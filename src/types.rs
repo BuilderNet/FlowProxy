@@ -133,7 +133,7 @@ impl SystemBundle {
     }
 
     /// Encode the inner bundle (no signer).
-    pub fn encode_inner(self) -> Vec<u8> {
+    pub fn encode_local(self) -> Vec<u8> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
