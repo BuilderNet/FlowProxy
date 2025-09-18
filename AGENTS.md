@@ -20,7 +20,12 @@ This guide helps contributors deliver changes to `buildernet-orderflow-proxy` sa
 - `cargo test` executes unit and integration tests; add `-- --nocapture` when debugging async failures.
 
 ## Coding Style & Naming Conventions
-Rust code should stay within 100 columns; `rustfmt` is authoritative and will reorder imports at crate granularity. Use snake_case for modules/functions and UpperCamelCase for types; reserve SCREAMING_SNAKE_CASE for constants. Prefer structured errors (`thiserror`, `eyre`) over panics, and bubble fallible calls with `?`. When adding public APIs, gate re-exports in `lib.rs` and document behavior with concise rustdoc comments.
+- Keep Rust code within 100 columns.
+- Use `rustfmt` for formatting; it is authoritative and will reorder imports at crate granularity.
+- Use `snake_case` for modules and functions, `UpperCamelCase` for types, and reserve `SCREAMING_SNAKE_CASE` for constants.
+- Prefer structured errors (`thiserror`, `eyre`) over panics, and bubble fallible calls with `?`.
+- When adding public APIs, gate re-exports in `lib.rs`.
+- Document public APIs with concise rustdoc comments.
 
 ## Testing Guidelines
 Async flows rely on `tokio::test`, so keep helpers in `tests/common` to avoid duplication. Write integration tests alongside existing `ingress.rs` and `network.rs` files, naming functions with the behavior under test (e.g. `ingress_rejects_invalid_signature`). Run `cargo test --features ...` if you introduce optional features. New behavior must include either a targeted unit test in the owning module or an integration scenario covering success and error paths.
