@@ -140,7 +140,6 @@ impl OrderflowIngress {
         };
 
         // Explicitly change the mutability of the `entity` variable.
-        let entity = entity;
         if let Some(mut data) = ingress.entity_data(entity) {
             data.scores.score_mut(received_at).number_of_requests += 1;
         }
@@ -148,9 +147,8 @@ impl OrderflowIngress {
         trace!(target: "ingress", ?entity, id = request.id, method = request.method, params = ?request.params, "Serving user JSON-RPC request");
         let result = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
-                let Some(Ok(bundle)) = request
-                    .take_single_param()
-                    .map(|value| serde_json::from_value::<RpcBundle>(value))
+                let Some(Ok(bundle)) =
+                    request.take_single_param().map(serde_json::from_value::<RpcBundle>)
                 else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams)
@@ -216,7 +214,7 @@ impl OrderflowIngress {
             }
         }
 
-        return Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
+        Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
     }
 
     pub async fn system_handler(
@@ -381,13 +379,9 @@ fn maybe_decompress(
 fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
     let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
-    println!("address: {}", address);
-    println!("signature: {}", signature);
     let signature = Signature::from_str(signature).ok()?;
-    println!("signature: {:?}", signature);
     let body_hash = keccak256(body);
     let signer = recover_signer(&signature, body_hash).ok()?;
-    println!("signer: {:?}", signer);
     Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
 }
 
