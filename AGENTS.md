@@ -3,8 +3,15 @@
 This guide helps contributors deliver changes to `buildernet-orderflow-proxy` safely and predictably.
 
 ## Project Structure & Module Organization
-The entrypoint binary lives in `src/main.rs` and delegates to the library crate in `src/lib.rs`. Domain modules sit under `src/`, e.g. `ingress/` for HTTP+JSON-RPC handling, `priority/` for scoring queues, `forwarder.rs` for relaying bundles, and `rate_limit.rs` for throttling logic. Shared helpers remain in `types.rs` and `utils.rs`. Integration tests live under `tests/` with reusable fixtures in `tests/common/`. Keep new code in the closest domain module and expose it through `lib.rs`.
-
+- The entrypoint binary lives in `src/main.rs` and delegates to the library crate in `src/lib.rs`.
+- Domain modules are located under `src/`:
+  - `ingress/`: Handles HTTP+JSON-RPC requests.
+  - `priority/`: Scores queues.
+  - `forwarder.rs`: Relays bundles.
+  - `rate_limit.rs`: Implements throttling logic.
+- Shared helpers are in `types.rs` and `utils.rs`.
+- Integration tests are under `tests/`, with reusable fixtures in `tests/common/`.
+- Place new code in the closest domain module and expose it through `lib.rs`.
 ## Build, Test, and Development Commands
 - `cargo build` compiles the binary with the default dev profile.
 - `cargo run -- --help` prints the CLI flags defined in `src/cli.rs` and is the fastest smoke-test.
