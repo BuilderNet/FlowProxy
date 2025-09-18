@@ -140,7 +140,6 @@ impl OrderflowIngress {
         };
 
         // Explicitly change the mutability of the `entity` variable.
-        let entity = entity;
         if let Some(mut data) = ingress.entity_data(entity) {
             data.scores.score_mut(received_at).number_of_requests += 1;
         }
@@ -148,9 +147,8 @@ impl OrderflowIngress {
         trace!(target: "ingress", ?entity, id = request.id, method = request.method, params = ?request.params, "Serving user JSON-RPC request");
         let result = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
-                let Some(Ok(bundle)) = request
-                    .take_single_param()
-                    .map(|value| serde_json::from_value::<RpcBundle>(value))
+                let Some(Ok(bundle)) =
+                    request.take_single_param().map(serde_json::from_value::<RpcBundle>)
                 else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams)
@@ -216,7 +214,7 @@ impl OrderflowIngress {
             }
         }
 
-        return Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
+        Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
     }
 
     pub async fn system_handler(

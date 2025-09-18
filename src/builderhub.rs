@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use dashmap::DashMap;
 use revm_primitives::Address;
@@ -35,8 +35,8 @@ pub struct BuilderHubInstanceData {
 
 /// A trait for a peer store.
 pub trait PeerStore {
-    fn get_peers(&self)
-        -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send + Sync;
+    #[allow(async_fn_in_trait)]
+    async fn get_peers(&self) -> eyre::Result<Vec<BuilderHubBuilder>>;
 }
 
 /// A BuilderHub client.
@@ -73,12 +73,10 @@ impl BuilderHub {
 }
 
 impl PeerStore for BuilderHub {
-    fn get_peers(&self) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send {
-        async move {
-            let endpoint = format!("{}/api/l1-builder/v1/builders", self.url);
-            let response = self.client.get(endpoint).send().await?;
-            Ok(response.json().await?)
-        }
+    async fn get_peers(&self) -> eyre::Result<Vec<BuilderHubBuilder>> {
+        let endpoint = format!("{}/api/l1-builder/v1/builders", self.url);
+        let response = self.client.get(endpoint).send().await?;
+        Ok(response.json().await?)
     }
 }
 
@@ -125,14 +123,12 @@ impl LocalPeerStore<()> {
 }
 
 impl PeerStore for LocalPeerStore<Registered> {
-    fn get_peers(&self) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send {
-        async move {
-            Ok(self
-                .builders
-                .iter()
-                .filter(|b| b.value().orderflow_proxy.ecdsa_pubkey_address == self.state.address)
-                .map(|b| b.value().clone())
-                .collect())
-        }
+    async fn get_peers(&self) -> eyre::Result<Vec<BuilderHubBuilder>> {
+        Ok(self
+            .builders
+            .iter()
+            .filter(|b| b.value().orderflow_proxy.ecdsa_pubkey_address == self.state.address)
+            .map(|b| b.value().clone())
+            .collect())
     }
 }
