@@ -1,4 +1,4 @@
-use crate::{priority::Priority, types::Bundle, utils};
+use crate::{priority::Priority, rate_limit::CounterOverTime, types::Bundle, utils};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::Address;
 use serde::Deserialize;
@@ -82,6 +82,7 @@ impl Default for SpamThresholds {
 /// Entity related information kept in the system.
 #[derive(Debug)]
 pub struct EntityData {
+    pub rate_limit: CounterOverTime,
     /// Score metrics bucketed by scoring windows.
     pub scores: EntityScores,
 }

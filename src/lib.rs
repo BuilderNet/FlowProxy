@@ -31,6 +31,7 @@ pub mod entity;
 pub mod forwarder;
 pub mod jsonrpc;
 pub mod priority;
+pub mod rate_limit;
 pub mod types;
 pub mod utils;
 pub mod validation;
@@ -102,6 +103,8 @@ pub async fn run_with_listeners(
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
+        rate_limit_lookback_s: args.rate_limit_lookback_s,
+        rate_limit_count: args.rate_limit_count,
         score_lookback_s: args.score_lookback_s,
         score_bucket_s: args.score_bucket_s,
         spam_thresholds: SpamThresholds::default(),

@@ -3,6 +3,7 @@ use crate::{
     forwarder::IngressForwarders,
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
+    rate_limit::CounterOverTime,
     types::{decode_transaction, RpcBundle, SystemBundle, SystemTransaction},
     validation::validate_transaction,
 };
@@ -54,6 +55,8 @@ pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 #[derive(Debug)]
 pub struct OrderflowIngress {
     pub gzip_enabled: bool,
+    pub rate_limit_lookback_s: u64,
+    pub rate_limit_count: u64,
     pub score_lookback_s: u64,
     pub score_bucket_s: u64,
     pub spam_thresholds: SpamThresholds,
@@ -81,6 +84,7 @@ impl OrderflowIngress {
         }
 
         Some(self.entities.entry(entity).or_insert_with(|| EntityData {
+            rate_limit: CounterOverTime::new(Duration::from_secs(self.rate_limit_lookback_s), 8),
             scores: EntityScores::new(
                 Duration::from_secs(self.score_lookback_s),
                 Duration::from_secs(self.score_bucket_s),
@@ -103,7 +107,7 @@ impl OrderflowIngress {
             tokio::time::sleep(interval).await;
             let len_before = self.entities.len();
             info!(target: "ingress::state", entries = len_before, "Starting state maintenance");
-            self.entities.retain(|_, c| !c.scores.is_empty());
+            self.entities.retain(|_, c| c.rate_limit.count() > 0 || !c.scores.is_empty());
             let len_after = self.entities.len();
             let num_removed = len_before.saturating_sub(len_after);
             info!(target: "ingress::state", entries = len_after, num_removed, "Finished state maintenance");
@@ -129,6 +133,14 @@ impl OrderflowIngress {
         };
 
         let entity = Entity::Signer(signer);
+
+        if let Some(mut data) = ingress.entity_data(entity) {
+            if data.rate_limit.count() > ingress.rate_limit_count {
+                ingress.metrics.user.requests_rate_limited.increment(1);
+                return JsonRpcResponse::error(None, JsonRpcError::RateLimited)
+            }
+            data.rate_limit.inc();
+        }
 
         let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
         {
@@ -411,6 +423,8 @@ impl Default for OrderflowIngressMetrics {
 pub struct OrderflowHandlerMetrics {
     /// The total number of requests received.
     requests_received: Counter,
+    /// The total number of requests that were rate limited.
+    requests_rate_limited: Counter,
     /// The total number of JSON-RPC requests that couldn't be parsed.
     json_rpc_parse_errors: Counter,
     /// The total number of JSON-RPC requests with unknown method.

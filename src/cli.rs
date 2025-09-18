@@ -39,6 +39,14 @@ pub struct OrderflowIngressArgs {
     #[clap(long, default_value_t = MAX_REQUEST_SIZE_BYTES)]
     pub max_request_size: usize,
 
+    /// Number of seconds to look back for ratelimit computation.
+    #[clap(long, default_value_t = 1)]
+    pub rate_limit_lookback_s: u64,
+
+    /// Max number of requests sent per rolling `--ratelimit-lookback-s` window, per IP.
+    #[clap(long, default_value_t = 500)]
+    pub rate_limit_count: u64,
+
     /// Number of seconds to look back for score computation.
     #[clap(long, default_value_t = 60)]
     pub score_lookback_s: u64,
@@ -67,6 +75,8 @@ impl Default for OrderflowIngressArgs {
             metrics: None,
             orderflow_signer: None,
             max_request_size: MAX_REQUEST_SIZE_BYTES,
+            rate_limit_lookback_s: 1,
+            rate_limit_count: 500,
             score_lookback_s: 60,
             score_bucket_s: 4,
             log_json: false,
@@ -79,6 +89,18 @@ impl OrderflowIngressArgs {
     /// Set max request size.
     pub fn max_request_size(mut self, max: usize) -> Self {
         self.max_request_size = max;
+        self
+    }
+
+    /// Set rate limit lookback seconds.
+    pub fn rate_limit_lookback_s(mut self, lookback_s: u64) -> Self {
+        self.rate_limit_lookback_s = lookback_s;
+        self
+    }
+
+    /// Set rate limit count.
+    pub fn rate_limit_count(mut self, count: u64) -> Self {
+        self.rate_limit_count = count;
         self
     }
 
