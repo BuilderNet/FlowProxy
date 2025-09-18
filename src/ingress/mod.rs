@@ -381,13 +381,9 @@ fn maybe_decompress(
 fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
     let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
-    println!("address: {}", address);
-    println!("signature: {}", signature);
     let signature = Signature::from_str(signature).ok()?;
-    println!("signature: {:?}", signature);
     let body_hash = keccak256(body);
     let signer = recover_signer(&signature, body_hash).ok()?;
-    println!("signer: {:?}", signer);
     Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
 }
 

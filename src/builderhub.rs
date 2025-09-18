@@ -35,9 +35,8 @@ pub struct BuilderHubInstanceData {
 
 /// A trait for a peer store.
 pub trait PeerStore {
-    fn request_builders(
-        &self,
-    ) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send + Sync;
+    fn get_peers(&self)
+        -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send + Sync;
 }
 
 /// A BuilderHub client.
@@ -74,9 +73,7 @@ impl BuilderHub {
 }
 
 impl PeerStore for BuilderHub {
-    fn request_builders(
-        &self,
-    ) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send {
+    fn get_peers(&self) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send {
         async move {
             let endpoint = format!("{}/api/l1-builder/v1/builders", self.url);
             let response = self.client.get(endpoint).send().await?;
@@ -128,9 +125,7 @@ impl LocalPeerStore<()> {
 }
 
 impl PeerStore for LocalPeerStore<Registered> {
-    fn request_builders(
-        &self,
-    ) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send {
+    fn get_peers(&self) -> impl Future<Output = eyre::Result<Vec<BuilderHubBuilder>>> + Send {
         async move {
             Ok(self
                 .builders

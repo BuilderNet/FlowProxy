@@ -10,6 +10,7 @@ use crate::{
 use alloy_primitives::Address;
 use alloy_signer::SignerSync as _;
 use alloy_signer_local::PrivateKeySigner;
+use axum::http::HeaderValue;
 use dashmap::DashMap;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{header::CONTENT_TYPE, HeaderMap};
@@ -52,7 +53,7 @@ impl IngressForwarders {
     ) -> Arc<BuilderRequest> {
         let mut headers = HeaderMap::new();
         headers.insert(BUILDERNET_PRIORITY_HEADER, priority.to_string().parse().unwrap());
-        headers.insert(CONTENT_TYPE, "application/json".parse().unwrap());
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         if let Some(signature_header) = signature_header {
             headers.insert(FLASHBOTS_SIGNATURE_HEADER, signature_header.parse().unwrap());
@@ -72,7 +73,7 @@ impl IngressForwarders {
     /// Broadcast bundle to all forwarders.
     pub fn broadcast_bundle(&self, priority: Priority, bundle: SystemBundle) {
         // Create local request first
-        let local = Self::create_request(priority, bundle.clone().encode_inner(), None);
+        let local = Self::create_request(priority, bundle.clone().encode_local(), None);
         let _ = self.local.send(priority, local);
 
         let body = bundle.encode();
