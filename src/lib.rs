@@ -26,23 +26,14 @@ use ingress::OrderflowIngress;
 
 use crate::{builderhub::PeerStore, ingress::OrderflowIngressMetrics};
 
-pub mod priority;
-
-pub mod jsonrpc;
-
-pub mod types;
-
-pub mod entity;
-
-pub mod rate_limit;
-
-pub mod validation;
-
-pub mod forwarder;
-
 pub mod builderhub;
-
+pub mod entity;
+pub mod forwarder;
+pub mod jsonrpc;
+pub mod priority;
+pub mod types;
 pub mod utils;
+pub mod validation;
 
 pub async fn run(args: OrderflowIngressArgs) -> eyre::Result<()> {
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
@@ -111,8 +102,6 @@ pub async fn run_with_listeners(
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
-        rate_limit_count: args.rate_limit_count,
-        rate_limit_lookback_s: args.rate_limit_lookback_s,
         score_lookback_s: args.score_lookback_s,
         score_bucket_s: args.score_bucket_s,
         spam_thresholds: SpamThresholds::default(),

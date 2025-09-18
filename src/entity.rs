@@ -1,10 +1,9 @@
-use crate::{priority::Priority, rate_limit::CounterOverTime, types::Bundle, utils};
+use crate::{priority::Priority, types::Bundle, utils};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::Address;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
-    net::IpAddr,
     time::{Duration, Instant},
 };
 
@@ -13,8 +12,6 @@ use std::{
 pub enum Entity {
     /// Bundle signer.
     Signer(Address),
-    /// Sender IP address.
-    Ip(IpAddr),
     /// Entity could not be determined.
     Unknown,
 }
@@ -23,7 +20,6 @@ impl Entity {
     /// Returns entity type as string.
     pub fn as_str_ty(&self) -> &str {
         match self {
-            Self::Ip(_) => "ip",
             Self::Signer(_) => "signer",
             Self::Unknown => "unknown",
         }
@@ -86,8 +82,6 @@ impl Default for SpamThresholds {
 /// Entity related information kept in the system.
 #[derive(Debug)]
 pub struct EntityData {
-    /// Rate limiter.
-    pub rate_limit: CounterOverTime,
     /// Score metrics bucketed by scoring windows.
     pub scores: EntityScores,
 }

@@ -1,4 +1,4 @@
-use buildernet_orderflow_ingress::cli::OrderflowIngressArgs;
+use buildernet_orderflow_proxy::cli::OrderflowIngressArgs;
 use clap::Parser;
 
 #[tokio::main]
@@ -10,7 +10,7 @@ async fn main() {
         std::process::exit(1);
     }));
 
-    if let Err(error) = buildernet_orderflow_ingress::run(OrderflowIngressArgs::parse()).await {
+    if let Err(error) = buildernet_orderflow_proxy::run(OrderflowIngressArgs::parse()).await {
         eprintln!("Error: {error:?}");
         std::process::exit(1);
     }
