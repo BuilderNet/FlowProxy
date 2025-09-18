@@ -1,0 +1,33 @@
+# Stage 0: common stuff for building & running.
+
+FROM debian:bookworm-slim AS base
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates libssl3
+
+# Don't run as root.
+RUN useradd -m user
+WORKDIR /home/user
+USER user
+
+# Stage 1: install all dependencies
+
+# https://github.com/rust-lang/docker-rust-nightly
+FROM rustlang/rust:nightly-bookworm-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        make build-essential curl ssh git cmake lld pkg-config libssl3 libssl-dev
+
+WORKDIR /usr/src/myapp
+COPY Cargo.lock Cargo.toml .
+COPY .cargo .cargo
+COPY src src
+RUN mkdir -p ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts
+RUN --mount=type=ssh,id=github cargo fetch --locked
+RUN cargo install --locked --path .
+
+# Stage 2: copy the /home/user directory in a clean image, that's all we need.
+
+FROM base
+COPY --from=builder /usr/local/cargo/bin/* /usr/local/bin/
