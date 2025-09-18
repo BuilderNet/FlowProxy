@@ -10,7 +10,7 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::{bytes::BytesMut, Address, Bytes, TxKind, U256};
 use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
-use buildernet_orderflow_ingress::{
+use buildernet_orderflow_proxy::{
     cli::OrderflowIngressArgs, ingress::FLASHBOTS_SIGNATURE_HEADER, jsonrpc::JSONRPC_VERSION_2,
     types::RpcBundle,
 };
@@ -33,7 +33,7 @@ pub(crate) async fn spawn_ingress() -> IngressClient<PrivateKeySigner> {
     let address = user_listener.local_addr().unwrap();
 
     tokio::spawn(async move {
-        buildernet_orderflow_ingress::run_with_listeners(
+        buildernet_orderflow_proxy::run_with_listeners(
             args,
             user_listener,
             system_listener,

@@ -825,7 +825,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "buildernet-orderflow-ingress"
+name = "buildernet-orderflow-proxy"
 version = "0.1.0"
 dependencies = [
  "alloy-consensus",

@@ -26,23 +26,15 @@ use ingress::OrderflowIngress;
 
 use crate::{builderhub::PeerStore, ingress::OrderflowIngressMetrics};
 
-pub mod priority;
-
-pub mod jsonrpc;
-
-pub mod types;
-
-pub mod entity;
-
-pub mod rate_limit;
-
-pub mod validation;
-
-pub mod forwarder;
-
 pub mod builderhub;
-
+pub mod entity;
+pub mod forwarder;
+pub mod jsonrpc;
+pub mod priority;
+pub mod rate_limit;
+pub mod types;
 pub mod utils;
+pub mod validation;
 
 pub async fn run(args: OrderflowIngressArgs) -> eyre::Result<()> {
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
@@ -92,7 +84,7 @@ pub async fn run_with_listeners(
             async move { run_update_peers(builder_hub, peers).await }
         });
     } else {
-        debug!("Running with local peer store");
+        warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = utils::LOCAL_PEER_STORE.clone();
 
         let peer_store = local_peer_store
@@ -111,8 +103,8 @@ pub async fn run_with_listeners(
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
-        rate_limit_count: args.rate_limit_count,
         rate_limit_lookback_s: args.rate_limit_lookback_s,
+        rate_limit_count: args.rate_limit_count,
         score_lookback_s: args.score_lookback_s,
         score_bucket_s: args.score_bucket_s,
         spam_thresholds: SpamThresholds::default(),
@@ -171,7 +163,7 @@ async fn run_update_peers(peer_store: impl PeerStore, peers: Arc<DashMap<String,
     let delay = Duration::from_secs(30);
 
     loop {
-        let builders = match peer_store.request_builders().await {
+        let builders = match peer_store.get_peers().await {
             Ok(builders) => builders,
             Err(error) => {
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");

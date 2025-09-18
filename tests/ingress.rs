@@ -1,4 +1,4 @@
-use buildernet_orderflow_ingress::{
+use buildernet_orderflow_proxy::{
     ingress::FLASHBOTS_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
 };
@@ -11,7 +11,7 @@ mod common;
 use common::{create_test_bundle, spawn_ingress, test_transaction_raw};
 
 mod assert {
-    use buildernet_orderflow_ingress::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
+    use buildernet_orderflow_proxy::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
 
     pub(crate) async fn jsonrpc_error(response: reqwest::Response, expected: JsonRpcError) {
         let body = response.bytes().await.unwrap();
