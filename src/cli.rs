@@ -1,8 +1,24 @@
 use alloy_signer_local::PrivateKeySigner;
-use clap::{Parser, ValueHint};
+use clap::{Args, Parser, ValueHint};
 
 /// The maximum request size in bytes (10 MiB).
 const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
+
+/// Arguments required to create a clickhouse client.
+#[derive(PartialEq, Eq, Clone, Debug, Args)]
+pub struct ClickhouseArgs {
+    #[clap(long = "clickhouse.host", env = "CLICKHOUSE_HOST")]
+    pub host: String,
+
+    #[clap(long = "clickhouse.user", env = "CLICKHOUSE_USER")]
+    pub username: String,
+
+    #[clap(long = "clickhouse.password", env = "CLICKHOUSE_PASSWORD")]
+    pub password: String,
+
+    #[clap(long = "clickhouse.database", env = "CLICKHOUSE_DATABASE")]
+    pub database: String,
+}
 
 #[derive(Parser, Debug)]
 pub struct OrderflowIngressArgs {
@@ -70,6 +86,9 @@ pub struct OrderflowIngressArgs {
     /// The order cache size.
     #[clap(long = "cache.size", default_value_t = 4096)]
     pub cache_size: u64,
+
+    #[clap(flatten)]
+    pub clickhouse: Option<ClickhouseArgs>,
 }
 
 impl Default for OrderflowIngressArgs {
@@ -91,6 +110,8 @@ impl Default for OrderflowIngressArgs {
             gzip_enabled: false,
             cache_ttl: 60,
             cache_size: 4096,
+
+            clickhouse: None,
         }
     }
 }

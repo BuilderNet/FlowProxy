@@ -25,12 +25,16 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{builderhub::PeerStore, cache::OrderCache, ingress::OrderflowIngressMetrics};
+use crate::{
+    builderhub::PeerStore, cache::OrderCache, indexer::spawn_indexer,
+    ingress::OrderflowIngressMetrics,
+};
 
 pub mod builderhub;
 mod cache;
 pub mod entity;
 pub mod forwarder;
+pub mod indexer;
 pub mod jsonrpc;
 pub mod priority;
 pub mod rate_limit;
@@ -64,6 +68,8 @@ pub async fn run_with_listeners(
     if let Some(metrics_addr) = args.metrics {
         spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
     }
+
+    let (indexer_handle, _) = spawn_indexer(args.clickhouse);
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
@@ -119,6 +125,7 @@ pub async fn run_with_listeners(
         forwarders,
         local_builder_url: Some(builder_url),
         metrics: OrderflowIngressMetrics::default(),
+        indexer_handle,
     });
 
     // Spawn a state maintenance task.
