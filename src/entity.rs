@@ -1,6 +1,8 @@
-use crate::{priority::Priority, rate_limit::CounterOverTime, types::Bundle, utils};
+use crate::{priority::Priority, rate_limit::CounterOverTime, utils};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::Address;
+use rbuilder_primitives::serialize::RawBundle;
+use revm_primitives::keccak256;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -245,7 +247,7 @@ impl EntityBuilderStats {
 #[derive(Debug)]
 pub enum EntityRequest<'a> {
     PrivateTx(&'a PooledTransaction),
-    Bundle(&'a Bundle<PooledTransaction>),
+    Bundle(&'a RawBundle),
 }
 
 impl EntityRequest<'_> {
@@ -253,7 +255,7 @@ impl EntityRequest<'_> {
     fn is_replacement(&self) -> bool {
         match self {
             Self::PrivateTx(_) => false,
-            Self::Bundle(bundle) => bundle.uuid.is_some(),
+            Self::Bundle(bundle) => bundle.replacement_uuid.is_some(),
         }
     }
 
@@ -263,7 +265,7 @@ impl EntityRequest<'_> {
         match self {
             Self::PrivateTx(_) => true,
             Self::Bundle(bundle) => {
-                bundle.txs.iter().all(|tx| bundle.reverting_tx_hashes.contains(tx.hash()))
+                bundle.txs.iter().all(|tx| bundle.reverting_tx_hashes.contains(&keccak256(tx)))
             }
         }
     }
@@ -272,7 +274,9 @@ impl EntityRequest<'_> {
     fn has_eip4844_txs(&self) -> bool {
         match self {
             Self::PrivateTx(tx) => tx.is_eip4844(),
-            Self::Bundle(bundle) => bundle.txs.iter().any(|tx| tx.is_eip4844()),
+            Self::Bundle(bundle) => {
+                bundle.txs.iter().any(|tx| utils::looks_like_canonical_blob_tx(tx))
+            }
         }
     }
 }
