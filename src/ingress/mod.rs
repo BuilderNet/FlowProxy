@@ -1,4 +1,5 @@
 use crate::{
+    cache::OrderCache,
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
@@ -63,6 +64,7 @@ pub struct OrderflowIngress {
     pub spam_thresholds: SpamThresholds,
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
+    pub order_cache: OrderCache,
     pub forwarders: IngressForwarders,
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
