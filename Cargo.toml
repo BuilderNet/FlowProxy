@@ -19,10 +19,10 @@ revm-interpreter = { version = "25.0.2", default-features = false }
 
 # rt
 tokio = { version = "1", default-features = false, features = [
-    "sync",
-    "time",
-    "rt-multi-thread",
-    "macros",
+  "sync",
+  "time",
+  "rt-multi-thread",
+  "macros"
 ] }
 futures = "0.3"
 
@@ -36,16 +36,16 @@ metrics-derive = "0.1"
 metrics-process = "2.4.0"
 metrics-util = "0.20.0"
 metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = [
-    "http-listener",
+  "http-listener"
 ] }
 
 # misc
 hyper = "1.7"
 axum = { version = "0.8", default-features = false, features = [
-    "http1",
-    "json",
-    "tokio",
-    "tracing",
+  "http1",
+  "json",
+  "tokio",
+  "tracing"
 ] }
 mime = "0.3"
 serde = { version = "1", features = ["derive"] }

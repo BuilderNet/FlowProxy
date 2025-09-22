@@ -19,8 +19,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
-      - name: Run fmt
-        run: cargo +nightly fmt --all --check
+      - run: rustup toolchain install nightly-2025-09-21 --component rustfmt
+      - run: cargo +nightly-2025-09-21 fmt --all --check
 
   clippy:
     name: clippy
