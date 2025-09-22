@@ -239,6 +239,15 @@ impl SystemTransaction {
 
         serde_json::to_vec(&json).unwrap()
     }
+
+    /// Returns a unique key for the transaction.
+    pub fn unique_key(&self) -> Uuid {
+        // We use the transaction hash as the unique key.
+        let mut hash = [0u8; 16];
+        hash.copy_from_slice(&self.transaction.hash().as_slice());
+
+        uuid::Builder::from_sha1_bytes(hash).into_uuid()
+    }
 }
 
 /// Decode pooled Ethereum transaction from raw bytes.
