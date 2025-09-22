@@ -3,7 +3,7 @@ use std::time::Duration;
 use mini_moka::sync::Cache;
 use uuid::Uuid;
 
-/// A thread-safe cache deduplicating order IDs.
+/// A thread-safe, in-memory cache for deduplicating order IDs.
 #[derive(Debug, Clone)]
 pub struct OrderCache {
     /// The inner cache.
