@@ -34,9 +34,12 @@ pub struct SystemBundle {
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
+#[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DecodedBundle {
+    /// A new, full bundle.
     Bundle(Bundle),
+    /// A replacement bundle.
     Replacement(BundleReplacementData),
 }
 
