@@ -1779,7 +1779,10 @@ dependencies = [
  "metrics-process",
  "metrics-util 0.20.0",
  "mime",
+<<<<<<< HEAD
  "mini-moka",
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
  "rbuilder-primitives",
  "reqwest",
  "revm-interpreter",
@@ -6081,7 +6084,11 @@ dependencies = [
 [[package]]
 name = "rbuilder-primitives"
 version = "0.1.0"
+<<<<<<< HEAD
 source = "git+https://github.com/flashbots/rbuilder.git?rev=3f14f82#3f14f8242b94e51169847fd325ee2b21a9518a32"
+=======
+source = "git+https://github.com/mempirate/rbuilder.git?branch=refactor%2Fextract-primitives#b3cab8a69815416dcb4fbc969590645df6a7e609"
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
 dependencies = [
  "ahash",
  "alloy-consensus",
@@ -11769,6 +11776,7 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
 name = "wyhash"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11778,6 +11786,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
 name = "wyz"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

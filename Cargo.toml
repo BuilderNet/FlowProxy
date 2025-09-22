@@ -18,7 +18,11 @@ revm-primitives = { version = "20.2.1", default-features = false }
 revm-interpreter = { version = "25.0.2", default-features = false }
 
 # rbuilder
+<<<<<<< HEAD
 rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder.git", rev = "3f14f82" }
+=======
+rbuilder-primitives = { git = "https://github.com/mempirate/rbuilder.git", branch = "refactor/extract-primitives" }
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
 
 # rt
 tokio = { version = "1", default-features = false, features = [
@@ -63,8 +67,11 @@ flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 reqwest = { version = "0.12", features = ["json"] }
 strum = "0.27"
 strum_macros = "0.27"
+<<<<<<< HEAD
 mini-moka = "0.10.3"
 
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
 # Manually override cc version (conflict between alloy-consensus and rbuilder)
 cc = "=1.2.15"
 

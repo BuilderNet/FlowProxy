@@ -17,7 +17,10 @@ use rbuilder_primitives::{
     serialize::{RawBundle, RawBundleConvertError, RawBundleDecodeResult, TxEncoding},
     Bundle, BundleReplacementData,
 };
+<<<<<<< HEAD
 use revm_primitives::B256;
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
 use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -36,6 +39,7 @@ pub struct SystemBundle {
     /// The decoded bundle.
     #[serde(skip)]
     pub decoded_bundle: Arc<DecodedBundle>,
+<<<<<<< HEAD
 
     /// The bundle hash.
     #[serde(skip)]
@@ -49,6 +53,14 @@ pub enum DecodedBundle {
     /// A new, full bundle.
     Bundle(Bundle),
     /// A replacement bundle.
+=======
+}
+
+/// Decoded bundle type. Either a new, full bundle or a replacement bundle.
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum DecodedBundle {
+    Bundle(Bundle),
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
     Replacement(BundleReplacementData),
 }
 
@@ -60,6 +72,7 @@ impl From<RawBundleDecodeResult> for DecodedBundle {
                 Self::Replacement(replacement_data)
             }
         }
+<<<<<<< HEAD
     }
 }
 
@@ -132,6 +145,8 @@ impl BundleHash for RawBundle {
         }
 
         B256::from(bytes)
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
     }
 }
 
@@ -144,6 +159,7 @@ impl SystemBundle {
     ) -> Result<Self, RawBundleConvertError> {
         let decoded = bundle.clone().decode(TxEncoding::WithBlobData)?;
 
+<<<<<<< HEAD
         let bundle_hash = bundle.bundle_hash();
 
         Ok(Self {
@@ -152,6 +168,38 @@ impl SystemBundle {
             decoded_bundle: Arc::new(decoded.into()),
             bundle_hash,
         })
+=======
+        Ok(Self { signer, raw_bundle: Arc::new(bundle), decoded_bundle: Arc::new(decoded.into()) })
+    }
+
+    /// Returns `true` if the bundle is a replacement.
+    pub fn is_replacement(&self) -> bool {
+        matches!(self.decoded_bundle.as_ref(), DecodedBundle::Replacement(_))
+    }
+
+    /// Returns the bundle UUID if it is a bundle, otherwise the replacement UUID.
+    pub fn uuid(&self) -> Uuid {
+        match self.decoded_bundle.as_ref() {
+            DecodedBundle::Bundle(bundle) => bundle.uuid,
+            DecodedBundle::Replacement(replacement_data) => replacement_data.key.key().id,
+        }
+    }
+
+    /// Returns the bundle if it is a new bundle.
+    pub fn bundle(&self) -> Option<&Bundle> {
+        match self.decoded_bundle.as_ref() {
+            DecodedBundle::Bundle(bundle) => Some(bundle),
+            DecodedBundle::Replacement(_) => None,
+        }
+    }
+
+    /// Returns the replacement data if it is a replacement bundle.
+    pub fn replacement_data(&self) -> Option<&BundleReplacementData> {
+        match self.decoded_bundle.as_ref() {
+            DecodedBundle::Replacement(replacement_data) => Some(replacement_data),
+            DecodedBundle::Bundle(_) => None,
+        }
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
     }
 
     /// Returns `true` if the bundle is a replacement.
@@ -267,6 +315,7 @@ pub fn recover_transaction(
     let signer = transaction.recover_signer()?;
     Ok(Recovered::new_unchecked(transaction, signer))
 }
+<<<<<<< HEAD
 
 /// Response for the eth_sendBundle and eth_sendRawTransaction methods.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -304,3 +353,5 @@ mod tests {
         assert_eq!(json, json!(hash));
     }
 }
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)

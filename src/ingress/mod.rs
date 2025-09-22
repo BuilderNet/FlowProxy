@@ -5,10 +5,14 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
+<<<<<<< HEAD
     types::{
         decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
         SystemTransaction,
     },
+=======
+    types::{decode_transaction, DecodedBundle, SystemBundle, SystemTransaction},
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
     validation::validate_transaction,
 };
 use alloy_consensus::{
@@ -345,6 +349,7 @@ impl OrderflowIngress {
 
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
+<<<<<<< HEAD
         // Deduplicate bundles.
         let bundle_hash = bundle.bundle_hash();
         if self.order_cache.contains(&bundle_hash) {
@@ -354,6 +359,8 @@ impl OrderflowIngress {
 
         self.order_cache.insert(bundle_hash);
 
+=======
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
         // Decode and validate the bundle.
         let bundle = self
             .pqueues
@@ -385,13 +392,21 @@ impl OrderflowIngress {
         bundle: SystemBundle,
     ) -> Result<B256, IngressError> {
         let uuid = bundle.uuid();
+<<<<<<< HEAD
         let bundle_hash = bundle.bundle_hash();
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(priority, bundle);
 
         debug!(target: "ingress", bundle_uuid = %uuid, bundle_hash = %bundle_hash, "Bundle processed");
+=======
+        // Send request to all forwarders.
+        self.forwarders.broadcast_bundle(priority, bundle);
 
-        Ok(bundle_hash)
+        debug!(target: "ingress", bundle_uuid = %uuid, "Bundle processed");
+>>>>>>> 1b5d8b8 (refactor: use rbuilder-primitives)
+
+        // TODO: Return bundle UUID or hash or both?
+        Ok(todo!("Return bundle UUID or hash or both?"))
     }
 
     async fn send_raw_transaction(
