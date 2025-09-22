@@ -4,7 +4,7 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
-    types::{decode_transaction, RpcBundle, SystemBundle, SystemTransaction},
+    types::{decode_transaction, DecodedBundle, SystemBundle, SystemTransaction},
     validation::validate_transaction,
 };
 use alloy_consensus::{
@@ -24,6 +24,7 @@ use dashmap::DashMap;
 use flate2::read::GzDecoder;
 use metrics::{Counter, Histogram};
 use metrics_derive::Metrics;
+use rbuilder_primitives::serialize::RawBundle;
 use reqwest::Url;
 use std::{
     collections::HashMap,
@@ -160,7 +161,7 @@ impl OrderflowIngress {
         let result = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(Ok(bundle)) =
-                    request.take_single_param().map(serde_json::from_value::<RpcBundle>)
+                    request.take_single_param().map(serde_json::from_value::<RawBundle>)
                 else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams)
@@ -284,42 +285,52 @@ impl OrderflowIngress {
     }
 
     /// Handles a new bundle.
-    async fn on_bundle(&self, entity: Entity, bundle: RpcBundle) -> Result<B256, IngressError> {
+    async fn on_bundle(&self, entity: Entity, bundle: RawBundle) -> Result<B256, IngressError> {
+        let start = Instant::now();
         trace!(target: "ingress", ?entity, "Processing bundle");
-        // Decode transactions and get the signer.
-        let bundle = bundle.try_map_transactions(|bytes| decode_transaction(&bytes))?;
+        // Convert to system bundle.
         let Entity::Signer(signer) = entity else { unreachable!() };
 
-        let bundle = bundle.into_system(signer);
+        let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
-        self.send_bundle(entity, bundle).await
+        // Decode and validate the bundle.
+        let bundle = self
+            .pqueues
+            .spawn_with_priority(priority, move || {
+                SystemBundle::try_from_bundle_and_signer(bundle, signer)
+            })
+            .await?;
+
+        match bundle.decoded_bundle.as_ref() {
+            DecodedBundle::Bundle(bundle) => {
+                debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
+            }
+            DecodedBundle::Replacement(replacement_data) => {
+                debug!(target: "ingress", replacement_data = ?replacement_data, "Replacement bundle decoded");
+            }
+        }
+
+        let elapsed = start.elapsed();
+        debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
+
+        // TODO: Index here
+
+        self.send_bundle(priority, bundle).await
     }
 
     async fn send_bundle(
         &self,
-        entity: Entity,
+        priority: Priority,
         bundle: SystemBundle,
     ) -> Result<B256, IngressError> {
-        let start = Instant::now();
-        let bundle_hash = bundle.bundle_hash();
-
-        // Determine priority for processing given request.
-        let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
-
-        // Spawn expensive operations like ECDSA recovery and consensus validation.
-        let to_validate = bundle.clone();
-        self.pqueues
-            // NOTE: maybe a `spawn_blocking` here?
-            .spawn_with_priority(priority, move || to_validate.validate())
-            .await?;
-
+        let uuid = bundle.uuid();
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(priority, bundle);
 
-        let elapsed = start.elapsed();
-        debug!(target: "ingress", bundle_hash = %bundle_hash, elapsed = ?elapsed, "Bundle processed");
+        debug!(target: "ingress", bundle_uuid = %uuid, "Bundle processed");
 
-        Ok(bundle_hash)
+        // TODO: Return bundle UUID or hash or both?
+        Ok(todo!("Return bundle UUID or hash or both?"))
     }
 
     async fn send_raw_transaction(
