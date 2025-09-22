@@ -362,6 +362,8 @@ impl OrderflowIngress {
             })
             .await?;
 
+        // TODO: Should we calculate the unique key BEFORE the validation step above? Might save us
+        // some compute.
         let unique_key = bundle.unique_key();
         if self.order_cache.contains(unique_key) {
             trace!(target: "ingress", unique_key = %unique_key, "Bundle already processed");
