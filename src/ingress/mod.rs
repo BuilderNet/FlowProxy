@@ -2,6 +2,7 @@ use crate::{
     cache::OrderCache,
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
+    indexer::{BundleIndexer, ClickhouseIndexerHandle},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
@@ -37,6 +38,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use time::UtcDateTime;
 use tracing::*;
 
 pub mod error;
@@ -57,7 +59,7 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 
-#[derive(Debug)]
+#[allow(missing_debug_implementations)]
 pub struct OrderflowIngress {
     pub gzip_enabled: bool,
     pub rate_limit_lookback_s: u64,
@@ -73,6 +75,7 @@ pub struct OrderflowIngress {
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
     pub metrics: OrderflowIngressMetrics,
+    pub indexer_handle: ClickhouseIndexerHandle,
 }
 
 impl OrderflowIngress {
@@ -126,6 +129,8 @@ impl OrderflowIngress {
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
         let received_at = Instant::now();
+        let received_at_utc = UtcDateTime::now();
+
         ingress.metrics.user.requests_received.increment(1);
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
@@ -172,7 +177,10 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress.on_bundle(entity, bundle).await.map(EthResponse::BundleHash)
+                ingress
+                    .on_bundle(entity, bundle, received_at_utc)
+                    .await
+                    .map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(Ok(tx)) = request.take_single_param().map(|value| {
@@ -337,7 +345,12 @@ impl OrderflowIngress {
     }
 
     /// Handles a new bundle.
-    async fn on_bundle(&self, entity: Entity, bundle: RawBundle) -> Result<B256, IngressError> {
+    async fn on_bundle(
+        &self,
+        entity: Entity,
+        bundle: RawBundle,
+        received_at: UtcDateTime,
+    ) -> Result<B256, IngressError> {
         let start = Instant::now();
         trace!(target: "ingress", ?entity, "Processing bundle");
         // Convert to system bundle.
@@ -375,6 +388,7 @@ impl OrderflowIngress {
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
         // TODO: Index here
+        self.indexer_handle.index_bundle(bundle.clone(), received_at);
 
         self.send_bundle(priority, bundle).await
     }

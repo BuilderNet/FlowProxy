@@ -42,6 +42,11 @@ metrics-exporter-prometheus = { version = "0.17.2", default-features = false, fe
   "http-listener"
 ] }
 
+# clickhouse
+clickhouse = { version = "0.13.3", features = ["inserter", "time"] }
+clickhouse-derive = { version = "0.2.0" }
+time = { version = "0.3.44" }
+
 # misc
 hyper = "1.7"
 axum = { version = "0.8", default-features = false, features = [
