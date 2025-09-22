@@ -274,9 +274,7 @@ impl EntityRequest<'_> {
     fn has_eip4844_txs(&self) -> bool {
         match self {
             Self::PrivateTx(tx) => tx.is_eip4844(),
-            Self::Bundle(bundle) => {
-                bundle.txs.iter().any(|tx| utils::looks_like_canonical_blob_tx(tx))
-            }
+            Self::Bundle(bundle) => bundle.txs.iter().any(utils::looks_like_canonical_blob_tx),
         }
     }
 }
