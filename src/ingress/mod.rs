@@ -5,7 +5,10 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
-    types::{decode_transaction, DecodedBundle, HashResponse, SystemBundle, SystemTransaction},
+    types::{
+        decode_transaction, BundleHash as _, DecodedBundle, HashResponse, SystemBundle,
+        SystemTransaction,
+    },
     validation::validate_transaction,
 };
 use alloy_consensus::{
@@ -295,6 +298,15 @@ impl OrderflowIngress {
 
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
+        // Deduplicate bundles.
+        let bundle_hash = bundle.bundle_hash();
+        if self.order_cache.contains(bundle_hash) {
+            trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
+            return Ok(bundle_hash);
+        }
+
+        self.order_cache.insert(bundle_hash);
+
         // Decode and validate the bundle.
         let bundle = self
             .pqueues
@@ -302,16 +314,6 @@ impl OrderflowIngress {
                 SystemBundle::try_from_bundle_and_signer(bundle, signer)
             })
             .await?;
-
-        // TODO: Should we calculate the unique key BEFORE the validation step above? Might save us
-        // some compute.
-        let unique_key = bundle.unique_key();
-        if self.order_cache.contains(unique_key) {
-            trace!(target: "ingress", unique_key = %unique_key, "Bundle already processed");
-            return Ok(todo!("Return bundle UUID or hash or both?"));
-        }
-
-        self.order_cache.insert(unique_key);
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
@@ -353,16 +355,16 @@ impl OrderflowIngress {
         let start = Instant::now();
         let tx_hash = *transaction.hash();
 
-        let Entity::Signer(signer) = entity else { unreachable!() };
-        let transaction = SystemTransaction::from_transaction_and_signer(transaction, signer);
-
-        let unique_key = transaction.unique_key();
-        if self.order_cache.contains(unique_key) {
-            trace!(target: "ingress", unique_key = %unique_key, "Transaction already processed");
+        // Deduplicate transactions.
+        if self.order_cache.contains(tx_hash) {
+            trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
             return Ok(tx_hash);
         }
 
-        self.order_cache.insert(unique_key);
+        self.order_cache.insert(tx_hash);
+
+        let Entity::Signer(signer) = entity else { unreachable!() };
+        let transaction = SystemTransaction::from_transaction_and_signer(transaction, signer);
 
         // Determine priority for processing given request.
         let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
