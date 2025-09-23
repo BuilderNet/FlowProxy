@@ -59,15 +59,15 @@ impl<T> UnboundedReceiver<T> {
     ///  * `Poll::Ready(None)` if any of the channels has been closed.
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         if let Poll::Ready(message) = self.high.poll_recv(cx) {
-            return Poll::Ready(message)
+            return Poll::Ready(message);
         }
 
         if let Poll::Ready(message) = self.medium.poll_recv(cx) {
-            return Poll::Ready(message)
+            return Poll::Ready(message);
         }
 
         if let Poll::Ready(message) = self.low.poll_recv(cx) {
-            return Poll::Ready(message)
+            return Poll::Ready(message);
         }
 
         Poll::Pending

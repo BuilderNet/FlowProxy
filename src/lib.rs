@@ -174,7 +174,7 @@ async fn run_update_peers(
             Err(error) => {
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
-                continue
+                continue;
             }
         };
 
