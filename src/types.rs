@@ -1,4 +1,8 @@
-use std::{ops::Deref, sync::Arc};
+use std::{
+    hash::{Hash as _, Hasher as _},
+    ops::Deref,
+    sync::Arc,
+};
 
 use alloy_consensus::{
     crypto::RecoveryError,
@@ -13,6 +17,7 @@ use rbuilder_primitives::{
     serialize::{RawBundle, RawBundleConvertError, RawBundleDecodeResult, TxEncoding},
     Bundle, BundleReplacementData,
 };
+use revm_primitives::B256;
 use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
@@ -31,6 +36,10 @@ pub struct SystemBundle {
     /// The decoded bundle.
     #[serde(skip)]
     pub decoded_bundle: Arc<DecodedBundle>,
+
+    /// The bundle hash.
+    #[serde(skip)]
+    pub bundle_hash: B256,
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
@@ -54,6 +63,71 @@ impl From<RawBundleDecodeResult> for DecodedBundle {
     }
 }
 
+trait BundleHash {
+    fn bundle_hash(&self) -> B256;
+}
+
+impl BundleHash for RawBundle {
+    fn bundle_hash(&self) -> B256 {
+        fn hash(bundle: &RawBundle, state: &mut wyhash::WyHash) {
+            bundle.block_number.hash(state);
+            bundle.txs.hash(state);
+
+            let reverting_tx_hashes = if !bundle.reverting_tx_hashes.is_empty() {
+                Some(
+                    bundle
+                        .reverting_tx_hashes
+                        .iter()
+                        .map(|hash| format!("{:?}", hash))
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            };
+
+            reverting_tx_hashes.hash(state);
+
+            let dropping_tx_hashes = if !bundle.dropping_tx_hashes.is_empty() {
+                Some(
+                    bundle
+                        .dropping_tx_hashes
+                        .iter()
+                        .map(|hash| format!("{:?}", hash))
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            };
+
+            dropping_tx_hashes.hash(state);
+
+            let replacement_uuid = bundle.replacement_uuid.map(|uuid| uuid.to_string());
+            replacement_uuid.hash(state);
+
+            let refund_percent = bundle.refund_percent.map(|percent| percent as u64);
+            refund_percent.hash(state);
+
+            bundle.refund_recipient.hash(state);
+
+            let refund_tx_hashes = bundle
+                .refund_tx_hashes
+                .as_ref()
+                .map(|hashes| hashes.iter().map(|hash| format!("{:?}", hash)).collect::<Vec<_>>());
+            refund_tx_hashes.hash(state);
+        }
+
+        let mut hasher = wyhash::WyHash::default();
+        let mut bytes = [0u8; 32];
+        for i in 0..4 {
+            hash(&self, &mut hasher);
+            let hash = hasher.finish();
+            bytes[(i * 8)..((i + 1) * 8)].copy_from_slice(&hash.to_be_bytes());
+        }
+
+        B256::from(bytes)
+    }
+}
+
 impl SystemBundle {
     /// Create a new system bundle from a raw bundle and a signer.
     /// Returns an error if the bundle fails to decode.
@@ -63,7 +137,14 @@ impl SystemBundle {
     ) -> Result<Self, RawBundleConvertError> {
         let decoded = bundle.clone().decode(TxEncoding::WithBlobData)?;
 
-        Ok(Self { signer, raw_bundle: Arc::new(bundle), decoded_bundle: Arc::new(decoded.into()) })
+        let bundle_hash = bundle.bundle_hash();
+
+        Ok(Self {
+            signer,
+            raw_bundle: Arc::new(bundle),
+            decoded_bundle: Arc::new(decoded.into()),
+            bundle_hash,
+        })
     }
 
     /// Returns `true` if the bundle is a replacement.
@@ -77,6 +158,11 @@ impl SystemBundle {
             DecodedBundle::Bundle(bundle) => bundle.uuid,
             DecodedBundle::Replacement(replacement_data) => replacement_data.key.key().id,
         }
+    }
+
+    /// Returns the bundle hash.
+    pub fn bundle_hash(&self) -> B256 {
+        self.bundle_hash
     }
 
     /// Returns the bundle if it is a new bundle.
@@ -169,4 +255,16 @@ pub fn recover_transaction(
 ) -> Result<Recovered<PooledTransaction>, RecoveryError> {
     let signer = transaction.recover_signer()?;
     Ok(Recovered::new_unchecked(transaction, signer))
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HashResponse {
+    bundle_hash: B256,
+}
+
+impl From<B256> for HashResponse {
+    fn from(bundle_hash: B256) -> Self {
+        Self { bundle_hash }
+    }
 }
