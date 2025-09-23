@@ -78,7 +78,7 @@ impl BundleHash for RawBundle {
                     bundle
                         .reverting_tx_hashes
                         .iter()
-                        .map(|hash| format!("{:?}", hash))
+                        .map(|hash| format!("{hash:?}"))
                         .collect::<Vec<_>>(),
                 )
             } else {
@@ -92,7 +92,7 @@ impl BundleHash for RawBundle {
                     bundle
                         .dropping_tx_hashes
                         .iter()
-                        .map(|hash| format!("{:?}", hash))
+                        .map(|hash| format!("{hash:?}"))
                         .collect::<Vec<_>>(),
                 )
             } else {
@@ -112,14 +112,14 @@ impl BundleHash for RawBundle {
             let refund_tx_hashes = bundle
                 .refund_tx_hashes
                 .as_ref()
-                .map(|hashes| hashes.iter().map(|hash| format!("{:?}", hash)).collect::<Vec<_>>());
+                .map(|hashes| hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>());
             refund_tx_hashes.hash(state);
         }
 
         let mut hasher = wyhash::WyHash::default();
         let mut bytes = [0u8; 32];
         for i in 0..4 {
-            hash(&self, &mut hasher);
+            hash(self, &mut hasher);
             let hash = hasher.finish();
             bytes[(i * 8)..((i + 1) * 8)].copy_from_slice(&hash.to_be_bytes());
         }
