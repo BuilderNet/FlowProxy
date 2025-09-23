@@ -1781,6 +1781,7 @@ dependencies = [
  "clickhouse",
  "clickhouse-derive",
  "dashmap 6.1.0",
+ "derive_more",
  "eyre",
  "flate2",
  "futures",

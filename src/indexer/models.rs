@@ -2,152 +2,154 @@ use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::U256;
 use clickhouse_derive::Row;
-use time::{OffsetDateTime, UtcDateTime};
+use time::OffsetDateTime;
 
-use crate::types::{DecodedBundle, SystemBundle};
+use crate::types::{DecodedBundle, IndexableSystemBundle};
 
 /// Model representing clickhouse bundle row.
-#[derive(Row, Debug, serde::Serialize)]
+#[derive(Clone, Row, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub time: OffsetDateTime,
     #[serde(rename = "transactions.hash")]
     /// Collection of hashes for transactions in the bundle.
-    pub tx_hash: Vec<String>,
+    pub transactions_hash: Vec<String>,
     /// Collection of from addresses for transactions in the bundle.
     #[serde(rename = "transactions.from")]
-    pub tx_from: Vec<String>,
+    pub transactions_from: Vec<String>,
     /// Collection of nonces for transactions in the bundle.
     #[serde(rename = "transactions.nonce")]
-    pub tx_nonce: Vec<u64>,
+    pub transactions_nonce: Vec<u64>,
     /// Collection of signature `r` values for transactions in the bundle.
     #[serde(rename = "transactions.r")]
-    pub tx_r: Vec<U256>,
+    pub transactions_r: Vec<U256>,
     /// Collection of signature `s` values for transactions in the bundle.
     #[serde(rename = "transactions.s")]
-    pub tx_s: Vec<U256>,
+    pub transactions_s: Vec<U256>,
     /// Collection of signature `v` values for transactions in the bundle.
     #[serde(rename = "transactions.v")]
-    pub tx_v: Vec<U256>,
+    pub transactions_v: Vec<u8>,
     /// Collection of to addresses for transactions in the bundle.
     #[serde(rename = "transactions.to")]
-    pub tx_to: Vec<Option<String>>,
+    pub transactions_to: Vec<Option<String>>,
     /// Collection of gas limit values for transactions in the bundle.
     #[serde(rename = "transactions.gas")]
-    pub tx_gas: Vec<U256>,
+    pub transactions_gas: Vec<u64>,
     /// Collection of transaction types for transactions in the bundle.
     #[serde(rename = "transactions.type")]
-    pub tx_type: Vec<u64>,
+    pub transactions_type: Vec<u64>,
     /// Collection of inputs for transactions in the bundle.
     #[serde(rename = "transactions.input")]
-    pub tx_input: Vec<String>,
+    pub transactions_input: Vec<String>,
     /// Collection of values for transactions in the bundle.
     #[serde(rename = "transactions.value")]
-    pub tx_value: Vec<U256>,
+    pub transactions_value: Vec<U256>,
     /// Collection of gas prices for transactions in the bundle.
     #[serde(rename = "transactions.gasPrice")]
-    pub tx_gas_price: Vec<Option<U256>>,
+    pub transactions_gas_price: Vec<Option<u128>>,
     /// Collection of max fee per gas values for transactions in the bundle.
     #[serde(rename = "transactions.maxFeePerGas")]
-    pub tx_max_fee_per_gas: Vec<Option<U256>>,
+    pub transactions_max_fee_per_gas: Vec<Option<u128>>,
     /// Collection of max priority fee per gas values for transactions in the bundle.
     #[serde(rename = "transactions.maxPriorityFeePerGas")]
-    pub tx_max_priority_fee_per_gas: Vec<Option<U256>>,
+    pub transactions_max_priority_fee_per_gas: Vec<Option<u128>>,
     /// Collection of access lists for transactions in the bundle.
     #[serde(rename = "transactions.accessList")]
-    pub tx_access_list: Vec<Option<String>>,
-    /// Bundle type: top (default), bottom.
-    #[serde(rename = "type")]
-    pub bundle_type: String,
+    pub transactions_access_list: Vec<Option<String>>,
+    /// Collection of authorization lists for transactions in the bundle.
+    #[serde(rename = "transactions.authorizationList")]
+    pub transactions_authorization_list: Vec<Option<String>>,
+
     /// Bundle block number.
     pub block_number: u64,
     /// Minimum timestamp for the bundle.
     pub min_timestamp: u64,
     /// Maximum timestamp for the bundle.
     pub max_timestamp: u64,
+
     /// Collection of reverting transaction hashes.
     pub reverting_tx_hashes: Vec<String>,
     /// Collection of dropping transaction hashes.
     pub dropping_tx_hashes: Vec<String>,
     /// Collection of refund transaction hashes.
     pub refund_tx_hashes: Vec<String>,
+
     /// Bundle uuid.
     pub uuid: Option<String>,
-    /// The IP from which the bundle request was observed.
-    pub source_ip: Option<String>,
-    /// The `Host` value in the header
-    pub host: Option<String>,
-    /// Builder name.
-    pub builder_name: String,
+    pub replacement_nonce: Option<u64>,
     /// Bundle refund percent.
     pub refund_percent: Option<u8>,
     /// Bundle refund recipient.
     pub refund_recipient: Option<String>,
-    /// The score calculated by the forwarder.
-    pub forwarder_score: f32,
+    /// The signer of the bundle,
+    pub signer_address: Option<String>,
+    /// For 2nd price refunds done by buildernet
+    pub refund_identity: Option<String>,
+
+    /// Builder name.
+    pub builder_name: String,
+
     /// The hash of the bundle (unique identifier)
     pub hash: String,
-    /// The bx refund parameters are specified in eth_sendPriorityFeeRefundBundle bundles
-    pub bx_first_refund_recipient: Option<String>,
-    pub bx_first_refund_percent: Option<u8>,
-    pub bx_second_refund_recipient: Option<String>,
-    pub bx_second_refund_percent: Option<u8>,
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
-impl From<(SystemBundle, UtcDateTime)> for BundleRow {
-    fn from(bundle_with_time: (SystemBundle, UtcDateTime)) -> Self {
-        let (bundle, time) = bundle_with_time;
+impl From<IndexableSystemBundle> for BundleRow {
+    fn from(indexable_bundle: IndexableSystemBundle) -> Self {
+        let IndexableSystemBundle { system_bundle: bundle, timestamp, builder_name } =
+            indexable_bundle;
         let DecodedBundle::Bundle(ref decoded) = bundle.decoded_bundle.as_ref() else {
             unreachable!("expecting decoded bundle")
         };
 
         let bundle = BundleRow {
-            time: time.into(),
-            tx_hash: decoded.txs.iter().map(|tx| format!("{:?}", tx.hash())).collect(),
-            tx_from: decoded.txs.iter().map(|tx| format!("{:?}", tx.signer())).collect(),
-            tx_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
-            tx_r: decoded.txs.iter().map(|tx| tx.as_ref().signature().r()).collect(),
-            tx_s: decoded.txs.iter().map(|tx| tx.as_ref().signature().s()).collect(),
-            tx_v: decoded.txs.iter().map(|tx| U256::from(tx.as_ref().signature().v())).collect(),
-            tx_to: decoded.txs.iter().map(|tx| tx.to().map(|t| format!("{t:?}"))).collect(),
-            tx_gas: decoded.txs.iter().map(|tx| U256::from(tx.as_ref().gas_limit())).collect(),
-            tx_type: decoded.txs.iter().map(|tx| tx.as_ref().tx_type() as u64).collect(),
-            tx_input: decoded
+            // Ensure microsecond accuracy
+            time: timestamp.replace_nanosecond(0).unwrap().into(),
+            transactions_hash: decoded.txs.iter().map(|tx| format!("{:?}", tx.hash())).collect(),
+            transactions_from: decoded.txs.iter().map(|tx| format!("{:?}", tx.signer())).collect(),
+            transactions_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
+            transactions_r: decoded.txs.iter().map(|tx| tx.as_ref().signature().r()).collect(),
+            transactions_s: decoded.txs.iter().map(|tx| tx.as_ref().signature().s()).collect(),
+            transactions_v: decoded
+                .txs
+                .iter()
+                .map(|tx| tx.as_ref().signature().v().into())
+                .collect(),
+            transactions_to: decoded
+                .txs
+                .iter()
+                .map(|tx| tx.to().map(|t| format!("{t:?}")))
+                .collect(),
+            transactions_gas: decoded.txs.iter().map(|tx| tx.as_ref().gas_limit()).collect(),
+            transactions_type: decoded.txs.iter().map(|tx| tx.as_ref().tx_type() as u64).collect(),
+            transactions_input: decoded
                 .txs
                 .iter()
                 .map(|tx| alloy_primitives::hex::encode_prefixed(tx.as_ref().input()))
                 .collect(),
-            tx_value: decoded.txs.iter().map(|tx| tx.value()).collect(),
-            tx_gas_price: decoded
+            transactions_value: decoded.txs.iter().map(|tx| tx.value()).collect(),
+            transactions_gas_price: decoded.txs.iter().map(|tx| tx.as_ref().gas_price()).collect(),
+            transactions_max_fee_per_gas: decoded
                 .txs
                 .iter()
-                .map(|tx| tx.as_ref().gas_price().map(U256::from))
+                .map(|tx| if tx.is_legacy() { None } else { Some(tx.as_ref().max_fee_per_gas()) })
                 .collect(),
-            tx_max_fee_per_gas: decoded
+            transactions_max_priority_fee_per_gas: decoded
                 .txs
                 .iter()
-                .map(|tx| {
-                    if tx.is_legacy() {
-                        None
-                    } else {
-                        Some(U256::from(tx.as_ref().max_fee_per_gas()))
-                    }
-                })
+                .map(
+                    |tx| {
+                        if tx.is_legacy() {
+                            None
+                        } else {
+                            tx.as_ref().max_priority_fee_per_gas()
+                        }
+                    },
+                )
                 .collect(),
-            tx_max_priority_fee_per_gas: decoded
-                .txs
-                .iter()
-                .map(|tx| {
-                    if tx.is_legacy() {
-                        None
-                    } else {
-                        tx.as_ref().max_priority_fee_per_gas().map(U256::from)
-                    }
-                })
-                .collect(),
-            tx_access_list: decoded
+            transactions_access_list: decoded
                 .txs
                 .iter()
                 .map(|tx| {
@@ -157,7 +159,16 @@ impl From<(SystemBundle, UtcDateTime)> for BundleRow {
                         .map(|access_list| serde_json::to_string(&access_list).unwrap())
                 })
                 .collect(),
-            bundle_type: String::from("top"),
+            transactions_authorization_list: decoded
+                .txs
+                .iter()
+                .map(|tx| {
+                    tx.as_ref()
+                        .authorization_list()
+                        .as_ref()
+                        .map(|access_list| serde_json::to_string(&access_list).unwrap())
+                })
+                .collect(),
             block_number: bundle.raw_bundle.block_number.unwrap_or_default().to::<u64>(),
             min_timestamp: bundle.raw_bundle.min_timestamp.unwrap_or_default(),
             max_timestamp: bundle.raw_bundle.max_timestamp.unwrap_or_default(),
@@ -187,20 +198,16 @@ impl From<(SystemBundle, UtcDateTime)> for BundleRow {
                 .replacement_uuid
                 .or(bundle.raw_bundle.uuid)
                 .map(|u| u.to_string()),
-            source_ip: None,             //Some(source_ip.to_owned()),
-            host: None,                  //Some(host.to_owned()),
-            builder_name: String::new(), //builder_name.to_owned(),
+            replacement_nonce: bundle.raw_bundle.replacement_nonce,
+            signer_address: Some(format!("{:?}", bundle.signer)),
+            builder_name,
             refund_percent: bundle.raw_bundle.refund_percent,
             refund_recipient: bundle
                 .raw_bundle
                 .refund_recipient
                 .map(|recipient| format!("{recipient:x}")),
-            forwarder_score: 0.0, // self.compute_forwarder_score(&decoded.txs, source_ip),
+            refund_identity: None,
             hash: format!("{:?}", decoded.hash), // always lowercase
-            bx_first_refund_recipient: None, // extra .first_refund_recipient .map(|recipient| recipient.to_lowercase()),
-            bx_first_refund_percent: None, // extra.first_refund_percent .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
-            bx_second_refund_recipient: None, // extra.second_refund_recipient .map(|recipient| recipient.to_lowercase()),
-            bx_second_refund_percent: None, // extra .second_refund_percent .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
         };
 
         bundle

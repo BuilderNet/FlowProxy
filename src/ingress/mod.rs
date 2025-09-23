@@ -7,8 +7,8 @@ use crate::{
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
-        decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
-        SystemTransaction,
+        decode_transaction, BundleHash as _, DecodedBundle, EthResponse, IndexableSystemBundle,
+        SystemBundle, SystemTransaction,
     },
     validation::validate_transaction,
 };
@@ -388,7 +388,11 @@ impl OrderflowIngress {
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
         // TODO: Index here
-        self.indexer_handle.index_bundle(bundle.clone(), received_at);
+        self.indexer_handle.index_bundle(IndexableSystemBundle {
+            system_bundle: bundle.clone(),
+            timestamp: received_at,
+            builder_name: String::new(), /* todo */
+        });
 
         self.send_bundle(priority, bundle).await
     }

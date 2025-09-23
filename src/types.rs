@@ -20,6 +20,7 @@ use rbuilder_primitives::{
 use revm_primitives::B256;
 use serde::Serialize;
 use serde_json::json;
+use time::UtcDateTime;
 use uuid::Uuid;
 
 /// Bundle type that is used for the system API. It contains the verified signer with the original
@@ -211,6 +212,13 @@ impl SystemBundle {
 
         serde_json::to_vec(&json).unwrap()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexableSystemBundle {
+    pub timestamp: UtcDateTime,
+    pub builder_name: String,
+    pub system_bundle: SystemBundle,
 }
 
 /// Internally processed transaction.
