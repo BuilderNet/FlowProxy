@@ -244,7 +244,7 @@ impl SystemTransaction {
 /// Decode pooled Ethereum transaction from raw bytes.
 pub fn decode_transaction(raw: &Bytes) -> Eip2718Result<PooledTransaction> {
     if raw.is_empty() {
-        return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort))
+        return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort));
     }
     PooledTransaction::decode_2718(&mut &raw[..])
 }

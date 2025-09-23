@@ -32,7 +32,7 @@ pub struct JsonRpcRequest<T> {
 impl<T> JsonRpcRequest<T> {
     pub fn from_json(Json(json): Json<JsonRpcRequest<T>>) -> Result<Self, JsonRpcError> {
         if json.jsonrpc != JSONRPC_VERSION_2 {
-            return Err(JsonRpcError::InvalidRequest)
+            return Err(JsonRpcError::InvalidRequest);
         }
         Ok(json)
     }
@@ -225,10 +225,10 @@ impl JsonRpcError {
     /// The HTTP status code for JSON-RPC error.
     pub fn http_status_code(&self) -> StatusCode {
         match self {
-            Self::ParseError |
-            Self::InvalidRequest |
-            Self::InvalidParams |
-            Self::InvalidSignature => StatusCode::BAD_REQUEST,
+            Self::ParseError
+            | Self::InvalidRequest
+            | Self::InvalidParams
+            | Self::InvalidSignature => StatusCode::BAD_REQUEST,
             Self::MethodNotFound => StatusCode::NOT_FOUND,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal | Self::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
