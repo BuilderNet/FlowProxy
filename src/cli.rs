@@ -38,6 +38,10 @@ pub struct OrderflowIngressArgs {
     #[clap(long, value_hint = ValueHint::Url)]
     pub builder_url: String,
 
+    /// The name of the local builder.
+    #[clap(long, default_value_t = String::from("buildernet"))]
+    pub builder_name: String,
+
     /// The URL of BuilderHub.
     #[clap(long, value_hint = ValueHint::Url)]
     pub builder_hub_url: Option<String>,
@@ -98,6 +102,7 @@ impl Default for OrderflowIngressArgs {
             system_listen_url: String::from("127.0.0.1:0"),
             builder_listen_url: String::from("127.0.0.1:0"),
             builder_url: String::from("http://127.0.0.1:8545"),
+            builder_name: String::from("buildernet"),
             builder_hub_url: None,
             metrics: None,
             orderflow_signer: None,

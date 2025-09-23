@@ -74,6 +74,7 @@ pub struct OrderflowIngress {
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
+    pub local_builder_name: String,
     pub metrics: OrderflowIngressMetrics,
     pub indexer_handle: ClickhouseIndexerHandle,
 }
@@ -387,11 +388,10 @@ impl OrderflowIngress {
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
-        // TODO: Index here
         self.indexer_handle.index_bundle(IndexableSystemBundle {
             system_bundle: bundle.clone(),
             timestamp: received_at,
-            builder_name: String::new(), /* todo */
+            builder_name: self.local_builder_name.clone(),
         });
 
         self.send_bundle(priority, bundle).await

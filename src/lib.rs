@@ -124,6 +124,7 @@ pub async fn run_with_listeners(
         order_cache,
         forwarders,
         local_builder_url: Some(builder_url),
+        local_builder_name: args.builder_name,
         metrics: OrderflowIngressMetrics::default(),
         indexer_handle,
     });
@@ -224,7 +225,7 @@ async fn run_update_peers(
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(30)).await;
+        tokio::time::sleep(delay).await;
     }
 }
 
