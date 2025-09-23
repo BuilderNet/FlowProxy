@@ -279,7 +279,7 @@ mod tests {
         let hash = B256::from([1; 32]);
         let response = EthResponse::BundleHash(hash);
 
-        let json = serde_json::to_value(&response).unwrap();
+        let json = serde_json::to_value(response).unwrap();
 
         assert_eq!(
             json,
@@ -293,7 +293,7 @@ mod tests {
     fn test_tx_hash_response() {
         let hash = B256::from([1; 32]);
         let response = EthResponse::TxHash(hash);
-        let json = serde_json::to_value(&response).unwrap();
+        let json = serde_json::to_value(response).unwrap();
         assert_eq!(json, json!(hash));
     }
 }
