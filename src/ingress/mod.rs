@@ -6,7 +6,7 @@ use crate::{
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
-        decode_transaction, BundleHash as _, DecodedBundle, HashResponse, SystemBundle,
+        decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
         SystemTransaction,
     },
     validation::validate_transaction,
@@ -124,7 +124,7 @@ impl OrderflowIngress {
         State(ingress): State<Arc<Self>>,
         headers: HeaderMap,
         body: axum::body::Bytes,
-    ) -> JsonRpcResponse<HashResponse> {
+    ) -> JsonRpcResponse<EthResponse> {
         let received_at = Instant::now();
         ingress.metrics.user.requests_received.increment(1);
 
@@ -172,7 +172,7 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress.on_bundle(entity, bundle).await
+                ingress.on_bundle(entity, bundle).await.map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(Ok(tx)) = request.take_single_param().map(|value| {
@@ -182,13 +182,13 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress.send_raw_transaction(entity, tx).await
+                ingress.send_raw_transaction(entity, tx).await.map(EthResponse::TxHash)
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
 
         let response = match result {
-            Ok(hash) => JsonRpcResponse::result(request.id, HashResponse::from(hash)),
+            Ok(eth) => JsonRpcResponse::result(request.id, eth),
             Err(error) => {
                 if error.is_validation() {
                     if let Some(mut data) = ingress.entity_data(entity) {
@@ -239,7 +239,7 @@ impl OrderflowIngress {
         State(ingress): State<Arc<Self>>,
         headers: HeaderMap,
         body: axum::body::Bytes,
-    ) -> JsonRpcResponse<B256> {
+    ) -> JsonRpcResponse<EthResponse> {
         let received_at = Instant::now();
         ingress.metrics.system.requests_received.increment(1);
 
@@ -276,7 +276,7 @@ impl OrderflowIngress {
         }
 
         trace!(target: "ingress", %peer, id = request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");
-        let raw = match request.method.as_str() {
+        let (raw, response) = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(raw) = request.take_single_param() else {
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
@@ -292,12 +292,15 @@ impl OrderflowIngress {
                 let bundle_hash = bundle.bundle_hash();
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
-                    return JsonRpcResponse::result(request.id, bundle_hash);
+                    return JsonRpcResponse::result(
+                        request.id,
+                        EthResponse::BundleHash(bundle_hash),
+                    );
                 }
 
                 ingress.order_cache.insert(bundle_hash);
 
-                raw
+                (raw, EthResponse::BundleHash(bundle_hash))
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(raw) = request.take_single_param() else {
@@ -315,12 +318,12 @@ impl OrderflowIngress {
                 let tx_hash = *tx.tx_hash();
                 if ingress.order_cache.contains(&tx_hash) {
                     trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
-                    return JsonRpcResponse::result(request.id, tx_hash);
+                    return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
                 }
 
                 ingress.order_cache.insert(tx_hash);
 
-                raw
+                (raw, EthResponse::TxHash(tx_hash))
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
@@ -330,7 +333,7 @@ impl OrderflowIngress {
 
         ingress.metrics.system.record_method_metrics(&request.method, received_at);
 
-        JsonRpcResponse::result(request.id, B256::ZERO) // we don't really need the hash here
+        JsonRpcResponse::result(request.id, response)
     }
 
     /// Handles a new bundle.

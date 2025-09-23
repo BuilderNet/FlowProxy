@@ -261,14 +261,39 @@ pub fn recover_transaction(
     Ok(Recovered::new_unchecked(transaction, signer))
 }
 
+/// Response for the eth_sendBundle and eth_sendRawTransaction methods.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct HashResponse {
-    bundle_hash: B256,
+pub enum EthResponse {
+    BundleHash(B256),
+    #[serde(untagged)]
+    TxHash(B256),
 }
 
-impl From<B256> for HashResponse {
-    fn from(bundle_hash: B256) -> Self {
-        Self { bundle_hash }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_response() {
+        let hash = B256::from([1; 32]);
+        let response = EthResponse::BundleHash(hash);
+
+        let json = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(
+            json,
+            json!({
+                "bundleHash": hash
+            })
+        );
+    }
+
+    #[test]
+    fn test_tx_hash_response() {
+        let hash = B256::from([1; 32]);
+        let response = EthResponse::TxHash(hash);
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json, json!(hash));
     }
 }
