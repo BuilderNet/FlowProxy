@@ -6080,7 +6080,7 @@ dependencies = [
 [[package]]
 name = "rbuilder-primitives"
 version = "0.1.0"
-source = "git+https://github.com/mempirate/rbuilder.git?branch=refactor%2Fextract-primitives#b3cab8a69815416dcb4fbc969590645df6a7e609"
+source = "git+https://github.com/flashbots/rbuilder.git?rev=3f14f82#3f14f8242b94e51169847fd325ee2b21a9518a32"
 dependencies = [
  "ahash",
  "alloy-consensus",
