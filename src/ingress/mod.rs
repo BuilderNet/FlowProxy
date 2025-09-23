@@ -362,16 +362,6 @@ impl OrderflowIngress {
             })
             .await?;
 
-        // TODO: Should we calculate the unique key BEFORE the validation step above? Might save us
-        // some compute.
-        let unique_key = bundle.unique_key();
-        if self.order_cache.contains(unique_key) {
-            trace!(target: "ingress", unique_key = %unique_key, "Bundle already processed");
-            return Ok(todo!("Return bundle UUID or hash or both?"));
-        }
-
-        self.order_cache.insert(unique_key);
-
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
@@ -430,7 +420,10 @@ impl OrderflowIngress {
             return Ok(tx_hash);
         }
 
-        self.order_cache.insert(unique_key);
+        self.order_cache.insert(tx_hash);
+
+        let Entity::Signer(signer) = entity else { unreachable!() };
+        let transaction = SystemTransaction::from_transaction_and_signer(transaction, signer);
 
         // Determine priority for processing given request.
         let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
