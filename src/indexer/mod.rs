@@ -44,10 +44,10 @@ impl ClickhouseIndexer {
                 )
             }
 
-            // TODO: current clickhouse code doesn't let me know if this calls `force_commit` or
+            // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls `force_commit` or
             // not. It kinda sucks. I should fork it and make a PR eventually.
             //
-            // TODO: implement a file-based backup in case this call fails due to connection
+            // TODO(thedevbirb): implement a file-based backup in case this call fails due to connection
             // timeouts or whatever.
             let _ = self.bundle_inserter.commit().await;
         }
@@ -94,12 +94,13 @@ pub fn spawn_indexer(args: Option<ClickhouseArgs>) -> (ClickhouseIndexerHandle, 
         .with_user(args.username)
         .with_password(args.password);
 
-    // TODO: configure the inserter, example: <https://github.com/ClickHouse/clickhouse-rs/blob/2e57c2602eb24c032964405ce58687a5f4147d81/examples/inserter.rs#L43-L59>
     let bundle_inserter = client
         .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
         .expect("in 0.13.3, this never returns Err")
         .with_period(Some(Duration::from_secs(4))) // Dump every 4s
-        .with_period_bias(0.1); // 12±(0.1*12)
+        .with_period_bias(0.1) // 4±(0.1*4)
+        .with_max_bytes(128 * 1024 * 1024)
+        .with_max_rows(65_536); // 128MiB
 
     let indexer = ClickhouseIndexer { bundle_rx: rx, client, bundle_inserter };
     let task_handle = tokio::spawn(indexer.run());

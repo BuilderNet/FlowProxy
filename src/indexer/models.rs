@@ -1,3 +1,5 @@
+use alloy_consensus::Transaction;
+use alloy_eips::Typed2718;
 use alloy_primitives::U256;
 use clickhouse_derive::Row;
 use time::{OffsetDateTime, UtcDateTime};
@@ -6,7 +8,7 @@ use crate::types::{DecodedBundle, SystemBundle};
 
 /// Model representing clickhouse bundle row.
 #[derive(Row, Debug, serde::Serialize)]
-pub struct BundleRow {
+pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub time: OffsetDateTime,
@@ -93,104 +95,122 @@ pub struct BundleRow {
     pub bx_second_refund_percent: Option<u8>,
 }
 
+/// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
 impl From<(SystemBundle, UtcDateTime)> for BundleRow {
     fn from(bundle_with_time: (SystemBundle, UtcDateTime)) -> Self {
-        let DecodedBundle::Bundle(ref decoded) = bundle_with_time.0.decoded_bundle.as_ref() else {
-            todo!()
+        let (bundle, time) = bundle_with_time;
+        let DecodedBundle::Bundle(ref decoded) = bundle.decoded_bundle.as_ref() else {
+            unreachable!("expecting decoded bundle")
         };
 
-        // let bundle = BundleRow {
-        //     time: OffsetDateTime::now_utc(),
-        //     tx_hash: decoded.txs.iter().map(|tx| format!("{:?}", tx.hash())).collect(),
-        //     tx_from: decoded.txs.iter().map(|tx| format!("{:?}", tx.signer())).collect(),
-        //     tx_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
-        //     tx_r: decoded.txs.iter().map(|tx| tx.as_ref().signature().r()).collect(),
-        //     tx_s: decoded.txs.iter().map(|tx| tx.as_ref().signature().s()).collect(),
-        //     tx_v: txs.iter().map(|tx| to_klickhouse_u256(tx.signature().v().to_u64())).collect(),
-        //     tx_to: txs.iter().map(|tx| tx.to().to().map(|t| format!("{t:?}"))).collect(),
-        //     tx_gas: txs.iter().map(|tx| to_klickhouse_u256(tx.gas_limit())).collect(),
-        //     tx_type: txs.iter().map(|tx| tx.tx_type() as u64).collect(),
-        //     tx_input: txs
-        //         .iter()
-        //         .map(|tx| alloy_primitives::hex::encode_prefixed(tx.input()))
-        //         .collect(),
-        //     tx_value: txs.iter().map(|tx| to_klickhouse_u256(tx.value())).collect(),
-        //     tx_gas_price: txs.iter().map(|tx| tx.gas_price().map(to_klickhouse_u256)).collect(),
-        //     tx_max_fee_per_gas: txs
-        //         .iter()
-        //         .map(|tx| tx.legacy_max_fee_per_gas().map(to_klickhouse_u256))
-        //         .collect(),
-        //     tx_max_priority_fee_per_gas: txs
-        //         .iter()
-        //         .map(|tx| tx.max_priority_fee_per_gas().map(to_klickhouse_u256))
-        //         .collect(),
-        //     tx_access_list: txs
-        //         .iter()
-        //         .map(|tx| {
-        //             tx.access_list()
-        //                 .as_ref()
-        //                 .map(|access_list| serde_json::to_string(&access_list).unwrap())
-        //         })
-        //         .collect(),
-        //     bundle_type,
-        //     // TODO(palkeo): This is not ideal, we are using 0 as block number, if not defined.
-        //     block_number: raw_bundle.block_number.unwrap_or_default().to::<u64>(),
-        //     min_timestamp: raw_bundle.min_timestamp.unwrap_or_default().to::<u64>(),
-        //     max_timestamp: raw_bundle.max_timestamp.unwrap_or_default().to::<u64>(),
-        //     reverting_tx_hashes: raw_bundle
-        //         .reverting_tx_hashes
-        //         .clone()
-        //         .unwrap_or_default()
-        //         .iter()
-        //         .map(|h| format!("{h:?}"))
-        //         .collect(),
-        //     dropping_tx_hashes: raw_bundle
-        //         .dropping_tx_hashes
-        //         .clone()
-        //         .unwrap_or_default()
-        //         .iter()
-        //         .map(|h| format!("{h:?}"))
-        //         .collect(),
-        //     refund_tx_hashes: raw_bundle
-        //         .refund_tx_hashes
-        //         .clone()
-        //         .unwrap_or_default()
-        //         .iter()
-        //         .map(|h| format!("{h:?}"))
-        //         .collect(),
-        //     uuid: raw_bundle.replacement_uuid.or(raw_bundle.uuid).map(|u| u.to_string()),
-        //     source_ip: Some(source_ip.to_owned()),
-        //     host: Some(host.to_owned()),
-        //     builder_name: builder_name.to_owned(),
-        //     refund_percent: raw_bundle
-        //         .refund_percent
-        //         .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
-        //     refund_recipient: raw_bundle
-        //         .refund_recipient
-        //         .clone()
-        //         .map(|recipient| recipient.to_lowercase()),
-        //     forwarder_score: self.compute_forwarder_score(&txs, source_ip),
-        //     hash: format!("{bundle_hash:?}"), // always lowercase
-        //     bx_first_refund_recipient: extra
-        //         .first_refund_recipient
-        //         .map(|recipient| recipient.to_lowercase()),
-        //     bx_first_refund_percent: extra
-        //         .first_refund_percent
-        //         .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
-        //     bx_second_refund_recipient: extra
-        //         .second_refund_recipient
-        //         .map(|recipient| recipient.to_lowercase()),
-        //     bx_second_refund_percent: extra
-        //         .second_refund_percent
-        //         .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
-        // };
-        todo!();
+        let bundle = BundleRow {
+            time: time.into(),
+            tx_hash: decoded.txs.iter().map(|tx| format!("{:?}", tx.hash())).collect(),
+            tx_from: decoded.txs.iter().map(|tx| format!("{:?}", tx.signer())).collect(),
+            tx_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
+            tx_r: decoded.txs.iter().map(|tx| tx.as_ref().signature().r()).collect(),
+            tx_s: decoded.txs.iter().map(|tx| tx.as_ref().signature().s()).collect(),
+            tx_v: decoded.txs.iter().map(|tx| U256::from(tx.as_ref().signature().v())).collect(),
+            tx_to: decoded.txs.iter().map(|tx| tx.to().map(|t| format!("{t:?}"))).collect(),
+            tx_gas: decoded.txs.iter().map(|tx| U256::from(tx.as_ref().gas_limit())).collect(),
+            tx_type: decoded.txs.iter().map(|tx| tx.as_ref().tx_type() as u64).collect(),
+            tx_input: decoded
+                .txs
+                .iter()
+                .map(|tx| alloy_primitives::hex::encode_prefixed(tx.as_ref().input()))
+                .collect(),
+            tx_value: decoded.txs.iter().map(|tx| tx.value()).collect(),
+            tx_gas_price: decoded
+                .txs
+                .iter()
+                .map(|tx| tx.as_ref().gas_price().map(U256::from))
+                .collect(),
+            tx_max_fee_per_gas: decoded
+                .txs
+                .iter()
+                .map(|tx| {
+                    if tx.is_legacy() {
+                        None
+                    } else {
+                        Some(U256::from(tx.as_ref().max_fee_per_gas()))
+                    }
+                })
+                .collect(),
+            tx_max_priority_fee_per_gas: decoded
+                .txs
+                .iter()
+                .map(|tx| {
+                    if tx.is_legacy() {
+                        None
+                    } else {
+                        tx.as_ref().max_priority_fee_per_gas().map(U256::from)
+                    }
+                })
+                .collect(),
+            tx_access_list: decoded
+                .txs
+                .iter()
+                .map(|tx| {
+                    tx.as_ref()
+                        .access_list()
+                        .as_ref()
+                        .map(|access_list| serde_json::to_string(&access_list).unwrap())
+                })
+                .collect(),
+            bundle_type: String::from("top"),
+            block_number: bundle.raw_bundle.block_number.unwrap_or_default().to::<u64>(),
+            min_timestamp: bundle.raw_bundle.min_timestamp.unwrap_or_default(),
+            max_timestamp: bundle.raw_bundle.max_timestamp.unwrap_or_default(),
+            reverting_tx_hashes: bundle
+                .raw_bundle
+                .reverting_tx_hashes
+                .clone()
+                .iter()
+                .map(|h| format!("{h:?}"))
+                .collect(),
+            dropping_tx_hashes: bundle
+                .raw_bundle
+                .dropping_tx_hashes
+                .clone()
+                .iter()
+                .map(|h| format!("{h:?}"))
+                .collect(),
+            refund_tx_hashes: bundle
+                .raw_bundle
+                .refund_tx_hashes
+                .clone()
+                .iter()
+                .map(|h| format!("{h:?}"))
+                .collect(),
+            uuid: bundle
+                .raw_bundle
+                .replacement_uuid
+                .or(bundle.raw_bundle.uuid)
+                .map(|u| u.to_string()),
+            source_ip: None,             //Some(source_ip.to_owned()),
+            host: None,                  //Some(host.to_owned()),
+            builder_name: String::new(), //builder_name.to_owned(),
+            refund_percent: bundle.raw_bundle.refund_percent,
+            refund_recipient: bundle
+                .raw_bundle
+                .refund_recipient
+                .map(|recipient| format!("{recipient:x}")),
+            forwarder_score: 0.0, // self.compute_forwarder_score(&decoded.txs, source_ip),
+            hash: format!("{:?}", decoded.hash), // always lowercase
+            bx_first_refund_recipient: None, // extra .first_refund_recipient .map(|recipient| recipient.to_lowercase()),
+            bx_first_refund_percent: None, // extra.first_refund_percent .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
+            bx_second_refund_recipient: None, // extra.second_refund_recipient .map(|recipient| recipient.to_lowercase()),
+            bx_second_refund_percent: None, // extra .second_refund_percent .map(|pct| u8::try_from(pct.to::<u64>()).unwrap_or(255)),
+        };
+
+        bundle
     }
 }
 
 /// Model representing clickhouse private transaction row.
 #[derive(Row, Debug, serde::Serialize)]
-pub struct PrivateTxRow {
+#[allow(dead_code)]
+pub(crate) struct PrivateTxRow {
     /// The timestamp at which private transaction was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub time: OffsetDateTime,
