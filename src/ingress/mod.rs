@@ -259,7 +259,8 @@ impl OrderflowIngress {
             return JsonRpcResponse::error(None, JsonRpcError::Internal);
         };
 
-        let mut request = match JsonRpcRequest::from_bytes(&body) {
+        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
+        {
             Ok(request) => request,
             Err(error) => {
                 ingress.metrics.system.json_rpc_parse_errors.increment(1);
@@ -275,10 +276,53 @@ impl OrderflowIngress {
         }
 
         trace!(target: "ingress", %peer, id = request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");
+        let raw = match request.method.as_str() {
+            ETH_SEND_BUNDLE_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
 
-        let Some(raw) = request.take_single_param() else {
-            ingress.metrics.system.json_rpc_parse_errors.increment(1);
-            return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                let Ok(bundle) = serde_json::from_value::<RawBundle>(raw.clone()) else {
+                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                // Deduplicate bundles.
+                let bundle_hash = bundle.bundle_hash();
+                if ingress.order_cache.contains(&bundle_hash) {
+                    trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
+                    return JsonRpcResponse::result(request.id, bundle_hash);
+                }
+
+                ingress.order_cache.insert(bundle_hash);
+
+                raw
+            }
+            ETH_SEND_RAW_TRANSACTION_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                let Ok(tx) =
+                    decode_transaction(&serde_json::from_value::<Bytes>(raw.clone()).unwrap())
+                else {
+                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                let tx_hash = *tx.tx_hash();
+                if ingress.order_cache.contains(&tx_hash) {
+                    trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
+                    return JsonRpcResponse::result(request.id, tx_hash);
+                }
+
+                ingress.order_cache.insert(tx_hash);
+
+                raw
+            }
+            _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
 
         // Send request only to the local builder forwarder.
@@ -300,7 +344,7 @@ impl OrderflowIngress {
 
         // Deduplicate bundles.
         let bundle_hash = bundle.bundle_hash();
-        if self.order_cache.contains(bundle_hash) {
+        if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
             return Ok(bundle_hash);
         }
@@ -356,7 +400,7 @@ impl OrderflowIngress {
         let tx_hash = *transaction.hash();
 
         // Deduplicate transactions.
-        if self.order_cache.contains(tx_hash) {
+        if self.order_cache.contains(&tx_hash) {
             trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
             return Ok(tx_hash);
         }

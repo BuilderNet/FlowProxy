@@ -27,7 +27,7 @@ impl OrderCache {
     }
 
     /// Check if an order ID is in the cache.
-    pub fn contains(&self, id: B256) -> bool {
-        self.cache.contains_key(&id)
+    pub fn contains(&self, id: &B256) -> bool {
+        self.cache.contains_key(id)
     }
 }
