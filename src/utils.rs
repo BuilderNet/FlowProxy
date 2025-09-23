@@ -20,4 +20,4 @@ pub fn clamp_to_duration_bucket(time: Instant, duration: Duration) -> Instant {
     *START + clamped_duration
 }
 
-pub static LOCAL_PEER_STORE: LazyLock<LocalPeerStore<()>> = LazyLock::new(LocalPeerStore::new);
+pub static LOCAL_PEER_STORE: LazyLock<LocalPeerStore> = LazyLock::new(LocalPeerStore::new);

@@ -1,5 +1,6 @@
 //! Orderflow ingress for BuilderNet.
 
+use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
     extract::DefaultBodyLimit,
@@ -70,29 +71,30 @@ pub async fn run_with_listeners(
             PrivateKeySigner::random()
         }
     };
-    info!(address = %orderflow_signer.address(), "Orderflow signer configured");
+    let local_signer = orderflow_signer.address();
+    info!(address = %local_signer, "Orderflow signer configured");
 
     let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build()?;
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
         debug!(url = builder_hub_url, "Running with BuilderHub");
         let builder_hub = builderhub::BuilderHub::new(builder_hub_url);
-        builder_hub.register(orderflow_signer.address(), None).await?;
+        builder_hub.register(local_signer, None).await?;
 
         tokio::spawn({
             let peers = peers.clone();
-            async move { run_update_peers(builder_hub, peers).await }
+            async move { run_update_peers(local_signer, builder_hub, peers).await }
         });
     } else {
         warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = utils::LOCAL_PEER_STORE.clone();
 
-        let peer_store = local_peer_store
-            .register(orderflow_signer.address(), Some(system_listener.local_addr()?.port()));
+        let peer_store =
+            local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
 
         tokio::spawn({
             let peers = peers.clone();
-            async move { run_update_peers(peer_store, peers).await }
+            async move { run_update_peers(local_signer, peer_store, peers).await }
         });
     }
 
@@ -158,7 +160,11 @@ pub async fn run_with_listeners(
     Ok(())
 }
 
-async fn run_update_peers(peer_store: impl PeerStore, peers: Arc<DashMap<String, PeerHandle>>) {
+async fn run_update_peers(
+    local_signer: Address,
+    peer_store: impl PeerStore,
+    peers: Arc<DashMap<String, PeerHandle>>,
+) {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
     let delay = Duration::from_secs(30);
 
@@ -184,7 +190,7 @@ async fn run_update_peers(peer_store: impl PeerStore, peers: Arc<DashMap<String,
         // Update or insert builder information.
         for builder in builders {
             let entry = peers.entry(builder.name.clone());
-            let should_spawn = match &entry {
+            let new_peer = match &entry {
                 dashmap::Entry::Occupied(entry) => {
                     info!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Peer configuration was updated");
                     entry.get().info != builder
@@ -195,7 +201,8 @@ async fn run_update_peers(peer_store: impl PeerStore, peers: Arc<DashMap<String,
                 }
             };
 
-            if should_spawn {
+            // Self-filter any new peers before connecting to them.
+            if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
                 let sender =
                     spawn_forwarder(builder.name.clone(), builder.ip.clone(), client.clone())
