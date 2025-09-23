@@ -108,7 +108,7 @@ pub fn spawn_indexer(args: Option<ClickhouseArgs>) -> (ClickhouseIndexerHandle, 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use clickhouse::Client as ClickhouseClient;
     use clickhouse::{error::Result as ClickhouseResult, test::handlers::RecordDdlControl};
     use derive_more::{Deref, DerefMut, From, Into};
@@ -145,13 +145,13 @@ mod tests {
     `transactions.accessList` Array(Nullable(String)),
     `transactions.authorizationList` Array(Nullable(String)),
 
-    `block_number` UInt64,
-    `min_timestamp` UInt64,
-    `max_timestamp` UInt64,
+    `block_number` Nullable(UInt64),
+    `min_timestamp` Nullable(UInt64),
+    `max_timestamp` Nullable(UInt64),
 
     `reverting_tx_hashes` Array(FixedString(66)),
     `dropping_tx_hashes` Array(FixedString(66)),
-    `refund_tx_hashes` Array(FixedString(66)),
+    `refund_tx_hashes` Nullable(Array(FixedString(66))),
 
     `uuid` Nullable(String),
     `replacement_nonce` Nullable(Uint64),
@@ -227,7 +227,7 @@ SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
     }
 
     /// An example system bundle to use for testing.
-    fn system_bundle_example() -> SystemBundle {
+    pub(crate) fn system_bundle_example() -> SystemBundle {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         SystemBundle::try_from_bundle_and_signer(bundle, signer).unwrap()
