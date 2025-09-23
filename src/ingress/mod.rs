@@ -4,7 +4,7 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
-    types::{decode_transaction, DecodedBundle, SystemBundle, SystemTransaction},
+    types::{decode_transaction, DecodedBundle, HashResponse, SystemBundle, SystemTransaction},
     validation::validate_transaction,
 };
 use alloy_consensus::{
@@ -119,7 +119,7 @@ impl OrderflowIngress {
         State(ingress): State<Arc<Self>>,
         headers: HeaderMap,
         body: axum::body::Bytes,
-    ) -> JsonRpcResponse<B256> {
+    ) -> JsonRpcResponse<HashResponse> {
         let received_at = Instant::now();
         ingress.metrics.user.requests_received.increment(1);
 
@@ -183,7 +183,7 @@ impl OrderflowIngress {
         };
 
         let response = match result {
-            Ok(hash) => JsonRpcResponse::result(request.id, hash),
+            Ok(hash) => JsonRpcResponse::result(request.id, HashResponse::from(hash)),
             Err(error) => {
                 if error.is_validation() {
                     if let Some(mut data) = ingress.entity_data(entity) {
@@ -324,13 +324,13 @@ impl OrderflowIngress {
         bundle: SystemBundle,
     ) -> Result<B256, IngressError> {
         let uuid = bundle.uuid();
+        let bundle_hash = bundle.bundle_hash();
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(priority, bundle);
 
-        debug!(target: "ingress", bundle_uuid = %uuid, "Bundle processed");
+        debug!(target: "ingress", bundle_uuid = %uuid, bundle_hash = %bundle_hash, "Bundle processed");
 
-        // TODO: Return bundle UUID or hash or both?
-        Ok(todo!("Return bundle UUID or hash or both?"))
+        Ok(bundle_hash)
     }
 
     async fn send_raw_transaction(
