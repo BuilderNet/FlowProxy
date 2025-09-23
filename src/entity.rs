@@ -41,13 +41,13 @@ impl Entity {
     ) -> Priority {
         // Unknown entities get low processing priority.
         if self.is_unknown() {
-            return Priority::Low
+            return Priority::Low;
         }
 
         // Bundles with blob transactions get low processing priority
         // due to excessive bandwidth consumption.
         if request.has_eip4844_txs() {
-            return Priority::Low
+            return Priority::Low;
         }
 
         let score = scores.calculate();
@@ -55,11 +55,11 @@ impl Entity {
         let is_non_revertible = request.is_non_revertible();
 
         if (score < spam_thresholds.medium && is_replacement) || is_non_revertible {
-            return Priority::High
+            return Priority::High;
         }
 
         if spam_thresholds.high > score && score < spam_thresholds.medium {
-            return Priority::Medium
+            return Priority::Medium;
         }
 
         Priority::Low
@@ -137,8 +137,8 @@ impl EntityScores {
 
     pub fn calculate(&mut self) -> f64 {
         self.cleanup();
-        self.entries.values().map(|score| score.calculate()).sum::<f64>() /
-            self.entries.len() as f64
+        self.entries.values().map(|score| score.calculate()).sum::<f64>()
+            / self.entries.len() as f64
     }
 }
 

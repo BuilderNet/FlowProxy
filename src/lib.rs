@@ -168,7 +168,7 @@ async fn run_update_peers(peer_store: impl PeerStore, peers: Arc<DashMap<String,
             Err(error) => {
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
-                continue
+                continue;
             }
         };
 

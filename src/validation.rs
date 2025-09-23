@@ -39,18 +39,18 @@ pub fn validate_transaction(
     // Validate input length.
     let input_len = transaction.input().len();
     if transaction.is_create() && input_len > MAX_INIT_CODE_BYTE_SIZE {
-        return Err(ValidationError::ExceedsMaxInitCodeSize(input_len, MAX_INIT_CODE_BYTE_SIZE))
+        return Err(ValidationError::ExceedsMaxInitCodeSize(input_len, MAX_INIT_CODE_BYTE_SIZE));
     }
 
     // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
     if transaction.max_priority_fee_per_gas() > Some(transaction.max_fee_per_gas()) {
-        return Err(ValidationError::TipAboveFeeCap)
+        return Err(ValidationError::TipAboveFeeCap);
     }
 
     // Checks for chainid
     if let Some(chain_id) = transaction.chain_id() {
         if chain_id != MAINNET_CHAIN_ID {
-            return Err(ValidationError::ChainIdMismatch)
+            return Err(ValidationError::ChainIdMismatch);
         }
     }
 
@@ -67,19 +67,19 @@ pub fn validate_transaction(
     );
     let gas_limit = transaction.gas_limit();
     if gas_limit < gas.initial_gas || gas_limit < gas.floor_gas {
-        return Err(ValidationError::IntrinsicGasTooLow)
+        return Err(ValidationError::IntrinsicGasTooLow);
     }
 
     if transaction.is_eip4844() {
         let blob_count = transaction.blob_versioned_hashes().map(|b| b.len() as u64).unwrap_or(0);
         if blob_count == 0 {
             // no blobs
-            return Err(ValidationError::NoEip4844Blobs)
+            return Err(ValidationError::NoEip4844Blobs);
         }
     }
 
     if transaction.is_eip7702() && transaction.authorization_list().is_none_or(|l| l.is_empty()) {
-        return Err(ValidationError::MissingEip7702AuthorizationList)
+        return Err(ValidationError::MissingEip7702AuthorizationList);
     }
 
     Ok(())

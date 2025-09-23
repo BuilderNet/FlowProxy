@@ -81,7 +81,7 @@ impl OrderflowIngress {
         entity: Entity,
     ) -> Option<dashmap::mapref::one::RefMut<'_, Entity, EntityData>> {
         if entity.is_unknown() {
-            return None
+            return None;
         }
 
         Some(self.entities.entry(entity).or_insert_with(|| EntityData {
@@ -130,7 +130,7 @@ impl OrderflowIngress {
 
         // NOTE: Signature is mandatory
         let Some(signer) = maybe_verify_signature(&headers, &body) else {
-            return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature)
+            return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
         };
 
         let entity = Entity::Signer(signer);
@@ -138,7 +138,7 @@ impl OrderflowIngress {
         if let Some(mut data) = ingress.entity_data(entity) {
             if data.rate_limit.count() > ingress.rate_limit_count {
                 ingress.metrics.user.requests_rate_limited.increment(1);
-                return JsonRpcResponse::error(None, JsonRpcError::RateLimited)
+                return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
             }
             data.rate_limit.inc();
         }
@@ -148,7 +148,7 @@ impl OrderflowIngress {
             Ok(request) => request,
             Err(error) => {
                 ingress.metrics.user.json_rpc_parse_errors.increment(1);
-                return JsonRpcResponse::error(None, error)
+                return JsonRpcResponse::error(None, error);
             }
         };
 
@@ -164,7 +164,7 @@ impl OrderflowIngress {
                     request.take_single_param().map(serde_json::from_value::<RawBundle>)
                 else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams)
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 ingress.on_bundle(entity, bundle).await
@@ -174,7 +174,7 @@ impl OrderflowIngress {
                     decode_transaction(&serde_json::from_value::<Bytes>(value).unwrap())
                 }) else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams)
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 ingress.send_raw_transaction(entity, tx).await
@@ -212,18 +212,18 @@ impl OrderflowIngress {
                 return Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
                     .body(Body::from("not ready"))
-                    .unwrap()
+                    .unwrap();
             };
 
             if response.status().is_success() {
                 info!(target: "ingress", %url, "Local builder is ready");
-                return Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
+                return Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap();
             } else {
                 error!(target: "ingress", %url, status = %response.status(), "Local builder is not ready");
                 return Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
                     .body(Body::from("not ready"))
-                    .unwrap()
+                    .unwrap();
             }
         }
 
@@ -246,7 +246,7 @@ impl OrderflowIngress {
         let peer = 'peer: {
             if let Some(address) = maybe_verify_signature(&headers, &body) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
-                    break 'peer peer
+                    break 'peer peer;
                 }
             }
 
@@ -258,7 +258,7 @@ impl OrderflowIngress {
             Ok(request) => request,
             Err(error) => {
                 ingress.metrics.system.json_rpc_parse_errors.increment(1);
-                return JsonRpcResponse::error(None, error)
+                return JsonRpcResponse::error(None, error);
             }
         };
 
@@ -273,7 +273,7 @@ impl OrderflowIngress {
 
         let Some(raw) = request.take_single_param() else {
             ingress.metrics.system.json_rpc_parse_errors.increment(1);
-            return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams)
+            return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
         };
 
         // Send request only to the local builder forwarder.
