@@ -217,8 +217,8 @@ impl SystemBundle {
 #[derive(Debug, Clone)]
 pub struct IndexableSystemBundle {
     pub timestamp: UtcDateTime,
-    pub builder_name: String,
     pub system_bundle: SystemBundle,
+    pub builder_name: String,
 }
 
 /// Internally processed transaction.
