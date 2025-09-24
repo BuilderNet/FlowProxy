@@ -108,12 +108,7 @@ impl From<(SystemBundle, String)> for BundleRow {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
                 BundleRow {
-                    // Ensure microsecond accuracy
-                    time: bundle
-                        .received_at
-                        .replace_nanosecond(0)
-                        .expect("to set nanoseconds to zero for microsecond precision")
-                        .into(),
+                    time: bundle.received_at.into(),
                     transactions_hash: decoded
                         .txs
                         .iter()
@@ -250,11 +245,7 @@ impl From<(SystemBundle, String)> for BundleRow {
             // transactions.
             DecodedBundle::Replacement(ref replacement) => {
                 BundleRow {
-                    time: bundle
-                        .received_at
-                        .replace_nanosecond(0)
-                        .expect("to set nanoseconds to zero for microsecond precision")
-                        .into(),
+                    time: bundle.received_at.into(),
                     transactions_hash: Vec::new(),
                     transactions_from: Vec::new(),
                     transactions_nonce: Vec::new(),
