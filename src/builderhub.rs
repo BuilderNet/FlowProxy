@@ -81,26 +81,16 @@ impl PeerStore for BuilderHub {
 }
 
 #[derive(Debug, Clone)]
-pub struct LocalPeerStore<S: std::fmt::Debug + Clone> {
+pub struct LocalPeerStore {
     pub(crate) builders: Arc<DashMap<String, BuilderHubBuilder>>,
-    pub(crate) state: S,
 }
 
-#[derive(Debug, Clone)]
-pub struct Registered {
-    address: Address,
-}
-
-impl LocalPeerStore<()> {
+impl LocalPeerStore {
     pub(crate) fn new() -> Self {
-        Self { builders: Arc::new(DashMap::new()), state: () }
+        Self { builders: Arc::new(DashMap::new()) }
     }
 
-    pub fn register(
-        &self,
-        signer_address: Address,
-        port: Option<u16>,
-    ) -> LocalPeerStore<Registered> {
+    pub fn register(&self, signer_address: Address, port: Option<u16>) -> LocalPeerStore {
         self.builders.insert(
             signer_address.to_string(),
             BuilderHubBuilder {
@@ -115,20 +105,12 @@ impl LocalPeerStore<()> {
             },
         );
 
-        LocalPeerStore {
-            builders: self.builders.clone(),
-            state: Registered { address: signer_address },
-        }
+        LocalPeerStore { builders: self.builders.clone() }
     }
 }
 
-impl PeerStore for LocalPeerStore<Registered> {
+impl PeerStore for LocalPeerStore {
     async fn get_peers(&self) -> eyre::Result<Vec<BuilderHubBuilder>> {
-        Ok(self
-            .builders
-            .iter()
-            .filter(|b| b.value().orderflow_proxy.ecdsa_pubkey_address == self.state.address)
-            .map(|b| b.value().clone())
-            .collect())
+        Ok(self.builders.iter().map(|b| b.value().clone()).collect())
     }
 }
