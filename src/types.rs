@@ -70,47 +70,54 @@ trait BundleHash {
 impl BundleHash for RawBundle {
     fn bundle_hash(&self) -> B256 {
         fn hash(bundle: &RawBundle, state: &mut wyhash::WyHash) {
-            bundle.block_number.hash(state);
-            bundle.txs.hash(state);
+            // We destructure here so we never miss any fields if new fields are added in the
+            // future.
+            let RawBundle {
+                block_number,
+                txs,
+                reverting_tx_hashes,
+                dropping_tx_hashes,
+                replacement_uuid,
+                refund_percent,
+                refund_recipient,
+                refund_tx_hashes,
+                first_seen_at: _,
+                signing_address: _,
+                uuid: _,
+                version: _,
+                min_timestamp: _,
+                max_timestamp: _,
+                replacement_nonce: _,
+            } = bundle;
 
-            let reverting_tx_hashes = if !bundle.reverting_tx_hashes.is_empty() {
-                Some(
-                    bundle
-                        .reverting_tx_hashes
-                        .iter()
-                        .map(|hash| format!("{hash:?}"))
-                        .collect::<Vec<_>>(),
-                )
+            block_number.hash(state);
+            txs.hash(state);
+
+            let reverting_tx_hashes = if !reverting_tx_hashes.is_empty() {
+                Some(reverting_tx_hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>())
             } else {
                 None
             };
 
             reverting_tx_hashes.hash(state);
 
-            let dropping_tx_hashes = if !bundle.dropping_tx_hashes.is_empty() {
-                Some(
-                    bundle
-                        .dropping_tx_hashes
-                        .iter()
-                        .map(|hash| format!("{hash:?}"))
-                        .collect::<Vec<_>>(),
-                )
+            let dropping_tx_hashes = if !dropping_tx_hashes.is_empty() {
+                Some(dropping_tx_hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>())
             } else {
                 None
             };
 
             dropping_tx_hashes.hash(state);
 
-            let replacement_uuid = bundle.replacement_uuid.map(|uuid| uuid.to_string());
+            let replacement_uuid = replacement_uuid.map(|uuid| uuid.to_string());
             replacement_uuid.hash(state);
 
-            let refund_percent = bundle.refund_percent.map(|percent| percent as u64);
+            let refund_percent = refund_percent.map(|percent| percent as u64);
             refund_percent.hash(state);
 
-            bundle.refund_recipient.hash(state);
+            refund_recipient.hash(state);
 
-            let refund_tx_hashes = bundle
-                .refund_tx_hashes
+            let refund_tx_hashes = refund_tx_hashes
                 .as_ref()
                 .map(|hashes| hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>());
             refund_tx_hashes.hash(state);
