@@ -118,9 +118,6 @@ impl LocalPeerStore {
 
         let tmp = path.starts_with(std::env::temp_dir());
 
-        println!("path: {}", path.display());
-        println!("tmp: {}", tmp);
-
         let db = rocksdb::DB::open_default(path).unwrap().into();
         Self { db, tmp }
     }
