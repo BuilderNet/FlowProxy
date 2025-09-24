@@ -26,7 +26,7 @@ pub mod ingress;
 use ingress::OrderflowIngress;
 
 use crate::{
-    builderhub::PeerStore, cache::OrderCache, indexer::spawn_indexer,
+    builderhub::PeerStore, cache::OrderCache, indexer::ClickhouseIndexer,
     ingress::OrderflowIngressMetrics,
 };
 
@@ -69,7 +69,7 @@ pub async fn run_with_listeners(
         spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
     }
 
-    let (indexer_handle, _) = spawn_indexer(args.clickhouse);
+    let (indexer_handle, _) = ClickhouseIndexer::spawn(args.clickhouse, args.builder_name);
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
@@ -124,7 +124,6 @@ pub async fn run_with_listeners(
         order_cache,
         forwarders,
         local_builder_url: Some(builder_url),
-        local_builder_name: args.builder_name,
         metrics: OrderflowIngressMetrics::default(),
         indexer_handle,
     });

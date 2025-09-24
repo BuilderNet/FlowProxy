@@ -6,7 +6,7 @@ use clickhouse::{inserter::Inserter, Client as ClickhouseClient};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::info;
 
-use crate::{cli::ClickhouseArgs, indexer::models::BundleRow, types::IndexableSystemBundle};
+use crate::{cli::ClickhouseArgs, indexer::models::BundleRow, types::SystemBundle};
 
 mod models;
 
@@ -15,25 +15,65 @@ pub const BUNDLE_TABLE_NAME: &str = "bundles";
 const TRACING_TARGET: &str = "indexer";
 
 pub trait BundleIndexer: Sync + Send {
-    fn index_bundle(&self, indexable_bundle: IndexableSystemBundle);
+    fn index_bundle(&self, system_bundle: SystemBundle);
 }
 
 #[derive(Debug)]
 pub struct ClickhouseIndexerHandle {
-    bundle_tx: mpsc::Sender<IndexableSystemBundle>,
+    bundle_tx: mpsc::Sender<SystemBundle>,
 }
 
-struct ClickhouseIndexer {
+#[allow(missing_debug_implementations)]
+pub struct ClickhouseIndexer {
     #[allow(dead_code)]
-    pub client: ClickhouseClient,
-    pub bundle_rx: mpsc::Receiver<IndexableSystemBundle>,
-    pub bundle_inserter: Inserter<BundleRow>,
+    pub(crate) client: ClickhouseClient,
+    pub(crate) bundle_rx: mpsc::Receiver<SystemBundle>,
+    pub(crate) bundle_inserter: Inserter<BundleRow>,
+    pub(crate) builder_name: String,
 }
 
 impl ClickhouseIndexer {
+    pub fn spawn(
+        args: Option<ClickhouseArgs>,
+        builder_name: String,
+    ) -> (ClickhouseIndexerHandle, JoinHandle<()>) {
+        let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let handle = ClickhouseIndexerHandle { bundle_tx: tx };
+
+        let Some(args) = args else {
+            info!("Running with mocked indexer");
+            let mut indexer = MockIndexer { bundle_rx: rx };
+            let task_handle = tokio::task::spawn(async move {
+                while let Some(_b) = indexer.bundle_rx.recv().await {}
+            });
+            return (handle, task_handle);
+        };
+
+        info!(host = %args.host, "Running with clickhouse indexer");
+
+        let client = ClickhouseClient::default()
+            .with_url(args.host)
+            .with_database(args.database)
+            .with_user(args.username)
+            .with_password(args.password);
+
+        let bundle_inserter = client
+            .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
+            .expect("in 0.13.3, this never returns Err")
+            .with_period(Some(Duration::from_secs(4))) // Dump every 4s
+            .with_period_bias(0.1) // 4±(0.1*4)
+            .with_max_bytes(128 * 1024 * 1024) // 128MiB
+            .with_max_rows(65_536);
+
+        let indexer = ClickhouseIndexer { bundle_rx: rx, client, bundle_inserter, builder_name };
+        let task_handle = tokio::spawn(indexer.run());
+
+        (handle, task_handle)
+    }
+
     async fn run(mut self) {
-        while let Some(indexable_bundle) = self.bundle_rx.recv().await {
-            let bundle_row = indexable_bundle.into();
+        while let Some(system_bundle) = self.bundle_rx.recv().await {
+            let bundle_row = (system_bundle, self.builder_name.clone()).into();
 
             if let Err(e) = self.bundle_inserter.write(&bundle_row) {
                 tracing::error!(target: TRACING_TARGET,
@@ -43,11 +83,12 @@ impl ClickhouseIndexer {
                 )
             }
 
-            // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls `force_commit` or
-            // not. It kinda sucks. I should fork it and make a PR eventually.
+            // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
+            // `force_commit` or not. It kinda sucks. I should fork it and make a PR
+            // eventually.
             //
-            // TODO(thedevbirb): implement a file-based backup in case this call fails due to connection
-            // timeouts or whatever.
+            // TODO(thedevbirb): implement a file-based backup in case this call fails due to
+            // connection timeouts or whatever.
             let _ = self.bundle_inserter.commit().await;
         }
 
@@ -59,8 +100,8 @@ impl ClickhouseIndexer {
 }
 
 impl BundleIndexer for ClickhouseIndexerHandle {
-    fn index_bundle(&self, indexable_bundle: IndexableSystemBundle) {
-        if let Err(e) = self.bundle_tx.try_send(indexable_bundle) {
+    fn index_bundle(&self, system_bundle: SystemBundle) {
+        if let Err(e) = self.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
         }
     }
@@ -68,55 +109,20 @@ impl BundleIndexer for ClickhouseIndexerHandle {
 
 #[derive(Debug)]
 pub struct MockIndexer {
-    pub bundle_rx: mpsc::Receiver<IndexableSystemBundle>,
-}
-
-pub fn spawn_indexer(args: Option<ClickhouseArgs>) -> (ClickhouseIndexerHandle, JoinHandle<()>) {
-    let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-    let handle = ClickhouseIndexerHandle { bundle_tx: tx };
-
-    let Some(args) = args else {
-        info!("Running with mocked indexer");
-        let mut indexer = MockIndexer { bundle_rx: rx };
-        let task_handle =
-            tokio::task::spawn(
-                async move { while let Some(_b) = indexer.bundle_rx.recv().await {} },
-            );
-        return (handle, task_handle);
-    };
-
-    info!(host = %args.host, "Running with clickhouse indexer");
-
-    let client = ClickhouseClient::default()
-        .with_url(args.host)
-        .with_database(args.database)
-        .with_user(args.username)
-        .with_password(args.password);
-
-    let bundle_inserter = client
-        .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
-        .expect("in 0.13.3, this never returns Err")
-        .with_period(Some(Duration::from_secs(4))) // Dump every 4s
-        .with_period_bias(0.1) // 4±(0.1*4)
-        .with_max_bytes(128 * 1024 * 1024) // 128MiB
-        .with_max_rows(65_536);
-
-    let indexer = ClickhouseIndexer { bundle_rx: rx, client, bundle_inserter };
-    let task_handle = tokio::spawn(indexer.run());
-
-    (handle, task_handle)
+    pub bundle_rx: mpsc::Receiver<SystemBundle>,
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use clickhouse::Client as ClickhouseClient;
-    use clickhouse::{error::Result as ClickhouseResult, test::handlers::RecordDdlControl};
+    use clickhouse::{
+        error::Result as ClickhouseResult, test::handlers::RecordDdlControl,
+        Client as ClickhouseClient,
+    };
     use derive_more::{Deref, DerefMut, From, Into};
     use rbuilder_primitives::serialize::RawBundle;
     use time::UtcDateTime;
     use tokio::sync::mpsc;
 
-    use crate::types::IndexableSystemBundle;
     use crate::{
         indexer::{
             models::BundleRow, BundleIndexer, ClickhouseIndexer, ClickhouseIndexerHandle,
@@ -125,8 +131,7 @@ pub(crate) mod tests {
         types::SystemBundle,
     };
 
-    const CREATE_BUNDLES_TABLE_DDL: &str = r#"CREATE TABLE bundles
-(
+    const CREATE_BUNDLES_TABLE_DDL: &str = r#"CREATE TABLE bundles (
     `time` DateTime64(6),
     `transactions.hash` Array(FixedString(66)),
     `transactions.from` Array(FixedString(42)),
@@ -182,13 +187,23 @@ ORDER BY (block_number, time)
 TTL toDateTime(time) + toIntervalMonth(1) RECOMPRESS CODEC(ZSTD(6))
 SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
 
+    /// An example raw bundle in JSON format to use for testing. The transactions are from a real
+    /// bundle, along with the block number set to zero. The rest is to mainly populate some
+    /// fields.
     const TEST_BUNDLE: &str = r#"{
     "txs": [
         "0x02f89201820132850826299e00850826299e0082a1d694f82300c34f0d11b0420ac3ce85f0ebe4e3e0544280a40d2959800000000000000000000000000000000000000000000000000000000000000001c001a0030c9637d6d442bd2f9a43f69ec09dbaedb12e08ef1fe38ae5ce855bbcfc36ada064101cb4c00d6c21e792a2959c896992c9bbf8e2d84ce7647d561bfbcf59365a",
         "0x02f9019901458405f5e10085084f73d22e8304d3819480a64c6d7f12c47b7c66c5b4e20e72bc1fcd5d9e870aa87bee538000b90124d1ef924900000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000038d7ea4c6800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006670d0d6c4985c3948000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000f82300c34f0d11b0420ac3ce85f0ebe4e3e05442c080a0b881ab734863b49369bfbf2e28c035785276423783dbbb8e74ec813fd3a95614a0499f781a62cdf3d9a235b83e050f6e8f74df15fcad09822c78a84ace5a44a59b",
         "0x02f9019901058405f5e10085084f73d22e8304d4269480a64c6d7f12c47b7c66c5b4e20e72bc1fcd5d9e87071afd498d0000b90124d1ef924900000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000038d7ea4c6800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006670d0d6c4985c394800000000000000000000000000000000000000000000000100f8061414d648d750000000000000000000000005c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000f82300c34f0d11b0420ac3ce85f0ebe4e3e05442c080a0b9272dad54e7f289385ba64368db5de0a96bd9364734d2edf989307c93cd3982a01b076c83c0bb7d2c644568255d9878ce66c7552175df58025d670a9cec310546"
     ],
-    "blockNumber": "0x0"
+    "blockNumber": "0x0",
+    "droppingTxHashes": ["0x0000000000000000000000000000000000000000000000000000000000000000"],
+    "minTimestamp": 0,
+    "maxTimestamp": 0,
+    "replacementNonce": 0,
+    "refundPercent": 0,
+    "refundRecipient": "0x0000000000000000000000000000000000000000",
+    "refundTxHashes": ["0x0000000000000000000000000000000000000000000000000000000000000000"]
 }"#;
 
     #[derive(From, Into, Deref, DerefMut)]
@@ -216,10 +231,10 @@ SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
     #[allow(dead_code)]
     impl ClickhouseIndexer {
         async fn receive_one(&mut self) {
-            let Some(indexable_bundle) = self.bundle_rx.recv().await else {
+            let Some(system_bundle) = self.bundle_rx.recv().await else {
                 panic!("Expected to receive a bundle")
             };
-            let bundle_row = indexable_bundle.into();
+            let bundle_row = (system_bundle, self.builder_name.clone()).into();
 
             self.bundle_inserter.write(&bundle_row).unwrap();
             let _ = self.bundle_inserter.commit().await;
@@ -230,7 +245,8 @@ SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
     pub(crate) fn system_bundle_example() -> SystemBundle {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
-        SystemBundle::try_from_bundle_and_signer(bundle, signer).unwrap()
+        let received_at = UtcDateTime::now();
+        SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
     // NOTE: when working with the mocked clickhouse client, every request must have a
@@ -260,16 +276,17 @@ SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
             .expect("in 0.13.3, this never returns Err")
             .with_max_rows(0); // force commit immediately
 
-        let indexer =
-            ClickhouseIndexer { bundle_rx: rx, client: client.inner.clone(), bundle_inserter };
-
-        let indexable_bundle = IndexableSystemBundle {
-            system_bundle: system_bundle_example(),
-            timestamp: UtcDateTime::now(),
-            builder_name: String::from("buildernet"),
+        let indexer = ClickhouseIndexer {
+            bundle_rx: rx,
+            client: client.inner.clone(),
+            bundle_inserter,
+            builder_name: "buildernet".to_string(),
         };
 
-        let expected_bundle_rows = vec![BundleRow::from(indexable_bundle.clone())];
+        let system_bundle = system_bundle_example();
+
+        let expected_bundle_rows =
+            vec![BundleRow::from((system_bundle.clone(), indexer.builder_name.clone()))];
 
         // Test logic
 
@@ -277,7 +294,7 @@ SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
         let recording = client.mock.add(clickhouse::test::handlers::record());
 
         tokio::spawn(indexer.run());
-        handle.index_bundle(indexable_bundle);
+        handle.index_bundle(system_bundle);
 
         let recording_rows: Vec<BundleRow> = recording.collect().await;
         assert_eq!(expected_bundle_rows, recording_rows);

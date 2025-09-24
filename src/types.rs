@@ -41,6 +41,10 @@ pub struct SystemBundle {
     /// The bundle hash.
     #[serde(skip)]
     pub bundle_hash: B256,
+
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    #[serde(skip)]
+    pub received_at: UtcDateTime,
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
@@ -142,6 +146,7 @@ impl SystemBundle {
     pub fn try_from_bundle_and_signer(
         bundle: RawBundle,
         signer: Address,
+        received_at: UtcDateTime,
     ) -> Result<Self, RawBundleConvertError> {
         let decoded = bundle.clone().decode(TxEncoding::WithBlobData)?;
 
@@ -152,6 +157,7 @@ impl SystemBundle {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded.into()),
             bundle_hash,
+            received_at,
         })
     }
 
@@ -212,13 +218,6 @@ impl SystemBundle {
 
         serde_json::to_vec(&json).unwrap()
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct IndexableSystemBundle {
-    pub timestamp: UtcDateTime,
-    pub system_bundle: SystemBundle,
-    pub builder_name: String,
 }
 
 /// Internally processed transaction.

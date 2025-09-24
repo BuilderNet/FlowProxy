@@ -4,7 +4,7 @@ use alloy_primitives::U256;
 use clickhouse_derive::Row;
 use time::OffsetDateTime;
 
-use crate::types::{DecodedBundle, IndexableSystemBundle};
+use crate::types::{DecodedBundle, SystemBundle};
 
 /// Model representing clickhouse bundle row.
 #[derive(Clone, Row, Debug, serde::Serialize, serde::Deserialize)]
@@ -96,17 +96,19 @@ pub(crate) struct BundleRow {
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
-impl From<IndexableSystemBundle> for BundleRow {
-    fn from(indexable_bundle: IndexableSystemBundle) -> Self {
-        let IndexableSystemBundle { system_bundle: bundle, timestamp, builder_name } =
-            indexable_bundle;
+impl From<(SystemBundle, String)> for BundleRow {
+    fn from((bundle, builder_name): (SystemBundle, String)) -> Self {
         let DecodedBundle::Bundle(ref decoded) = bundle.decoded_bundle.as_ref() else {
             unreachable!("expecting decoded bundle")
         };
 
         let bundle = BundleRow {
             // Ensure microsecond accuracy
-            time: timestamp.replace_nanosecond(0).unwrap().into(),
+            time: bundle
+                .received_at
+                .replace_nanosecond(0)
+                .expect("to cancel nanosecond accuracy")
+                .into(),
             transactions_hash: decoded.txs.iter().map(|tx| format!("{:?}", tx.hash())).collect(),
             transactions_from: decoded.txs.iter().map(|tx| format!("{:?}", tx.signer())).collect(),
             transactions_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
@@ -153,20 +155,20 @@ impl From<IndexableSystemBundle> for BundleRow {
                 .txs
                 .iter()
                 .map(|tx| {
-                    tx.as_ref()
-                        .access_list()
-                        .as_ref()
-                        .map(|access_list| serde_json::to_string(&access_list).unwrap())
+                    tx.as_ref().access_list().as_ref().map(|access_list| {
+                        serde_json::to_string(&access_list)
+                            .expect("serde_json serialization doesn't fail")
+                    })
                 })
                 .collect(),
             transactions_authorization_list: decoded
                 .txs
                 .iter()
                 .map(|tx| {
-                    tx.as_ref()
-                        .authorization_list()
-                        .as_ref()
-                        .map(|access_list| serde_json::to_string(&access_list).unwrap())
+                    tx.as_ref().authorization_list().as_ref().map(|access_list| {
+                        serde_json::to_string(&access_list)
+                            .expect("serde_json serialization doesn't fail")
+                    })
                 })
                 .collect(),
             block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
@@ -272,11 +274,10 @@ pub(crate) mod tests {
     use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Encodable2718};
     use alloy_primitives::{hex, Address, Bytes, FixedBytes, Signature, TxKind, B256, U256, U64};
     use rbuilder_primitives::serialize::RawBundle;
-    use time::UtcDateTime;
 
     use crate::{
         indexer::{self, models::BundleRow},
-        types::{IndexableSystemBundle, SystemBundle},
+        types::SystemBundle,
     };
 
     /// Decodes the hex string to the provided number of bytes.
@@ -518,12 +519,8 @@ pub(crate) mod tests {
 
     #[test]
     fn clickhouse_bundle_row_conversion_round_trip_works() {
-        let indexable_bundle = IndexableSystemBundle {
-            system_bundle: indexer::tests::system_bundle_example(),
-            timestamp: UtcDateTime::now(),
-            builder_name: String::from("buildernet"),
-        };
-        let bundle_row: BundleRow = indexable_bundle.clone().into();
+        let system_bundle = indexer::tests::system_bundle_example();
+        let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
         let signer = decode_bytes(bundle_row.signer_address.as_ref().unwrap()).into();
 
         let mut raw_bundle_round_trip: RawBundle = bundle_row.into();
@@ -531,13 +528,14 @@ pub(crate) mod tests {
         // value saved from the bundle saved in db.
         raw_bundle_round_trip.signing_address = None;
 
-        assert_eq!(
-            indexable_bundle.system_bundle.raw_bundle,
-            Arc::new(raw_bundle_round_trip.clone())
-        );
-        let system_bundle_round_trip =
-            SystemBundle::try_from_bundle_and_signer(raw_bundle_round_trip, signer).unwrap();
+        assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
+        let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
+            raw_bundle_round_trip,
+            signer,
+            system_bundle.received_at,
+        )
+        .unwrap();
 
-        assert_eq!(indexable_bundle.system_bundle, system_bundle_round_trip);
+        assert_eq!(system_bundle, system_bundle_round_trip);
     }
 }
