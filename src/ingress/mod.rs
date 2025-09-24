@@ -391,8 +391,7 @@ impl OrderflowIngress {
 
         debug!(target: "ingress", bundle_uuid = %uuid, bundle_hash = %bundle_hash, "Bundle processed");
 
-        // TODO: Return bundle UUID or hash or both?
-        Ok(todo!("Return bundle UUID or hash or both?"))
+        Ok(bundle_hash)
     }
 
     async fn send_raw_transaction(
@@ -406,17 +405,6 @@ impl OrderflowIngress {
         // Deduplicate transactions.
         if self.order_cache.contains(&tx_hash) {
             trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
-            return Ok(tx_hash);
-        }
-
-        self.order_cache.insert(tx_hash);
-
-        let Entity::Signer(signer) = entity else { unreachable!() };
-        let transaction = SystemTransaction::from_transaction_and_signer(transaction, signer);
-
-        let unique_key = transaction.unique_key();
-        if self.order_cache.contains(unique_key) {
-            trace!(target: "ingress", unique_key = %unique_key, "Transaction already processed");
             return Ok(tx_hash);
         }
 
