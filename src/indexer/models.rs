@@ -1,5 +1,6 @@
 //! Contains the model used for storing data inside Clickhouse.
 
+use crate::indexer::serde::{deserialize_vec_u256, serialize_vec_u256};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::U256;
@@ -26,10 +27,18 @@ pub(crate) struct BundleRow {
     #[serde(rename = "transactions.nonce")]
     pub transactions_nonce: Vec<u64>,
     /// Collection of signature `r` values for transactions in the bundle.
-    #[serde(rename = "transactions.r")]
+    #[serde(
+        rename = "transactions.r",
+        serialize_with = "serialize_vec_u256",
+        deserialize_with = "deserialize_vec_u256"
+    )]
     pub transactions_r: Vec<U256>,
     /// Collection of signature `s` values for transactions in the bundle.
-    #[serde(rename = "transactions.s")]
+    #[serde(
+        rename = "transactions.s",
+        serialize_with = "serialize_vec_u256",
+        deserialize_with = "deserialize_vec_u256"
+    )]
     pub transactions_s: Vec<U256>,
     /// Collection of signature `v` values for transactions in the bundle.
     #[serde(rename = "transactions.v")]
@@ -47,7 +56,11 @@ pub(crate) struct BundleRow {
     #[serde(rename = "transactions.input")]
     pub transactions_input: Vec<String>,
     /// Collection of values for transactions in the bundle.
-    #[serde(rename = "transactions.value")]
+    #[serde(
+        rename = "transactions.value",
+        serialize_with = "serialize_vec_u256",
+        deserialize_with = "deserialize_vec_u256"
+    )]
     pub transactions_value: Vec<U256>,
     /// Collection of gas prices for transactions in the bundle.
     #[serde(rename = "transactions.gasPrice")]
