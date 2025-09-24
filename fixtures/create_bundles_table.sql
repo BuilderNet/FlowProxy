@@ -1,6 +1,7 @@
 -- DDL to create a ClickHouse table for storing Ethereum bundles data.
 CREATE TABLE bundles (
   `time` DateTime64(6),
+  `timestamp` DateTime64(6) ALIAS time,
   `transactions.hash` Array(FixedString(66)),
   `transactions.from` Array(FixedString(42)),
   `transactions.nonce` Array(UInt64),
@@ -24,9 +25,10 @@ CREATE TABLE bundles (
 
   `reverting_tx_hashes` Array(FixedString(66)),
   `dropping_tx_hashes` Array(FixedString(66)),
-  `refund_tx_hashes` Nullable(Array(FixedString(66))),
+  `refund_tx_hashes` Array(FixedString(66)),
 
-  `uuid` Nullable(String),
+  `uuid` Nullable(UUID),
+  `replacement_uuid` Nullable(UUID),
   `replacement_nonce` Nullable(UInt64),
   `refund_percent` Nullable(UInt8),
   `refund_recipient` Nullable(FixedString(42)),
@@ -36,21 +38,21 @@ CREATE TABLE bundles (
   `builder_name` LowCardinality(String) COMMENT 'name of the endpoint, or IP if missing',
 
   `hash` FixedString(66),
-  `timestamp` DateTime64(6) ALIAS time,
+
+  -- For bundles: `uuid` should be set.
+  -- For replacement bundles with transactions: `uuid` and `replacement_uuid` should be set.
+  -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacement_uuid` should be set.
+  -- So this is the invariant we want to enforce:
+  CHECK (uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
 
   INDEX from_bloom_filter `transactions.from` TYPE bloom_filter GRANULARITY 10,
   INDEX transactions_hash_bloom_filter `transactions.hash` TYPE bloom_filter GRANULARITY 10,
   INDEX hash_bloom_filter hash TYPE bloom_filter GRANULARITY 10,
   INDEX uuid_bloom_filter uuid TYPE bloom_filter GRANULARITY 10,
-
-  CONSTRAINT valid_transactions_hashes CHECK arrayAll(x -> ((x LIKE '0x%') AND (lower(x) = x)), `transactions.hash`),
-  CONSTRAINT valid_transactions_from CHECK arrayAll(x -> ((x LIKE '0x%') AND (lower(x) = x)), `transactions.from`),
-  CONSTRAINT valid_transactions_input CHECK arrayAll(x -> ((x LIKE '0x%') AND (lower(x) = x)), `transactions.input`),
-  CONSTRAINT valid_refund_percent CHECK (refund_percent IS NULL) OR (refund_percent <= 100)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')
 PARTITION BY toYYYYMM(time)
-PRIMARY KEY (block_number, time)
-ORDER BY (block_number, time)
+PRIMARY KEY (time)
+ORDER BY (time)
 TTL toDateTime(time) + toIntervalMonth(1) RECOMPRESS CODEC(ZSTD(6))
 SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;

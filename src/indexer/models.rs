@@ -5,6 +5,7 @@ use alloy_eips::Typed2718;
 use alloy_primitives::U256;
 use clickhouse_derive::Row;
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 use crate::types::{DecodedBundle, SystemBundle};
 
@@ -76,10 +77,14 @@ pub(crate) struct BundleRow {
     /// Collection of dropping transaction hashes.
     pub dropping_tx_hashes: Vec<String>,
     /// Collection of refund transaction hashes.
-    pub refund_tx_hashes: Option<Vec<String>>,
+    pub refund_tx_hashes: Vec<String>,
 
     /// Bundle uuid.
-    pub uuid: Option<String>,
+    #[serde(with = "clickhouse::serde::uuid::option")]
+    pub uuid: Option<Uuid>,
+    /// Replacement bundle uuid.
+    #[serde(with = "clickhouse::serde::uuid::option")]
+    pub replacement_uuid: Option<Uuid>,
     pub replacement_nonce: Option<u64>,
     /// Bundle refund percent.
     pub refund_percent: Option<u8>,
@@ -100,119 +105,196 @@ pub(crate) struct BundleRow {
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
 impl From<(SystemBundle, String)> for BundleRow {
     fn from((bundle, builder_name): (SystemBundle, String)) -> Self {
-        let DecodedBundle::Bundle(ref decoded) = bundle.decoded_bundle.as_ref() else {
-            unreachable!("expecting decoded bundle")
+        let bundle_row = match bundle.decoded_bundle.as_ref() {
+            DecodedBundle::Bundle(ref decoded) => {
+                BundleRow {
+                    // Ensure microsecond accuracy
+                    time: bundle
+                        .received_at
+                        .replace_nanosecond(0)
+                        .expect("to cancel nanosecond accuracy")
+                        .into(),
+                    transactions_hash: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| format!("{:?}", tx.hash()))
+                        .collect(),
+                    transactions_from: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| format!("{:?}", tx.signer()))
+                        .collect(),
+                    transactions_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
+                    transactions_r: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.as_ref().signature().r())
+                        .collect(),
+                    transactions_s: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.as_ref().signature().s())
+                        .collect(),
+                    transactions_v: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.as_ref().signature().v().into())
+                        .collect(),
+                    transactions_to: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.to().map(|t| format!("{t:?}")))
+                        .collect(),
+                    transactions_gas: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.as_ref().gas_limit())
+                        .collect(),
+                    transactions_type: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.as_ref().tx_type() as u64)
+                        .collect(),
+                    transactions_input: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| alloy_primitives::hex::encode_prefixed(tx.as_ref().input()))
+                        .collect(),
+                    transactions_value: decoded.txs.iter().map(|tx| tx.value()).collect(),
+                    transactions_gas_price: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| tx.as_ref().gas_price())
+                        .collect(),
+                    transactions_max_fee_per_gas: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| {
+                            if tx.is_legacy() {
+                                None
+                            } else {
+                                Some(tx.as_ref().max_fee_per_gas())
+                            }
+                        })
+                        .collect(),
+                    transactions_max_priority_fee_per_gas: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| {
+                            if tx.is_legacy() {
+                                None
+                            } else {
+                                tx.as_ref().max_priority_fee_per_gas()
+                            }
+                        })
+                        .collect(),
+                    transactions_access_list: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| {
+                            tx.as_ref().access_list().as_ref().map(|access_list| {
+                                serde_json::to_string(&access_list)
+                                    .expect("serde_json serialization doesn't fail")
+                            })
+                        })
+                        .collect(),
+                    transactions_authorization_list: decoded
+                        .txs
+                        .iter()
+                        .map(|tx| {
+                            tx.as_ref().authorization_list().as_ref().map(|access_list| {
+                                serde_json::to_string(&access_list)
+                                    .expect("serde_json serialization doesn't fail")
+                            })
+                        })
+                        .collect(),
+                    block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
+                    min_timestamp: bundle.raw_bundle.min_timestamp,
+                    max_timestamp: bundle.raw_bundle.max_timestamp,
+                    reverting_tx_hashes: bundle
+                        .raw_bundle
+                        .reverting_tx_hashes
+                        .clone()
+                        .iter()
+                        .map(|h| format!("{h:?}"))
+                        .collect(),
+                    dropping_tx_hashes: bundle
+                        .raw_bundle
+                        .dropping_tx_hashes
+                        .clone()
+                        .iter()
+                        .map(|h| format!("{h:?}"))
+                        .collect(),
+                    refund_tx_hashes: bundle
+                        .raw_bundle
+                        .refund_tx_hashes
+                        .clone()
+                        .map(|v| v.iter().map(|h| format!("{h:?}")).collect())
+                        .unwrap_or_default(),
+                    // Decoded bundles always have a uuid.
+                    uuid: Some(decoded.uuid),
+                    replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
+                    replacement_nonce: bundle.raw_bundle.replacement_nonce,
+                    signer_address: Some(format!("{:?}", bundle.signer)),
+                    builder_name,
+                    refund_percent: bundle.raw_bundle.refund_percent,
+                    refund_recipient: bundle
+                        .raw_bundle
+                        .refund_recipient
+                        .map(|recipient| format!("{recipient:x}")),
+                    refund_identity: None,
+                    hash: format!("{:?}", decoded.hash),
+                }
+            }
+            // This is in particular a cancellation bundle i.e. a replacement bundle with no
+            // transactions.
+            DecodedBundle::Replacement(ref replacement) => {
+                BundleRow {
+                    time: bundle
+                        .received_at
+                        .replace_nanosecond(0)
+                        .expect("to cancel nanosecond accuracy")
+                        .into(),
+                    transactions_hash: Vec::new(),
+                    transactions_from: Vec::new(),
+                    transactions_nonce: Vec::new(),
+                    transactions_r: Vec::new(),
+                    transactions_s: Vec::new(),
+                    transactions_v: Vec::new(),
+                    transactions_to: Vec::new(),
+                    transactions_gas: Vec::new(),
+                    transactions_type: Vec::new(),
+                    transactions_input: Vec::new(),
+                    transactions_value: Vec::new(),
+                    transactions_gas_price: Vec::new(),
+                    transactions_max_fee_per_gas: Vec::new(),
+                    transactions_max_priority_fee_per_gas: Vec::new(),
+                    transactions_access_list: Vec::new(),
+                    transactions_authorization_list: Vec::new(),
+                    block_number: None,
+                    min_timestamp: None,
+                    max_timestamp: None,
+                    reverting_tx_hashes: Vec::new(),
+                    dropping_tx_hashes: Vec::new(),
+                    refund_tx_hashes: Vec::new(),
+                    // Cancellation bundles don't have the uuid set.
+                    uuid: None,
+                    replacement_uuid: Some(replacement.key.key().id),
+                    replacement_nonce: bundle.raw_bundle.replacement_nonce,
+                    signer_address: Some(format!("{:?}", bundle.signer)),
+                    builder_name,
+                    refund_percent: bundle.raw_bundle.refund_percent,
+                    refund_recipient: bundle
+                        .raw_bundle
+                        .refund_recipient
+                        .map(|recipient| format!("{recipient:x}")),
+                    refund_identity: None,
+                    hash: format!("{:?}", bundle.bundle_hash), // always lowercase
+                }
+            }
         };
 
-        let bundle = BundleRow {
-            // Ensure microsecond accuracy
-            time: bundle
-                .received_at
-                .replace_nanosecond(0)
-                .expect("to cancel nanosecond accuracy")
-                .into(),
-            transactions_hash: decoded.txs.iter().map(|tx| format!("{:?}", tx.hash())).collect(),
-            transactions_from: decoded.txs.iter().map(|tx| format!("{:?}", tx.signer())).collect(),
-            transactions_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
-            transactions_r: decoded.txs.iter().map(|tx| tx.as_ref().signature().r()).collect(),
-            transactions_s: decoded.txs.iter().map(|tx| tx.as_ref().signature().s()).collect(),
-            transactions_v: decoded
-                .txs
-                .iter()
-                .map(|tx| tx.as_ref().signature().v().into())
-                .collect(),
-            transactions_to: decoded
-                .txs
-                .iter()
-                .map(|tx| tx.to().map(|t| format!("{t:?}")))
-                .collect(),
-            transactions_gas: decoded.txs.iter().map(|tx| tx.as_ref().gas_limit()).collect(),
-            transactions_type: decoded.txs.iter().map(|tx| tx.as_ref().tx_type() as u64).collect(),
-            transactions_input: decoded
-                .txs
-                .iter()
-                .map(|tx| alloy_primitives::hex::encode_prefixed(tx.as_ref().input()))
-                .collect(),
-            transactions_value: decoded.txs.iter().map(|tx| tx.value()).collect(),
-            transactions_gas_price: decoded.txs.iter().map(|tx| tx.as_ref().gas_price()).collect(),
-            transactions_max_fee_per_gas: decoded
-                .txs
-                .iter()
-                .map(|tx| if tx.is_legacy() { None } else { Some(tx.as_ref().max_fee_per_gas()) })
-                .collect(),
-            transactions_max_priority_fee_per_gas: decoded
-                .txs
-                .iter()
-                .map(
-                    |tx| {
-                        if tx.is_legacy() {
-                            None
-                        } else {
-                            tx.as_ref().max_priority_fee_per_gas()
-                        }
-                    },
-                )
-                .collect(),
-            transactions_access_list: decoded
-                .txs
-                .iter()
-                .map(|tx| {
-                    tx.as_ref().access_list().as_ref().map(|access_list| {
-                        serde_json::to_string(&access_list)
-                            .expect("serde_json serialization doesn't fail")
-                    })
-                })
-                .collect(),
-            transactions_authorization_list: decoded
-                .txs
-                .iter()
-                .map(|tx| {
-                    tx.as_ref().authorization_list().as_ref().map(|access_list| {
-                        serde_json::to_string(&access_list)
-                            .expect("serde_json serialization doesn't fail")
-                    })
-                })
-                .collect(),
-            block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
-            min_timestamp: bundle.raw_bundle.min_timestamp,
-            max_timestamp: bundle.raw_bundle.max_timestamp,
-            reverting_tx_hashes: bundle
-                .raw_bundle
-                .reverting_tx_hashes
-                .clone()
-                .iter()
-                .map(|h| format!("{h:?}"))
-                .collect(),
-            dropping_tx_hashes: bundle
-                .raw_bundle
-                .dropping_tx_hashes
-                .clone()
-                .iter()
-                .map(|h| format!("{h:?}"))
-                .collect(),
-            refund_tx_hashes: bundle
-                .raw_bundle
-                .refund_tx_hashes
-                .clone()
-                .map(|v| v.iter().map(|h| format!("{h:?}")).collect()),
-            uuid: bundle
-                .raw_bundle
-                .replacement_uuid
-                .or(bundle.raw_bundle.uuid)
-                .map(|u| u.to_string()),
-            replacement_nonce: bundle.raw_bundle.replacement_nonce,
-            signer_address: Some(format!("{:?}", bundle.signer)),
-            builder_name,
-            refund_percent: bundle.raw_bundle.refund_percent,
-            refund_recipient: bundle
-                .raw_bundle
-                .refund_recipient
-                .map(|recipient| format!("{recipient:x}")),
-            refund_identity: None,
-            hash: format!("{:?}", decoded.hash), // always lowercase
-        };
-
-        bundle
+        bundle_row
     }
 }
 
@@ -328,11 +410,14 @@ pub(crate) mod tests {
                     .iter()
                     .map(|h| decode_bytes(h))
                     .collect(),
-                refund_tx_hashes: value
-                    .refund_tx_hashes
-                    .map(|v| v.iter().map(|h| decode_bytes(h)).collect()),
-                uuid: value.uuid.and_then(|u| uuid::Uuid::parse_str(&u).ok()),
-                replacement_uuid: None,
+                // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it was
+                // written, because in Clickhouse we cannot have `Nullable(Array(T))`.
+                refund_tx_hashes: Some(
+                    value.refund_tx_hashes.iter().map(|h| decode_bytes(h)).collect(),
+                ),
+                // NOTE: we'll always consider this unset, and set the `replacement_uuid` instead.
+                uuid: None,
+                replacement_uuid: value.replacement_uuid,
                 replacement_nonce: value.replacement_nonce,
                 refund_percent: value.refund_percent,
                 refund_recipient: value.refund_recipient.map(|r| decode_bytes(&r).into()),
@@ -529,6 +614,25 @@ pub(crate) mod tests {
         // For this bundle in particular, ensure it set to `None`, and don't populate it with the
         // value saved from the bundle saved in db.
         raw_bundle_round_trip.signing_address = None;
+
+        assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
+        let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
+            raw_bundle_round_trip,
+            signer,
+            system_bundle.received_at,
+        )
+        .unwrap();
+
+        assert_eq!(system_bundle, system_bundle_round_trip);
+    }
+
+    #[test]
+    fn clickhouse_cancel_bundle_row_conversion_round_trip_works() {
+        let system_bundle = indexer::tests::system_cancel_bundle_example();
+        let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
+        let signer = decode_bytes(bundle_row.signer_address.as_ref().unwrap()).into();
+
+        let raw_bundle_round_trip: RawBundle = bundle_row.into();
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
         let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
