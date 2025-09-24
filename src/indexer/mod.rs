@@ -59,7 +59,7 @@ impl Debug for ClickhouseIndexer {
 
 impl ClickhouseIndexer {
     /// Create and spawn a new Clickhouse indexer task, returning the indexer handle and its
-    /// task hanndle.
+    /// task handle.
     pub fn spawn(
         args: Option<ClickhouseArgs>,
         builder_name: String,

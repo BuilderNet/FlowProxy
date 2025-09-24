@@ -112,7 +112,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     time: bundle
                         .received_at
                         .replace_nanosecond(0)
-                        .expect("to cancel nanosecond accuracy")
+                        .expect("to set nanoseconds to zero for microsecond precision")
                         .into(),
                     transactions_hash: decoded
                         .txs
@@ -253,7 +253,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     time: bundle
                         .received_at
                         .replace_nanosecond(0)
-                        .expect("to cancel nanosecond accuracy")
+                        .expect("to set nanoseconds to zero for microsecond precision")
                         .into(),
                     transactions_hash: Vec::new(),
                     transactions_from: Vec::new(),
@@ -482,7 +482,7 @@ pub(crate) mod tests {
                 0 => {
                     // Legacy transaction
                     let tx = TxLegacy {
-                        chain_id: None, // Will be derived from signature
+                        chain_id: Some(1),
                         nonce: transactions_nonce[i],
                         gas_price: transactions_gas_price[i].unwrap_or(0),
                         gas_limit: transactions_gas[i],
@@ -499,7 +499,7 @@ pub(crate) mod tests {
                 1 => {
                     // EIP-2930 transaction
                     let tx = TxEip2930 {
-                        chain_id: 1, // You may need to extract this from context
+                        chain_id: 1,
                         nonce: transactions_nonce[i],
                         gas_price: transactions_gas_price[i].unwrap_or(0),
                         gas_limit: transactions_gas[i],
@@ -517,7 +517,7 @@ pub(crate) mod tests {
                 2 => {
                     // EIP-1559 transaction
                     let tx = TxEip1559 {
-                        chain_id: 1, // You may need to extract this from context
+                        chain_id: 1,
                         nonce: transactions_nonce[i],
                         max_fee_per_gas: transactions_max_fee_per_gas[i].unwrap_or(0),
                         max_priority_fee_per_gas: transactions_max_priority_fee_per_gas[i]
@@ -554,8 +554,8 @@ pub(crate) mod tests {
                         value: transactions_value[i],
                         input,
                         access_list,
-                        blob_versioned_hashes: Vec::new(), // You'll need to extract this
-                        max_fee_per_blob_gas: 0,           // You'll need to extract this
+                        blob_versioned_hashes: Vec::new(),
+                        max_fee_per_blob_gas: 0,
                     };
                     TxEnvelope::Eip4844(Signed::new_unchecked(
                         TxEip4844Variant::TxEip4844(tx),
