@@ -159,8 +159,8 @@ impl LocalPeerStore {
 impl PeerStore for LocalPeerStore {
     async fn get_peers(&self) -> eyre::Result<Vec<BuilderHubBuilder>> {
         let mut builders = Vec::new();
-        let mut iter = self.db.iterator(rocksdb::IteratorMode::Start);
-        while let Some(result) = iter.next() {
+        let iter = self.db.iterator(rocksdb::IteratorMode::Start);
+        for result in iter {
             let (_, value) = result?;
             let builder = serde_json::from_slice(&value)?;
             builders.push(builder);
