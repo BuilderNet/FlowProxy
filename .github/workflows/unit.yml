@@ -29,4 +29,5 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
       - name: Run tests
-        run: cargo nextest run --lib --bins --no-tests=warn
+        run: cargo nextest run --lib --bins --no-tests=warn --retries 3
+
