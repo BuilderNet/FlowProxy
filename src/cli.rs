@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Parser, ValueHint};
 
@@ -23,8 +25,12 @@ pub struct OrderflowIngressArgs {
     pub builder_url: String,
 
     /// The URL of BuilderHub.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, conflicts_with = "peer_store_path")]
     pub builder_hub_url: Option<String>,
+
+    /// The path to the local peer store.
+    #[clap(long, value_hint = ValueHint::DirPath, conflicts_with = "builder_hub_url")]
+    pub peer_store_path: Option<PathBuf>,
 
     /// Enable Prometheus metrics.
     /// The metrics will be served at the given interface and port.
@@ -80,6 +86,7 @@ impl Default for OrderflowIngressArgs {
             builder_listen_url: String::from("127.0.0.1:0"),
             builder_url: String::from("http://127.0.0.1:8545"),
             builder_hub_url: None,
+            peer_store_path: None,
             metrics: None,
             orderflow_signer: None,
             max_request_size: MAX_REQUEST_SIZE_BYTES,

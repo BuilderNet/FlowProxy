@@ -25,7 +25,11 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{builderhub::PeerStore, cache::OrderCache, ingress::OrderflowIngressMetrics};
+use crate::{
+    builderhub::{LocalPeerStore, PeerStore},
+    cache::OrderCache,
+    ingress::OrderflowIngressMetrics,
+};
 
 pub mod builderhub;
 mod cache;
@@ -86,16 +90,25 @@ pub async fn run_with_listeners(
             let peers = peers.clone();
             async move { run_update_peers(local_signer, builder_hub, peers).await }
         });
-    } else {
-        warn!("No BuilderHub URL provided, running with local peer store");
-        let local_peer_store = utils::LOCAL_PEER_STORE.clone();
+    } else if let Some(peer_store_path) = args.peer_store_path {
+        info!(path = %peer_store_path.display(), "Running with local peer store");
+        let local_peer_store = LocalPeerStore::new(peer_store_path);
 
-        let peer_store =
-            local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
+        local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()))?;
 
         tokio::spawn({
             let peers = peers.clone();
-            async move { run_update_peers(local_signer, peer_store, peers).await }
+            async move { run_update_peers(local_signer, local_peer_store, peers).await }
+        });
+    } else {
+        let local_peer_store = utils::LOCAL_PEER_STORE.clone();
+        warn!(path = %local_peer_store.path().display(), "No BuilderHub URL provided, running with local peer store");
+
+        local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()))?;
+
+        tokio::spawn({
+            let peers = peers.clone();
+            async move { run_update_peers(local_signer, local_peer_store, peers).await }
         });
     }
 

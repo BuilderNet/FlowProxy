@@ -1,9 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use dashmap::DashMap;
 use revm_primitives::Address;
 use serde::{Deserialize, Serialize};
 use tracing::error;
+use uuid::Uuid;
 
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubOrderflowProxyCredentials {
@@ -82,35 +82,93 @@ impl PeerStore for BuilderHub {
 
 #[derive(Debug, Clone)]
 pub struct LocalPeerStore {
-    pub(crate) builders: Arc<DashMap<String, BuilderHubBuilder>>,
+    pub(crate) db: Arc<rocksdb::DB>,
+    tmp: bool,
+}
+
+impl Drop for LocalPeerStore {
+    fn drop(&mut self) {
+        if self.tmp {
+            let path = self.db.path();
+
+            // NOTE: If this is a shared database, this may panic if the directory is already
+            // destroyed.
+            let _ = std::fs::remove_dir_all(path);
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PeerStoreError {
+    #[error(transparent)]
+    Rocksdb(#[from] rocksdb::Error),
+    #[error(transparent)]
+    Serde(#[from] serde_json::Error),
 }
 
 impl LocalPeerStore {
-    pub(crate) fn new() -> Self {
-        Self { builders: Arc::new(DashMap::new()) }
+    /// Create a new local peer store in the given directory. The directory will be created if it
+    /// doesn't exist. If the directory is a temporary directory, the database will be destroyed
+    /// when the store is dropped.
+    pub(crate) fn new(path: PathBuf) -> Self {
+        // Create the directory if it doesn't exist.
+        if !path.exists() {
+            std::fs::create_dir_all(&path).unwrap();
+        }
+
+        let tmp = path.starts_with(std::env::temp_dir());
+
+        println!("path: {}", path.display());
+        println!("tmp: {}", tmp);
+
+        let db = rocksdb::DB::open_default(path).unwrap().into();
+        Self { db, tmp }
     }
 
-    pub fn register(&self, signer_address: Address, port: Option<u16>) -> LocalPeerStore {
-        self.builders.insert(
-            signer_address.to_string(),
-            BuilderHubBuilder {
-                name: signer_address.to_string(),
-                ip: format!("http://127.0.0.1:{}", port.unwrap()),
-                dns_name: "localhost".to_string(),
-                orderflow_proxy: BuilderHubOrderflowProxyCredentials {
-                    tls_cert: None,
-                    ecdsa_pubkey_address: signer_address,
-                },
-                instance: BuilderHubInstanceData { tls_cert: "".to_string() },
-            },
-        );
+    /// Create a new local peer store in random, temporary directory.
+    pub(crate) fn new_temp() -> Self {
+        let path =
+            std::env::temp_dir().join(format!("buildernet-orderflow-proxy-{}", Uuid::new_v4()));
+        Self::new(path)
+    }
 
-        LocalPeerStore { builders: self.builders.clone() }
+    /// Get the path of the local peer store.
+    pub(crate) fn path(&self) -> PathBuf {
+        self.db.path().to_path_buf()
+    }
+
+    pub fn register(
+        &self,
+        signer_address: Address,
+        port: Option<u16>,
+    ) -> Result<(), PeerStoreError> {
+        let builder = BuilderHubBuilder {
+            name: signer_address.to_string(),
+            ip: format!("http://127.0.0.1:{}", port.unwrap()),
+            dns_name: "localhost".to_string(),
+            orderflow_proxy: BuilderHubOrderflowProxyCredentials {
+                tls_cert: None,
+                ecdsa_pubkey_address: signer_address,
+            },
+            instance: BuilderHubInstanceData { tls_cert: "".to_string() },
+        };
+
+        self.db.put(signer_address.to_string(), serde_json::to_vec(&builder)?)?;
+
+        Ok(())
     }
 }
 
 impl PeerStore for LocalPeerStore {
     async fn get_peers(&self) -> eyre::Result<Vec<BuilderHubBuilder>> {
-        Ok(self.builders.iter().map(|b| b.value().clone()).collect())
+        let mut builders = Vec::new();
+        let mut iter = self.db.iterator(rocksdb::IteratorMode::Start);
+        while let Some(result) = iter.next() {
+            let (_, value) = result?;
+            let builder = serde_json::from_slice(&value)?;
+            builders.push(builder);
+        }
+
+        Ok(builders)
     }
 }

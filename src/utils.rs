@@ -23,7 +23,7 @@ pub fn clamp_to_duration_bucket(time: Instant, duration: Duration) -> Instant {
     *START + clamped_duration
 }
 
-pub static LOCAL_PEER_STORE: LazyLock<LocalPeerStore> = LazyLock::new(LocalPeerStore::new);
+pub static LOCAL_PEER_STORE: LazyLock<LocalPeerStore> = LazyLock::new(LocalPeerStore::new_temp);
 
 pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
     // For full check we could call TransactionSigned::decode_enveloped and fully try to decode it

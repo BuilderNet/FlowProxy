@@ -22,10 +22,10 @@ rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder.git", rev =
 
 # rt
 tokio = { version = "1", default-features = false, features = [
-    "sync",
-    "time",
-    "rt-multi-thread",
-    "macros",
+  "sync",
+  "time",
+  "rt-multi-thread",
+  "macros"
 ] }
 futures = "0.3"
 
@@ -39,16 +39,16 @@ metrics-derive = "0.1"
 metrics-process = "2.4.0"
 metrics-util = "0.20.0"
 metrics-exporter-prometheus = { version = "0.17.2", default-features = false, features = [
-    "http-listener",
+  "http-listener"
 ] }
 
 # misc
 hyper = "1.7"
 axum = { version = "0.8", default-features = false, features = [
-    "http1",
-    "json",
-    "tokio",
-    "tracing",
+  "http1",
+  "json",
+  "tokio",
+  "tracing"
 ] }
 wyhash = "0.6.0"
 mime = "0.3"
@@ -64,6 +64,7 @@ reqwest = { version = "0.12", features = ["json"] }
 strum = "0.27"
 strum_macros = "0.27"
 mini-moka = "0.10.3"
+rocksdb = "0.24.0"
 
 # Manually override cc version (conflict between alloy-consensus and rbuilder)
 cc = "=1.2.15"
