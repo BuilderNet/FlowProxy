@@ -181,6 +181,18 @@ pub(crate) mod tests {
     "refundTxHashes": ["0x0000000000000000000000000000000000000000000000000000000000000000"]
 }"#;
 
+    /// An example replacement bundle with no transactions, a.k.a. a cancel bundle.
+    ///
+    /// NOTE: we populate refndTxHashes with an empty hash to satisfy the schema, which doesn't
+    /// accept `Nullable(Array(String))`.
+    const TEST_CANCEL_BUNDLE: &str = r#"{
+    "txs": [],
+    "replacementUuid": "bcf24b5c-a8f8-4174-a1ad-f7521f3bd70c",
+    "replacementNonce": 1,
+    "signingAddress": "0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c",
+    "refundTxHashes": []
+}"#;
+
     #[derive(From, Into, Deref, DerefMut)]
     struct MockClickhouseClient {
         #[deref]
@@ -227,6 +239,14 @@ pub(crate) mod tests {
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
+    /// An example cancel bundle to use for testing.
+    pub(crate) fn system_cancel_bundle_example() -> SystemBundle {
+        let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
+        let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
+        let received_at = UtcDateTime::now();
+        SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
+    }
+
     // NOTE: when working with the mocked clickhouse client, every request must have a
     // corresponding handler before it's executed, otherwise it will panic.
     //
@@ -262,6 +282,45 @@ pub(crate) mod tests {
         };
 
         let system_bundle = system_bundle_example();
+
+        let expected_bundle_rows =
+            vec![BundleRow::from((system_bundle.clone(), indexer.builder_name.clone()))];
+
+        // Test logic
+
+        // Add handler for the next INSERT request.
+        let recording = client.mock.add(clickhouse::test::handlers::record());
+
+        tokio::spawn(indexer.run());
+        handle.index_bundle(system_bundle);
+
+        let recording_rows: Vec<BundleRow> = recording.collect().await;
+        assert_eq!(expected_bundle_rows, recording_rows);
+    }
+
+    /// Adapated from <https://github.com/ClickHouse/clickhouse-rs/blob/v0.13.3/examples/mock.rs>
+    #[tokio::test]
+    async fn clickhouse_bundles_insert_single_cancel_bundle_row_succeeds() {
+        // Scaffolding
+
+        let client = MockClickhouseClient::new();
+        client.create_bundles_table().await.unwrap();
+
+        let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let handle = IndexerHandle { bundle_tx: tx };
+        let bundle_inserter = client
+            .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
+            .expect("in 0.13.3, this never returns Err")
+            .with_max_rows(0); // force commit immediately
+
+        let indexer = ClickhouseIndexer {
+            bundle_rx: rx,
+            client: client.inner.clone(),
+            bundle_inserter,
+            builder_name: "buildernet".to_string(),
+        };
+
+        let system_bundle = system_cancel_bundle_example();
 
         let expected_bundle_rows =
             vec![BundleRow::from((system_bundle.clone(), indexer.builder_name.clone()))];
