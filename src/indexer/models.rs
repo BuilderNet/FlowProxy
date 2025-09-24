@@ -1,3 +1,5 @@
+//! Contains the model used for storing data inside Clickhouse.
+
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::U256;
@@ -6,7 +8,7 @@ use time::OffsetDateTime;
 
 use crate::types::{DecodedBundle, SystemBundle};
 
-/// Model representing clickhouse bundle row.
+/// Model representing Clickhouse bundle row.
 #[derive(Clone, Row, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleRow {

@@ -2,7 +2,7 @@ use crate::{
     cache::OrderCache,
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
-    indexer::{BundleIndexer, ClickhouseIndexerHandle},
+    indexer::{BundleIndexer, IndexerHandle},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
@@ -75,7 +75,7 @@ pub struct OrderflowIngress {
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
     pub metrics: OrderflowIngressMetrics,
-    pub indexer_handle: ClickhouseIndexerHandle,
+    pub indexer_handle: IndexerHandle,
 }
 
 impl OrderflowIngress {
