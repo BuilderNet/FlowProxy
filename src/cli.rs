@@ -62,6 +62,14 @@ pub struct OrderflowIngressArgs {
     /// Flag indicating whether GZIP support is enabled.
     #[clap(long = "http.enable-gzip")]
     pub gzip_enabled: bool,
+
+    /// The order cache TTL in seconds.
+    #[clap(long = "cache.ttl", default_value_t = 12)]
+    pub cache_ttl: u64,
+
+    /// The order cache size.
+    #[clap(long = "cache.size", default_value_t = 4096)]
+    pub cache_size: u64,
 }
 
 impl Default for OrderflowIngressArgs {
@@ -81,6 +89,8 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
+            cache_ttl: 60,
+            cache_size: 4096,
         }
     }
 }

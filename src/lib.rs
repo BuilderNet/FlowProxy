@@ -25,9 +25,10 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{builderhub::PeerStore, ingress::OrderflowIngressMetrics};
+use crate::{builderhub::PeerStore, cache::OrderCache, ingress::OrderflowIngressMetrics};
 
 pub mod builderhub;
+mod cache;
 pub mod entity;
 pub mod forwarder;
 pub mod jsonrpc;
@@ -103,6 +104,8 @@ pub async fn run_with_listeners(
         spawn_forwarder(String::from("local-builder"), args.builder_url, client.clone())?;
     let forwarders = IngressForwarders::new(local_sender, peers, orderflow_signer);
 
+    let order_cache = OrderCache::new(args.cache_ttl, args.cache_size);
+
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
         rate_limit_lookback_s: args.rate_limit_lookback_s,
@@ -112,6 +115,7 @@ pub async fn run_with_listeners(
         spam_thresholds: SpamThresholds::default(),
         pqueues: Default::default(),
         entities: DashMap::default(),
+        order_cache,
         forwarders,
         local_builder_url: Some(builder_url),
         metrics: OrderflowIngressMetrics::default(),
@@ -174,7 +178,7 @@ async fn run_update_peers(
             Err(error) => {
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
-                continue
+                continue;
             }
         };
 
