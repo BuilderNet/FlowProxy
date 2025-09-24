@@ -7,8 +7,8 @@ use crate::{
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
-        decode_transaction, BundleHash as _, DecodedBundle, EthResponse, IndexableSystemBundle,
-        SystemBundle, SystemTransaction,
+        decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
+        SystemTransaction,
     },
     validation::validate_transaction,
 };
@@ -74,7 +74,6 @@ pub struct OrderflowIngress {
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
-    pub local_builder_name: String,
     pub metrics: OrderflowIngressMetrics,
     pub indexer_handle: ClickhouseIndexerHandle,
 }
@@ -372,7 +371,7 @@ impl OrderflowIngress {
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
-                SystemBundle::try_from_bundle_and_signer(bundle, signer)
+                SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at)
             })
             .await?;
 
@@ -388,11 +387,7 @@ impl OrderflowIngress {
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
-        self.indexer_handle.index_bundle(IndexableSystemBundle {
-            system_bundle: bundle.clone(),
-            timestamp: received_at,
-            builder_name: self.local_builder_name.clone(),
-        });
+        self.indexer_handle.index_bundle(bundle.clone());
 
         self.send_bundle(priority, bundle).await
     }
