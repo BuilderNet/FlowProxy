@@ -1,5 +1,6 @@
 //! Clickhouse indexer of bundles.
 
+use std::fmt::Debug;
 use std::time::Duration;
 
 use clickhouse::{inserter::Inserter, Client as ClickhouseClient};
@@ -30,6 +31,17 @@ pub struct ClickhouseIndexer {
     pub(crate) bundle_rx: mpsc::Receiver<SystemBundle>,
     pub(crate) bundle_inserter: Inserter<BundleRow>,
     pub(crate) builder_name: String,
+}
+
+impl Debug for ClickhouseIndexer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClickhouseIndexer")
+            .field("client", &"ClickhouseClient")
+            .field("bundle_rx", &self.bundle_rx)
+            .field("bundle_inserter", &"Inserter")
+            .field("builder_name", &self.builder_name)
+            .finish()
+    }
 }
 
 impl ClickhouseIndexer {
