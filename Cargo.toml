@@ -63,6 +63,8 @@ flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
 reqwest = { version = "0.12", features = ["json"] }
 strum = "0.27"
 strum_macros = "0.27"
+mini-moka = "0.10.3"
+
 # Manually override cc version (conflict between alloy-consensus and rbuilder)
 cc = "=1.2.15"
 
