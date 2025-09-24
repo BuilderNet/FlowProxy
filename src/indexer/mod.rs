@@ -1,7 +1,7 @@
-//! Clickhouse indexer of bundles.
+//! Crate which contains structures and logic for indexing bundles and other types of data in to
+//! Clickhouse.
 
-use std::fmt::Debug;
-use std::time::Duration;
+use std::{fmt::Debug, time::Duration};
 
 use clickhouse::{inserter::Inserter, Client as ClickhouseClient};
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -11,25 +11,35 @@ use crate::{cli::ClickhouseArgs, indexer::models::BundleRow, types::SystemBundle
 
 mod models;
 
+/// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 4096;
+/// The name of the Clickhouse table to store bundles in.
 pub const BUNDLE_TABLE_NAME: &str = "bundles";
+/// The tracing target for this indexer crate.
 const TRACING_TARGET: &str = "indexer";
 
+/// Trait for adding bundle indexing functionality.
 pub trait BundleIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
 }
 
+/// An handle to the indexer, which mainly consists of channel senders to send data to be indexed.
 #[derive(Debug)]
-pub struct ClickhouseIndexerHandle {
+pub struct IndexerHandle {
     bundle_tx: mpsc::Sender<SystemBundle>,
 }
 
-#[allow(missing_debug_implementations)]
+/// The Clickhouse indexer implementation.
 pub struct ClickhouseIndexer {
+    /// The underlying Clickhouse client, used to create the Clickhouse `Inserter`.
     #[allow(dead_code)]
     pub(crate) client: ClickhouseClient,
-    pub(crate) bundle_rx: mpsc::Receiver<SystemBundle>,
+    /// A Clickhouse inserter which supports batching and periodic commits upon configurable
+    /// conditions.
     pub(crate) bundle_inserter: Inserter<BundleRow>,
+    /// The receiver half of the channel to receive bundles to index.
+    pub(crate) bundle_rx: mpsc::Receiver<SystemBundle>,
+    /// The name of the local builder, to store in the `builder_name` column.
     pub(crate) builder_name: String,
 }
 
@@ -45,12 +55,14 @@ impl Debug for ClickhouseIndexer {
 }
 
 impl ClickhouseIndexer {
+    /// Create and spawn a new Clickhouse indexer task, returning the indexer handle and its
+    /// task hanndle.
     pub fn spawn(
         args: Option<ClickhouseArgs>,
         builder_name: String,
-    ) -> (ClickhouseIndexerHandle, JoinHandle<()>) {
+    ) -> (IndexerHandle, JoinHandle<()>) {
         let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let handle = ClickhouseIndexerHandle { bundle_tx: tx };
+        let handle = IndexerHandle { bundle_tx: tx };
 
         let Some(args) = args else {
             info!("Running with mocked indexer");
@@ -83,6 +95,7 @@ impl ClickhouseIndexer {
         (handle, task_handle)
     }
 
+    /// Run the indexer until the receiving channel is closed.
     async fn run(mut self) {
         while let Some(system_bundle) = self.bundle_rx.recv().await {
             let bundle_row = (system_bundle, self.builder_name.clone()).into();
@@ -101,7 +114,9 @@ impl ClickhouseIndexer {
             //
             // TODO(thedevbirb): implement a file-based backup in case this call fails due to
             // connection timeouts or whatever.
-            let _ = self.bundle_inserter.commit().await;
+            if let Err(e) = self.bundle_inserter.commit().await {
+                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle to clickhouse");
+            }
         }
 
         tracing::error!(target: TRACING_TARGET, "bundle tx channel closed, indexer will stop running");
@@ -111,7 +126,7 @@ impl ClickhouseIndexer {
     }
 }
 
-impl BundleIndexer for ClickhouseIndexerHandle {
+impl BundleIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
@@ -119,6 +134,8 @@ impl BundleIndexer for ClickhouseIndexerHandle {
     }
 }
 
+/// A mock indexer which just receives bundles and does nothing with them. Useful for testing or
+/// for running without an indexer.
 #[derive(Debug)]
 pub struct MockIndexer {
     pub bundle_rx: mpsc::Receiver<SystemBundle>,
@@ -137,7 +154,7 @@ pub(crate) mod tests {
 
     use crate::{
         indexer::{
-            models::BundleRow, BundleIndexer, ClickhouseIndexer, ClickhouseIndexerHandle,
+            models::BundleRow, BundleIndexer, ClickhouseIndexer, IndexerHandle,
             BUNDLE_INDEXER_BUFFER_SIZE, BUNDLE_TABLE_NAME,
         },
         types::SystemBundle,
@@ -282,7 +299,7 @@ SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;"#;
         client.create_bundles_table().await.unwrap();
 
         let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let handle = ClickhouseIndexerHandle { bundle_tx: tx };
+        let handle = IndexerHandle { bundle_tx: tx };
         let bundle_inserter = client
             .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
             .expect("in 0.13.3, this never returns Err")
