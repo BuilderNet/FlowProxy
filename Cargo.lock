@@ -1779,6 +1779,7 @@ dependencies = [
  "metrics-process",
  "metrics-util 0.20.0",
  "mime",
+ "mini-moka",
  "rbuilder-primitives",
  "reqwest",
  "revm-interpreter",
