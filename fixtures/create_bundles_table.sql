@@ -7,9 +7,9 @@ CREATE TABLE bundles (
   `transactions.nonce` Array(UInt64),
   `transactions.r` Array(UInt256),
   `transactions.s` Array(UInt256),
-  `transactions.v` Array(UInt256),
+  `transactions.v` Array(u8),
   `transactions.to` Array(Nullable(FixedString(42))),
-  `transactions.gas` Array(UInt128),
+  `transactions.gas` Array(UInt64),
   `transactions.type` Array(UInt64),
   `transactions.input` Array(String),
   `transactions.value` Array(UInt256),
@@ -46,8 +46,8 @@ CREATE TABLE bundles (
   INDEX uuid_bloom_filter uuid TYPE bloom_filter GRANULARITY 10,
   
   -- For bundles: `uuid` should be set.
-  -- For replacement bundles with transactions: `uuid` and `replacementUuid` should be set.
-  -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacementUuid` should be set.
+  -- For replacement bundles with transactions: `uuid` and `replacement_uuid` should be set.
+  -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacement_uuid` should be set.
   -- So this is the invariant we want to enforce:
   CONSTRAINT valid_uuid_or_replacement CHECK (uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
 )
