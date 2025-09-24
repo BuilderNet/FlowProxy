@@ -1,6 +1,8 @@
-use crate::{priority::Priority, rate_limit::CounterOverTime, types::Bundle, utils};
+use crate::{priority::Priority, rate_limit::CounterOverTime, utils};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::Address;
+use rbuilder_primitives::serialize::RawBundle;
+use revm_primitives::keccak256;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -39,13 +41,13 @@ impl Entity {
     ) -> Priority {
         // Unknown entities get low processing priority.
         if self.is_unknown() {
-            return Priority::Low
+            return Priority::Low;
         }
 
         // Bundles with blob transactions get low processing priority
         // due to excessive bandwidth consumption.
         if request.has_eip4844_txs() {
-            return Priority::Low
+            return Priority::Low;
         }
 
         let score = scores.calculate();
@@ -53,11 +55,11 @@ impl Entity {
         let is_non_revertible = request.is_non_revertible();
 
         if (score < spam_thresholds.medium && is_replacement) || is_non_revertible {
-            return Priority::High
+            return Priority::High;
         }
 
         if spam_thresholds.high > score && score < spam_thresholds.medium {
-            return Priority::Medium
+            return Priority::Medium;
         }
 
         Priority::Low
@@ -245,7 +247,7 @@ impl EntityBuilderStats {
 #[derive(Debug)]
 pub enum EntityRequest<'a> {
     PrivateTx(&'a PooledTransaction),
-    Bundle(&'a Bundle<PooledTransaction>),
+    Bundle(&'a RawBundle),
 }
 
 impl EntityRequest<'_> {
@@ -253,7 +255,7 @@ impl EntityRequest<'_> {
     fn is_replacement(&self) -> bool {
         match self {
             Self::PrivateTx(_) => false,
-            Self::Bundle(bundle) => bundle.uuid.is_some(),
+            Self::Bundle(bundle) => bundle.replacement_uuid.is_some(),
         }
     }
 
@@ -263,7 +265,7 @@ impl EntityRequest<'_> {
         match self {
             Self::PrivateTx(_) => true,
             Self::Bundle(bundle) => {
-                bundle.txs.iter().all(|tx| bundle.reverting_tx_hashes.contains(tx.hash()))
+                bundle.txs.iter().all(|tx| bundle.reverting_tx_hashes.contains(&keccak256(tx)))
             }
         }
     }
@@ -272,7 +274,7 @@ impl EntityRequest<'_> {
     fn has_eip4844_txs(&self) -> bool {
         match self {
             Self::PrivateTx(tx) => tx.is_eip4844(),
-            Self::Bundle(bundle) => bundle.txs.iter().any(|tx| tx.is_eip4844()),
+            Self::Bundle(bundle) => bundle.txs.iter().any(utils::looks_like_canonical_blob_tx),
         }
     }
 }

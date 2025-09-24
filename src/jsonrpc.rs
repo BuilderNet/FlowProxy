@@ -32,7 +32,7 @@ pub struct JsonRpcRequest<T> {
 impl<T> JsonRpcRequest<T> {
     pub fn from_json(Json(json): Json<JsonRpcRequest<T>>) -> Result<Self, JsonRpcError> {
         if json.jsonrpc != JSONRPC_VERSION_2 {
-            return Err(JsonRpcError::InvalidRequest)
+            return Err(JsonRpcError::InvalidRequest);
         }
         Ok(json)
     }

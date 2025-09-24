@@ -223,7 +223,7 @@ impl Future for HttpForwarder {
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
                     info!(target: "ingress::forwarder", name = %this.name, "Terminating forwarder");
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 };
                 trace!(target: "ingress::forwarder", name = %this.name, ?request, "Sending request");
                 this.pending.push(send_http_request(
