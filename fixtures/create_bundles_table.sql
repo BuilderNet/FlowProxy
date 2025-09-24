@@ -7,7 +7,7 @@ CREATE TABLE bundles (
   `transactions.nonce` Array(UInt64),
   `transactions.r` Array(UInt256),
   `transactions.s` Array(UInt256),
-  `transactions.v` Array(u8),
+  `transactions.v` Array(UInt8),
   `transactions.to` Array(Nullable(FixedString(42))),
   `transactions.gas` Array(UInt64),
   `transactions.type` Array(UInt64),
