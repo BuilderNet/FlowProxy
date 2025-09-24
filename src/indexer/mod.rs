@@ -3,7 +3,10 @@
 
 use std::{fmt::Debug, time::Duration};
 
-use clickhouse::{inserter::Inserter, Client as ClickhouseClient};
+use clickhouse::{
+    inserter::{Inserter, Quantities},
+    Client as ClickhouseClient,
+};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::info;
 
@@ -98,6 +101,8 @@ impl ClickhouseIndexer {
     /// Run the indexer until the receiving channel is closed.
     async fn run(mut self) {
         while let Some(system_bundle) = self.bundle_rx.recv().await {
+            tracing::trace!(target: TRACING_TARGET, hash = %system_bundle.bundle_hash, "received bundle to index");
+
             let bundle_row = (system_bundle, self.builder_name.clone()).into();
 
             if let Err(e) = self.bundle_inserter.write(&bundle_row) {
@@ -114,8 +119,17 @@ impl ClickhouseIndexer {
             //
             // TODO(thedevbirb): implement a file-based backup in case this call fails due to
             // connection timeouts or whatever.
-            if let Err(e) = self.bundle_inserter.commit().await {
-                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle to clickhouse");
+            match self.bundle_inserter.commit().await {
+                Ok(quantities) => {
+                    if quantities == Quantities::ZERO {
+                        tracing::trace!(target: TRACING_TARGET, hash = %bundle_row.hash, "committed bundle to inserter");
+                    } else {
+                        tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch to clickhouse")
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle to clickhouse")
+                }
             }
         }
 
