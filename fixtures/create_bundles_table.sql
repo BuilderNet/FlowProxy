@@ -39,20 +39,21 @@ CREATE TABLE bundles (
 
   `hash` FixedString(66),
 
-  -- For bundles: `uuid` should be set.
-  -- For replacement bundles with transactions: `uuid` and `replacement_uuid` should be set.
-  -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacement_uuid` should be set.
-  -- So this is the invariant we want to enforce:
-  CHECK (uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
-
+  
   INDEX from_bloom_filter `transactions.from` TYPE bloom_filter GRANULARITY 10,
   INDEX transactions_hash_bloom_filter `transactions.hash` TYPE bloom_filter GRANULARITY 10,
   INDEX hash_bloom_filter hash TYPE bloom_filter GRANULARITY 10,
   INDEX uuid_bloom_filter uuid TYPE bloom_filter GRANULARITY 10,
+  
+  -- For bundles: `uuid` should be set.
+  -- For replacement bundles with transactions: `uuid` and `replacementUuid` should be set.
+  -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacementUuid` should be set.
+  -- So this is the invariant we want to enforce:
+  CONSTRAINT valid_uuid_or_replacement CHECK (uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')
 PARTITION BY toYYYYMM(time)
 PRIMARY KEY (time)
 ORDER BY (time)
 TTL toDateTime(time) + toIntervalMonth(1) RECOMPRESS CODEC(ZSTD(6))
-SETTINGS storage_policy = 'hot_cold', index_granularity = 8192;
+SETTINGS index_granularity = 8192;
