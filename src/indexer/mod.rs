@@ -13,6 +13,7 @@ use tracing::info;
 use crate::{cli::ClickhouseArgs, indexer::models::BundleRow, types::SystemBundle};
 
 mod models;
+mod serde;
 
 /// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 4096;
