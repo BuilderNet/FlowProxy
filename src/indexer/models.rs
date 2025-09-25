@@ -16,7 +16,7 @@ pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub time: OffsetDateTime,
-    #[serde(rename = "transactions.hash")]
+    #[serde(rename = "transactions.hash", with = "hashes")]
     /// Collection of hashes for transactions in the bundle.
     pub transactions_hash: Vec<B256>,
     /// Collection of from addresses for transactions in the bundle.

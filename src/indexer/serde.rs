@@ -71,7 +71,7 @@ pub(super) mod hashes {
         let mut seq = serializer.serialize_seq(Some(vec.len()))?;
         for hash in vec {
             // Converts a String to ASCII bytes
-            seq.serialize_element(hash.as_slice())?;
+            seq.serialize_element(&hash.0)?;
         }
 
         seq.end()
@@ -81,8 +81,8 @@ pub(super) mod hashes {
     where
         D: Deserializer<'de>,
     {
-        let vec: Vec<&[u8]> = Deserialize::deserialize(deserializer)?;
-        Ok(vec.into_iter().map(|b| B256::from_slice(b)).collect())
+        let vec: Vec<[u8; 32]> = Deserialize::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|b| B256::from(b)).collect())
     }
 }
 
