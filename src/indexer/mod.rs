@@ -158,7 +158,7 @@ pub struct MockIndexer {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{borrow::Cow, collections::BTreeMap, fs};
+    use std::{borrow::Cow, collections::BTreeMap, fs, time::Duration};
 
     use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
     use rbuilder_primitives::serialize::RawBundle;
@@ -353,7 +353,11 @@ pub(crate) mod tests {
         let system_bundle_row = (system_bundle.clone(), indexer.builder_name.clone()).into();
 
         indexer.bundle_inserter.write(&system_bundle_row).await.unwrap();
+        println!("{}", system_bundle_row.time);
+
         indexer.bundle_inserter.force_commit().await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
 
         let system_bundle_cancel = system_cancel_bundle_example();
         let system_bundle_cancel_row =

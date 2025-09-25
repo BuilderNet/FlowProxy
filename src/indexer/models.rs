@@ -114,8 +114,15 @@ impl From<(SystemBundle, String)> for BundleRow {
     fn from((bundle, builder_name): (SystemBundle, String)) -> Self {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
+                let micros = bundle.received_at.microsecond();
                 BundleRow {
-                    time: bundle.received_at.into(),
+                    time: bundle
+                        .received_at
+                        // Needed so that the `BundleRow` created has the same timestamp precision
+                        // (micros) as the row written on clickhouse db.
+                        .replace_microsecond(micros)
+                        .expect("to micros milliseconds")
+                        .into(),
                     transactions_hash: decoded.txs.iter().map(|tx| tx.hash()).collect(),
                     transactions_from: decoded.txs.iter().map(|tx| tx.signer()).collect(),
                     transactions_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
@@ -223,8 +230,15 @@ impl From<(SystemBundle, String)> for BundleRow {
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
             // transactions.
             DecodedBundle::Replacement(ref replacement) => {
+                let micros = bundle.received_at.microsecond();
                 BundleRow {
-                    time: bundle.received_at.into(),
+                    time: bundle
+                        .received_at
+                        // Needed so that the `BundleRow` created has the same timestamp precision
+                        // (micros) as the row written on clickhouse db.
+                        .replace_microsecond(micros)
+                        .expect("to micros milliseconds")
+                        .into(),
                     transactions_hash: Vec::new(),
                     transactions_from: Vec::new(),
                     transactions_nonce: Vec::new(),
