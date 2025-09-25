@@ -1,9 +1,9 @@
 //! Contains the model used for storing data inside Clickhouse.
 
-use crate::indexer::serde::{deserialize_vec_u256, serialize_vec_u256};
+use crate::indexer::serde::{deserialize_vec_u256, hashes, serialize_vec_u256};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -16,9 +16,9 @@ pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub time: OffsetDateTime,
-    #[serde(rename = "transactions.hash")]
+    #[serde(rename = "transactions.hash", with = "hashes")]
     /// Collection of hashes for transactions in the bundle.
-    pub transactions_hash: Vec<String>,
+    pub transactions_hash: Vec<B256>,
     /// Collection of from addresses for transactions in the bundle.
     #[serde(rename = "transactions.from")]
     pub transactions_from: Vec<String>,
@@ -121,11 +121,7 @@ impl From<(SystemBundle, String)> for BundleRow {
             DecodedBundle::Bundle(ref decoded) => {
                 BundleRow {
                     time: bundle.received_at.into(),
-                    transactions_hash: decoded
-                        .txs
-                        .iter()
-                        .map(|tx| format!("{:?}", tx.hash()))
-                        .collect(),
+                    transactions_hash: decoded.txs.iter().map(|tx| tx.hash()).collect(),
                     transactions_from: decoded
                         .txs
                         .iter()
@@ -435,7 +431,7 @@ pub(crate) mod tests {
 
     #[allow(clippy::too_many_arguments)]
     fn convert_clickhouse_data_to_tx_envelopes(
-        transactions_hash: Vec<String>,
+        transactions_hash: Vec<B256>,
         transactions_nonce: Vec<u64>,
         transactions_r: Vec<U256>,
         transactions_s: Vec<U256>,
@@ -493,11 +489,7 @@ pub(crate) mod tests {
                         value: transactions_value[i],
                         input,
                     };
-                    TxEnvelope::Legacy(Signed::new_unchecked(
-                        tx,
-                        signature,
-                        transactions_hash[i].parse::<B256>()?,
-                    ))
+                    TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, transactions_hash[i]))
                 }
                 1 => {
                     // EIP-2930 transaction
@@ -511,11 +503,7 @@ pub(crate) mod tests {
                         input,
                         access_list,
                     };
-                    TxEnvelope::Eip2930(Signed::new_unchecked(
-                        tx,
-                        signature,
-                        transactions_hash[i].parse::<B256>()?,
-                    ))
+                    TxEnvelope::Eip2930(Signed::new_unchecked(tx, signature, transactions_hash[i]))
                 }
                 2 => {
                     // EIP-1559 transaction
@@ -531,11 +519,7 @@ pub(crate) mod tests {
                         input,
                         access_list,
                     };
-                    TxEnvelope::Eip1559(Signed::new_unchecked(
-                        tx,
-                        signature,
-                        transactions_hash[i].parse::<B256>()?,
-                    ))
+                    TxEnvelope::Eip1559(Signed::new_unchecked(tx, signature, transactions_hash[i]))
                 }
                 3 => {
                     // EIP-4844 transaction (blob transaction)
@@ -563,7 +547,7 @@ pub(crate) mod tests {
                     TxEnvelope::Eip4844(Signed::new_unchecked(
                         TxEip4844Variant::TxEip4844(tx),
                         signature,
-                        transactions_hash[i].parse::<B256>()?,
+                        transactions_hash[i],
                     ))
                 }
                 4 => {
@@ -588,11 +572,7 @@ pub(crate) mod tests {
                         access_list,
                         authorization_list,
                     };
-                    TxEnvelope::Eip7702(Signed::new_unchecked(
-                        tx,
-                        signature,
-                        transactions_hash[i].parse::<B256>()?,
-                    ))
+                    TxEnvelope::Eip7702(Signed::new_unchecked(tx, signature, transactions_hash[i]))
                 }
                 _ => {
                     return Err(

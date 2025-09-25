@@ -55,3 +55,39 @@ where
 
     deserializer.deserialize_seq(U256VecVisitor)
 }
+
+pub(super) mod hashes {
+    use std::str::FromStr;
+
+    use alloy_primitives::B256;
+    use serde::{
+        de::Deserializer,
+        ser::{SerializeSeq, Serializer},
+        Deserialize,
+    };
+
+    pub(crate) fn serialize<S: Serializer>(
+        vec: &Vec<B256>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(vec.len()))?;
+        for hash in vec {
+            // Converts a String to ASCII bytes
+            let bytes = Vec::from(format!("{hash:?}"));
+            seq.serialize_element(&bytes)?;
+        }
+
+        seq.end()
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<B256>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<Vec<u8>> = Deserialize::deserialize(deserializer)?;
+        Ok(vec
+            .into_iter()
+            .map(|b| B256::from_str(&String::from_utf8(b).unwrap()).unwrap())
+            .collect())
+    }
+}
