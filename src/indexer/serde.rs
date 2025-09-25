@@ -65,7 +65,7 @@ pub(super) mod hashes {
         D: Deserializer<'de>,
     {
         let vec: Vec<[u8; 32]> = Deserialize::deserialize(deserializer)?;
-        Ok(vec.into_iter().map(|b| B256::from(b)).collect())
+        Ok(vec.into_iter().map(B256::from).collect())
     }
 }
 

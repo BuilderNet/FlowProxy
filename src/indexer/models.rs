@@ -134,7 +134,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .iter()
                         .map(|tx| tx.as_ref().signature().v().into())
                         .collect(),
-                    transactions_to: decoded.txs.iter().map(|tx| tx.to().map(|t| t)).collect(),
+                    transactions_to: decoded.txs.iter().map(|tx| tx.to()).collect(),
                     transactions_gas: decoded
                         .txs
                         .iter()
@@ -352,7 +352,7 @@ pub(crate) mod tests {
             )
             .unwrap();
 
-            let raw_bundle = RawBundle {
+            RawBundle {
                 block_number: value.block_number.map(|b| U64::from(b)),
                 min_timestamp: value.min_timestamp,
                 max_timestamp: value.max_timestamp,
@@ -371,9 +371,7 @@ pub(crate) mod tests {
                 first_seen_at: None,
                 version: None,
                 signing_address: value.signer_address,
-            };
-
-            raw_bundle
+            }
         }
     }
 
