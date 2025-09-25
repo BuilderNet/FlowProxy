@@ -284,8 +284,8 @@ impl From<(SystemBundle, String)> for BundleRow {
 }
 
 /// Model representing clickhouse private transaction row.
-#[derive(clickhouse::Row, Debug, serde::Serialize)]
-#[allow(dead_code)]
+#[derive(clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct PrivateTxRow {
     /// The timestamp at which private transaction was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]

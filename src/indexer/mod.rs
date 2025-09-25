@@ -46,9 +46,7 @@ trait ClickhouseIndexableOrderflow: Sized {
 
     fn hash(&self) -> B256;
 
-    fn to_value_ref<'a>(
-        row: &'a Self::ClickhouseRowType,
-    ) -> &<Self::ClickhouseRowType as Row>::Value<'a>;
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_>;
 }
 
 impl ClickhouseIndexableOrderflow for SystemBundle {
@@ -60,9 +58,7 @@ impl ClickhouseIndexableOrderflow for SystemBundle {
         self.bundle_hash
     }
 
-    fn to_value_ref<'a>(
-        row: &'a Self::ClickhouseRowType,
-    ) -> &<Self::ClickhouseRowType as Row>::Value<'a> {
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
         row
     }
 }
@@ -76,9 +72,7 @@ impl ClickhouseIndexableOrderflow for SystemTransaction {
         self.tx_hash()
     }
 
-    fn to_value_ref<'a>(
-        row: &'a Self::ClickhouseRowType,
-    ) -> &<Self::ClickhouseRowType as Row>::Value<'a> {
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
         row
     }
 }
@@ -89,7 +83,9 @@ pub struct IndexerHandle {
     bundle_tx: mpsc::Sender<SystemBundle>,
     transaction_tx: mpsc::Sender<SystemTransaction>,
 
+    #[allow(dead_code)]
     bundle_indexer_task: JoinHandle<()>,
+    #[allow(dead_code)]
     transaction_indexer_task: JoinHandle<()>,
 }
 
@@ -148,14 +144,7 @@ impl ClickhouseIndexer {
         let transaction_indexer_task =
             tokio::spawn(run_indexer(transaction_rx, transaction_inserter, builder_name.clone()));
 
-        let handle = IndexerHandle {
-            bundle_tx,
-            transaction_tx,
-            bundle_indexer_task,
-            transaction_indexer_task,
-        };
-
-        return handle;
+        IndexerHandle { bundle_tx, transaction_tx, bundle_indexer_task, transaction_indexer_task }
     }
 }
 
@@ -170,7 +159,7 @@ async fn run_indexer<T: ClickhouseIndexableOrderflow>(
 
         let hash = orderflow.hash();
         let orderflow_row: T::ClickhouseRowType = (orderflow, builder_name.clone()).into();
-        let value_ref = T::to_value_ref(&orderflow_row);
+        let value_ref = T::to_row_ref(&orderflow_row);
 
         if let Err(e) = inserter.write(value_ref).await {
             tracing::error!(target: TRACING_TARGET,
@@ -229,8 +218,9 @@ pub struct MockIndexer {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{borrow::Cow, collections::BTreeMap, fs, time::Duration};
+    use std::{borrow::Cow, collections::BTreeMap, fs, sync::Arc};
 
+    use alloy_consensus::transaction::SignerRecoverable;
     use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
     use rbuilder_primitives::serialize::RawBundle;
     use testcontainers::{
@@ -241,13 +231,13 @@ pub(crate) mod tests {
         ContainerAsync, Image,
     };
     use time::UtcDateTime;
-    use tokio::sync::mpsc;
 
     use crate::{
         indexer::{
-            models::BundleRow, IndexerHandle, BUNDLE_INDEXER_BUFFER_SIZE, BUNDLE_TABLE_NAME,
+            models::{BundleRow, PrivateTxRow},
+            BUNDLE_TABLE_NAME, TRANSACTIONS_TABLE_NAME,
         },
-        types::SystemBundle,
+        types::{decode_transaction, SystemBundle, SystemTransaction},
     };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
@@ -359,6 +349,15 @@ pub(crate) mod tests {
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
+    pub(crate) fn system_transaction_example() -> SystemTransaction {
+        let bytes = alloy_primitives::hex!("02f89201820132850826299e00850826299e0082a1d694f82300c34f0d11b0420ac3ce85f0ebe4e3e0544280a40d2959800000000000000000000000000000000000000000000000000000000000000001c001a0030c9637d6d442bd2f9a43f69ec09dbaedb12e08ef1fe38ae5ce855bbcfc36ada064101cb4c00d6c21e792a2959c896992c9bbf8e2d84ce7647d561bfbcf59365a");
+        let transaction =
+            Arc::new(decode_transaction(&alloy_primitives::Bytes::from(bytes)).unwrap());
+        let signer = transaction.recover_signer().unwrap();
+        let received_at = UtcDateTime::now();
+        SystemTransaction { transaction, signer, received_at }
+    }
+
     /// Create a test clickhouse client using testcontainers. Returns both the image and the
     /// client.
     ///
@@ -394,6 +393,22 @@ pub(crate) mod tests {
         client.query(&create_bundles_table_ddl).execute().await
     }
 
+    /// Creates the transactions table from the DDL present inside the `fixtures` folder.
+    async fn create_clickhouse_transactions_table(
+        client: &ClickhouseClient,
+    ) -> ClickhouseResult<()> {
+        let create_transactions_table = fs::read_to_string(
+            "./fixtures/create_transactions_table.sql",
+        )
+        .expect("could not read create_transactions_table.sql")
+        // NOTE: for local instances, ReplicatedMergeTree isn't supported.
+        .replace(
+            "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
+            "ENGINE = MergeTree()",
+        );
+        client.query(&create_transactions_table).execute().await
+    }
+
     #[tokio::test]
     async fn clickhouse_bundles_table_create_table_succeds() {
         let (image, client) = create_test_clickhouse_client().await.unwrap();
@@ -406,35 +421,22 @@ pub(crate) mod tests {
         let (image, client) = create_test_clickhouse_client().await.unwrap();
         create_clickhouse_bundles_table(&client).await.unwrap();
 
-        let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let _ = IndexerHandle { bundle_tx: tx };
-        let bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
-
-        let mut indexer = ClickhouseIndexer {
-            bundle_rx: rx,
-            client: client.clone(),
-            bundle_inserter,
-            builder_name: "buildernet".to_string(),
-        };
+        let mut bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
+        let builder_name = "buildernet".to_string();
 
         // Insert system bundle and system cancel bundle
 
         let system_bundle = system_bundle_example();
-        let system_bundle_row = (system_bundle.clone(), indexer.builder_name.clone()).into();
+        let system_bundle_row = (system_bundle.clone(), builder_name.clone()).into();
 
-        indexer.bundle_inserter.write(&system_bundle_row).await.unwrap();
-        println!("{}", system_bundle_row.time);
-
-        indexer.bundle_inserter.force_commit().await.unwrap();
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        bundle_inserter.write(&system_bundle_row).await.unwrap();
+        bundle_inserter.commit().await.unwrap();
 
         let system_bundle_cancel = system_cancel_bundle_example();
-        let system_bundle_cancel_row =
-            (system_bundle_cancel.clone(), indexer.builder_name.clone()).into();
+        let system_bundle_cancel_row = (system_bundle_cancel.clone(), builder_name.clone()).into();
 
-        indexer.bundle_inserter.write(&system_bundle_cancel_row).await.unwrap();
-        indexer.bundle_inserter.force_commit().await.unwrap();
+        bundle_inserter.write(&system_bundle_cancel_row).await.unwrap();
+        bundle_inserter.commit().await.unwrap();
 
         // Now select then, and verify they match with original input.
 
@@ -445,6 +447,36 @@ pub(crate) mod tests {
             .unwrap();
 
         assert_eq!(select_rows, vec![system_bundle_row, system_bundle_cancel_row]);
+
+        drop(image);
+    }
+
+    #[tokio::test]
+    async fn clickhouse_transactions_insert_single_row_succeeds() {
+        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        create_clickhouse_transactions_table(&client).await.unwrap();
+
+        let mut bundle_inserter =
+            client.inserter::<PrivateTxRow>(TRANSACTIONS_TABLE_NAME).with_max_rows(0); // force commit immediately
+        let builder_name = "buildernet".to_string();
+
+        // Insert system transaction
+
+        let system_transaction = system_transaction_example();
+        let system_transaction_row = (system_transaction.clone(), builder_name.clone()).into();
+
+        bundle_inserter.write(&system_transaction_row).await.unwrap();
+        bundle_inserter.commit().await.unwrap();
+
+        // Now select then, and verify they match with original input.
+
+        let select_rows = client
+            .query(&format!("SELECT * FROM {TRANSACTIONS_TABLE_NAME} ORDER BY time ASC"))
+            .fetch_all::<PrivateTxRow>()
+            .await
+            .unwrap();
+
+        assert_eq!(select_rows, vec![system_transaction_row]);
 
         drop(image);
     }
