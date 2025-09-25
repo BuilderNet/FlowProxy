@@ -43,7 +43,11 @@ metrics-exporter-prometheus = { version = "0.17.2", default-features = false, fe
 ] }
 
 # clickhouse
-clickhouse = { version = "0.13.3", features = ["inserter", "time", "uuid"] }
+clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", branch = "main", features = [
+  "inserter",
+  "time",
+  "uuid"
+] }
 clickhouse-derive = { version = "0.2.0" }
 time = { version = "0.3.44" }
 
@@ -74,7 +78,7 @@ mini-moka = "0.10.3"
 cc = "=1.2.15"
 
 [dev-dependencies]
-clickhouse = { version = "0.13.3", features = [
+clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", branch = "main", features = [
   "inserter",
   "time",
   "test-util",

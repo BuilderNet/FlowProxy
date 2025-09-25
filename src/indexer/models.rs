@@ -4,14 +4,13 @@ use crate::indexer::serde::{deserialize_vec_u256, serialize_vec_u256};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::U256;
-use clickhouse_derive::Row;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::types::{DecodedBundle, SystemBundle};
 
 /// Model representing Clickhouse bundle row.
-#[derive(Clone, Row, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
@@ -303,7 +302,7 @@ impl From<(SystemBundle, String)> for BundleRow {
 }
 
 /// Model representing clickhouse private transaction row.
-#[derive(Row, Debug, serde::Serialize)]
+#[derive(clickhouse::Row, Debug, serde::Serialize)]
 #[allow(dead_code)]
 pub(crate) struct PrivateTxRow {
     /// The timestamp at which private transaction was observed.

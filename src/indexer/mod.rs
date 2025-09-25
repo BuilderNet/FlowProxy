@@ -83,11 +83,11 @@ impl ClickhouseIndexer {
             .with_url(args.host)
             .with_database(args.database)
             .with_user(args.username)
-            .with_password(args.password);
+            .with_password(args.password)
+            .with_validation(true);
 
         let bundle_inserter = client
             .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
-            .expect("in 0.13.3, this never returns Err")
             .with_period(Some(Duration::from_secs(4))) // Dump every 4s
             .with_period_bias(0.1) // 4±(0.1*4)
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
@@ -106,7 +106,7 @@ impl ClickhouseIndexer {
 
             let bundle_row = (system_bundle, self.builder_name.clone()).into();
 
-            if let Err(e) = self.bundle_inserter.write(&bundle_row) {
+            if let Err(e) = self.bundle_inserter.write(&bundle_row).await {
                 tracing::error!(target: TRACING_TARGET,
                     ?e,
                     bundle_hash = bundle_row.hash,
@@ -219,7 +219,7 @@ pub(crate) mod tests {
     impl MockClickhouseClient {
         fn new() -> Self {
             let mock = clickhouse::test::Mock::new();
-            let inner = ClickhouseClient::default().with_url(mock.url());
+            let inner = ClickhouseClient::default().with_mock(&mock).with_validation(true);
             Self { inner, mock }
         }
 
@@ -241,7 +241,7 @@ pub(crate) mod tests {
             };
             let bundle_row = (system_bundle, self.builder_name.clone()).into();
 
-            self.bundle_inserter.write(&bundle_row).unwrap();
+            self.bundle_inserter.write(&bundle_row).await.unwrap();
             let _ = self.bundle_inserter.commit().await;
         }
     }
@@ -284,10 +284,7 @@ pub(crate) mod tests {
 
         let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
         let handle = IndexerHandle { bundle_tx: tx };
-        let bundle_inserter = client
-            .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
-            .expect("in 0.13.3, this never returns Err")
-            .with_max_rows(0); // force commit immediately
+        let bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
 
         let indexer = ClickhouseIndexer {
             bundle_rx: rx,
@@ -323,10 +320,7 @@ pub(crate) mod tests {
 
         let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
         let handle = IndexerHandle { bundle_tx: tx };
-        let bundle_inserter = client
-            .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
-            .expect("in 0.13.3, this never returns Err")
-            .with_max_rows(0); // force commit immediately
+        let bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
 
         let indexer = ClickhouseIndexer {
             bundle_rx: rx,
