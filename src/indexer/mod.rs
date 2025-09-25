@@ -300,7 +300,7 @@ pub(crate) mod tests {
         let clickhouse = ClickhouseImage::default().start().await?;
         let port = clickhouse.get_host_port_ipv4(8123).await?;
         let host = clickhouse.get_host().await?;
-        let url = format!("http://{}:{}", host, port);
+        let url = format!("http://{host}:{port}");
 
         Ok((
             clickhouse,

@@ -12,7 +12,7 @@ pub(super) mod u256es {
     ///
     /// EVM U256 is represented in big-endian, but ClickHouse expects little-endian.
     pub(crate) fn serialize<S: Serializer>(
-        u256es: &Vec<U256>,
+        u256es: &[U256],
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         // It consists of a LEB128 length prefix followed by the raw bytes of each U256 in
@@ -47,13 +47,9 @@ pub(super) mod hashes {
         Deserialize,
     };
 
-    pub(crate) fn serialize<S: Serializer>(
-        vec: &Vec<B256>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(vec: &[B256], serializer: S) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(vec.len()))?;
         for hash in vec {
-            // Converts a String to ASCII bytes
             seq.serialize_element(&hash.0)?;
         }
 
@@ -108,7 +104,8 @@ pub(super) mod address {
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
             if let Some(address) = address {
-                serializer.serialize_some(&address.0 .0)
+                let address_bytes = &address.0 .0;
+                serializer.serialize_some(address_bytes)
             } else {
                 serializer.serialize_none()
             }
@@ -136,12 +133,13 @@ pub(super) mod addresses {
         use super::*;
 
         pub(crate) fn serialize<S: Serializer>(
-            vec: &Vec<Option<Address>>,
+            vec: &[Option<Address>],
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
             let mut seq = serializer.serialize_seq(Some(vec.len()))?;
             for address in vec {
-                seq.serialize_element(&address.map(|a| a.0 .0))?;
+                let address_bytes = address.map(|a| a.0 .0);
+                seq.serialize_element(&address_bytes)?;
             }
             seq.end()
         }
@@ -156,12 +154,13 @@ pub(super) mod addresses {
     }
 
     pub(crate) fn serialize<S: Serializer>(
-        vec: &Vec<Address>,
+        vec: &[Address],
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(vec.len()))?;
         for address in vec {
-            seq.serialize_element(&address.0 .0)?;
+            let address_bytes = &address.0 .0;
+            seq.serialize_element(address_bytes)?;
         }
 
         seq.end()

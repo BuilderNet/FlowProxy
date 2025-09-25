@@ -59,7 +59,7 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct OrderflowIngress {
     pub gzip_enabled: bool,
     pub rate_limit_lookback_s: u64,

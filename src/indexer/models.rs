@@ -121,7 +121,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
                         .replace_microsecond(micros)
-                        .expect("to micros milliseconds")
+                        .expect("to replace microseconds")
                         .into(),
                     transactions_hash: decoded.txs.iter().map(|tx| tx.hash()).collect(),
                     transactions_from: decoded.txs.iter().map(|tx| tx.signer()).collect(),
@@ -191,7 +191,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .map(|tx| {
                             tx.as_ref().access_list().as_ref().map(|access_list| {
                                 serde_json::to_string(&access_list)
-                                    .expect("serde_json serialization doesn't fail")
+                                    .expect("to serialize access list")
                             })
                         })
                         .collect(),
@@ -201,7 +201,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .map(|tx| {
                             tx.as_ref().authorization_list().as_ref().map(|access_list| {
                                 serde_json::to_string(&access_list)
-                                    .expect("serde_json serialization doesn't fail")
+                                    .expect("to serialize authorization_list")
                             })
                         })
                         .collect(),
@@ -237,7 +237,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
                         .replace_microsecond(micros)
-                        .expect("to micros milliseconds")
+                        .expect("to replace microseconds")
                         .into(),
                     transactions_hash: Vec::new(),
                     transactions_from: Vec::new(),
