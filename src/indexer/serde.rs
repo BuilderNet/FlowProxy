@@ -21,7 +21,7 @@ pub(crate) fn serialize_vec_u256<S: Serializer>(
     let mut seq = serializer.serialize_seq(Some(vec.len()))?;
     for u256 in vec {
         let buf: [u8; 32] = u256.to_le_bytes();
-        seq.serialize_element(&buf)?;
+        seq.serialize_element(&buf.as_slice())?;
     }
     seq.end()
 }
