@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use alloy_primitives::Address;
 use buildernet_orderflow_proxy::{types::SystemBundle, utils::testutils::Random};
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rbuilder_primitives::serialize::RawBundle;
 
@@ -17,16 +17,25 @@ impl Random for RawBundleWithSigner {
     }
 }
 
-pub fn bench_validation(c: &mut Criterion) {
-    let size = 100;
+fn generate_inputs(size: u64, rng: &mut StdRng) -> Vec<RawBundleWithSigner> {
+    (0..size).map(|_| RawBundleWithSigner::random(rng)).collect()
+}
 
-    c.bench_function(&format!("bundle_validation_{size}"), |b| {
+pub fn bench_validation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("bundle_validation");
+    group.sample_size(64);
+    let size = 128;
+
+    group.throughput(Throughput::Elements(size));
+    group.bench_function(BenchmarkId::from_parameter(size), |b| {
         let mut rng = StdRng::seed_from_u64(12);
 
+        // We use iter_batched here so we have an owned value for the benchmarked function (second
+        // closure)
         b.iter_batched(
             || {
                 // Generate inputs
-                (0..size).map(|_| RawBundleWithSigner::random(&mut rng)).collect::<Vec<_>>()
+                generate_inputs(size, &mut rng)
             },
             |inputs| {
                 for input in inputs {
@@ -36,7 +45,7 @@ pub fn bench_validation(c: &mut Criterion) {
                     black_box(result);
                 }
             },
-            criterion::BatchSize::LargeInput,
+            BatchSize::SmallInput,
         )
     });
 }

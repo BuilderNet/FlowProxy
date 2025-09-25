@@ -47,8 +47,8 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
 pub mod testutils {
     use alloy_consensus::{
         BlobTransactionSidecar, EthereumTypedTransaction, SidecarBuilder, SignableTransaction as _,
-        SimpleCoder, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar, TxEip7702, TxEnvelope,
-        TxLegacy,
+        SimpleCoder, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip4844WithSidecar,
+        TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::Encodable2718 as _;
     use alloy_primitives::{Address, Bytes, TxKind, U256};
@@ -56,7 +56,6 @@ pub mod testutils {
     use alloy_signer_local::PrivateKeySigner;
     use rand::Rng;
     use rbuilder_primitives::serialize::RawBundle;
-    use uuid::Uuid;
 
     /// A trait for types that can be randomly generated.
     pub trait Random {
@@ -168,14 +167,14 @@ pub mod testutils {
         }
     }
 
-    impl Random for EthereumTypedTransaction<TxEip4844WithSidecar> {
+    impl Random for EthereumTypedTransaction<TxEip4844Variant> {
         fn random<R: Rng>(rng: &mut R) -> Self {
             let tx_type = rng.random_range(0..=4);
             match tx_type {
                 0 => EthereumTypedTransaction::Legacy(TxLegacy::random(rng)),
                 1 => EthereumTypedTransaction::Eip2930(TxEip2930::random(rng)),
                 2 => EthereumTypedTransaction::Eip1559(TxEip1559::random(rng)),
-                3 => EthereumTypedTransaction::Eip4844(TxEip4844WithSidecar::random(rng)),
+                3 => EthereumTypedTransaction::Eip4844(TxEip4844WithSidecar::random(rng).into()),
                 4 => EthereumTypedTransaction::Eip7702(TxEip7702::random(rng)),
                 _ => unreachable!(),
             }
@@ -195,9 +194,19 @@ pub mod testutils {
     }
 
     impl Random for RawBundle {
+        /// Generate a random bundle with transactions of type Eip1559.
         fn random<R: Rng>(rng: &mut R) -> Self {
             let txs_len = rng.random_range(1..=10);
-            let txs = (0..txs_len).map(|_| TxEnvelope::random(rng).encoded_2718().into()).collect();
+            // We only generate Eip1559 here.
+            let txs = (0..txs_len)
+                .map(|_| {
+                    let signer = PrivateKeySigner::random();
+                    let tx = EthereumTypedTransaction::Eip1559(TxEip1559::random(rng));
+                    let sighash = tx.signature_hash();
+                    let signature = signer.sign_hash_sync(&sighash).unwrap();
+                    TxEnvelope::new_unhashed(tx, signature).encoded_2718().into()
+                })
+                .collect();
 
             Self {
                 txs,
