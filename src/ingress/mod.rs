@@ -139,7 +139,7 @@ impl OrderflowIngress {
         };
 
         // NOTE: Signature is mandatory
-        let Some(signer) = maybe_verify_signature(&headers, &body) else {
+        let Some(signer) = extract_signer(&headers) else {
             trace!(target: "ingress", "Error verifying signature");
             return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
         };
@@ -491,6 +491,12 @@ fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
     let body_hash = keccak256(body);
     let signer = recover_signer(&signature, body_hash).ok()?;
     Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+}
+
+fn extract_signer(headers: &HeaderMap) -> Option<Address> {
+    let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
+    let (address, _) = signature_header.to_str().ok()?.split_once(':')?;
+    Address::from_str(address).ok()
 }
 
 /// Attempt to retrieve BuilderNet priority set by other ingresses.
