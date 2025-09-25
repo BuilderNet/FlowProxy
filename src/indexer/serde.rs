@@ -80,15 +80,19 @@ pub(super) mod address {
             address: &Option<Address>,
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
-            serializer.serialize_some(&address.map(|a| a.0))
+            if let Some(address) = address {
+                serializer.serialize_some(&address.0 .0)
+            } else {
+                serializer.serialize_none()
+            }
         }
 
         pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Option<Address>, D::Error>
         where
             D: Deserializer<'de>,
         {
-            let vec: Option<[u8; 20]> = Deserialize::deserialize(deserializer)?;
-            Ok(vec.map(Address::from))
+            let option: Option<[u8; 20]> = Deserialize::deserialize(deserializer)?;
+            Ok(option.map(Address::from))
         }
     }
 }
