@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use alloy_primitives::Address;
 use axum::{
@@ -61,7 +61,7 @@ async fn register_credentials(
 async fn get_builders(
     State(registry): State<Registry>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-) -> impl IntoResponse {
+) -> Json<Vec<BuilderHubBuilder>> {
     tracing::info!("Getting builders");
     let builders = registry
         .builders
@@ -69,17 +69,19 @@ async fn get_builders(
         .map(|builder| builder.value().clone())
         .collect::<Vec<BuilderHubBuilder>>();
 
+    tracing::info!("Found {} builders", builders.len());
+
     Json(builders)
 }
 
 #[derive(Debug, Clone)]
 struct Registry {
-    builders: DashMap<Address, BuilderHubBuilder>,
+    builders: Arc<DashMap<Address, BuilderHubBuilder>>,
 }
 
 impl Registry {
     pub fn new() -> Self {
-        Self { builders: DashMap::new() }
+        Self { builders: Arc::new(DashMap::new()) }
     }
 }
 
