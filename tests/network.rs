@@ -22,12 +22,9 @@ async fn network_e2e() {
     assert!(response.status().is_success());
 
     let received = builder1.recv::<Bytes>().await.unwrap();
-
-    println!("received 1: {:?}", received);
     assert_eq!(received, raw_tx);
 
     let received = builder2.recv::<Bytes>().await.unwrap();
-    println!("received 2: {:?}", received);
     assert_eq!(received, raw_tx);
 
     let bundle = create_test_bundle();
