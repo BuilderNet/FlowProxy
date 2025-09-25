@@ -71,10 +71,20 @@ pub(super) mod hashes {
 
 pub(super) mod hash {
     use alloy_primitives::B256;
-    use serde::{de::Deserializer, ser::Serializer, Deserialize};
+    use serde::{
+        de::Deserializer,
+        ser::{SerializeTuple as _, Serializer},
+        Deserialize,
+    };
 
     pub(crate) fn serialize<S: Serializer>(hash: &B256, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(&hash.0)
+        let mut tup = serializer.serialize_tuple(32)?;
+
+        for byte in hash.0 {
+            tup.serialize_element(&byte)?;
+        }
+
+        tup.end()
     }
 
     pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<B256, D::Error>
