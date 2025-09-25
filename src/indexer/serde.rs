@@ -151,7 +151,7 @@ pub(super) mod addresses {
         ) -> Result<S::Ok, S::Error> {
             let mut seq = serializer.serialize_seq(Some(vec.len()))?;
             for address in vec {
-                seq.serialize_element(&address.map(|a| a.0))?;
+                seq.serialize_element(&address.map(|a| a.0 .0))?;
             }
             seq.end()
         }
@@ -171,7 +171,7 @@ pub(super) mod addresses {
     ) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(vec.len()))?;
         for address in vec {
-            seq.serialize_element(address.as_slice())?;
+            seq.serialize_element(&address.0 .0)?;
         }
 
         seq.end()
@@ -181,7 +181,7 @@ pub(super) mod addresses {
     where
         D: Deserializer<'de>,
     {
-        let vec: Vec<&[u8]> = Deserialize::deserialize(deserializer)?;
-        Ok(vec.into_iter().map(|b| Address::from_slice(b)).collect())
+        let vec: Vec<[u8; 20]> = Deserialize::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(Address::from).collect())
     }
 }
