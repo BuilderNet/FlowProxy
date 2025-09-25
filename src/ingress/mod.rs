@@ -140,6 +140,7 @@ impl OrderflowIngress {
 
         // NOTE: Signature is mandatory
         let Some(signer) = maybe_verify_signature(&headers, &body) else {
+            trace!(target: "ingress", "Error verifying signature");
             return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
         };
 
@@ -147,6 +148,7 @@ impl OrderflowIngress {
 
         if let Some(mut data) = ingress.entity_data(entity) {
             if data.rate_limit.count() > ingress.rate_limit_count {
+                trace!(target: "ingress", "Rate limited request");
                 ingress.metrics.user.requests_rate_limited.increment(1);
                 return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
             }
@@ -157,6 +159,7 @@ impl OrderflowIngress {
         {
             Ok(request) => request,
             Err(error) => {
+                trace!(target: "ingress", "Error parsing JSON-RPC request");
                 ingress.metrics.user.json_rpc_parse_errors.increment(1);
                 return JsonRpcResponse::error(None, error);
             }
