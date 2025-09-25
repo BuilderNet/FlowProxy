@@ -317,14 +317,8 @@ pub(crate) struct PrivateTxRow {
     pub max_priority_fee_per_gas: Option<U256>,
     /// Transaction access list.
     pub access_list: Option<String>,
-    /// The IP from which the transaction request was observed.
-    pub source_ip: Option<String>,
-    /// The `Host` value in the header if it exists
-    pub host: Option<String>,
     /// Builder name.
     pub builder_name: String,
-    /// The score calculated by the forwarder.
-    pub forwarder_score: f32,
 }
 
 /// Tests to make sure round-trip conversion between raw bundle and clickhouse bundle types is
