@@ -347,25 +347,31 @@ pub(crate) mod tests {
             builder_name: "buildernet".to_string(),
         };
 
+        // Insert system bundle and system cancel bundle
+
         let system_bundle = system_bundle_example();
+        let system_bundle_row = (system_bundle.clone(), indexer.builder_name.clone()).into();
 
-        indexer
-            .bundle_inserter
-            .write(&(system_bundle.clone(), indexer.builder_name.clone()).into())
+        indexer.bundle_inserter.write(&system_bundle_row).await.unwrap();
+        indexer.bundle_inserter.force_commit().await.unwrap();
+
+        let system_bundle_cancel = system_cancel_bundle_example();
+        let system_bundle_cancel_row =
+            (system_bundle_cancel.clone(), indexer.builder_name.clone()).into();
+
+        indexer.bundle_inserter.write(&system_bundle_cancel_row).await.unwrap();
+        indexer.bundle_inserter.force_commit().await.unwrap();
+
+        // Now select then, and verify they match with original input.
+
+        let select_rows = client
+            .query(&format!("SELECT * FROM {BUNDLE_TABLE_NAME} ORDER BY time ASC"))
+            .fetch_all::<BundleRow>()
             .await
             .unwrap();
 
-        indexer.bundle_inserter.force_commit().await.unwrap();
+        assert_eq!(select_rows, vec![system_bundle_row, system_bundle_cancel_row]);
 
-        let system_bundle = system_cancel_bundle_example();
-
-        indexer
-            .bundle_inserter
-            .write(&(system_bundle.clone(), indexer.builder_name.clone()).into())
-            .await
-            .unwrap();
-
-        indexer.bundle_inserter.force_commit().await.unwrap();
         drop(image);
     }
 }
