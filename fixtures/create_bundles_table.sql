@@ -12,7 +12,7 @@ CREATE TABLE bundles (
   `transactions.gas` Array(UInt64),
   `transactions.type` Array(UInt64),
   `transactions.input` Array(String),
-  `transactions.value` Array(UInt256),
+  `transactions.value` Array(FixedString(32)),
   `transactions.gasPrice` Array(Nullable(UInt128)),
   `transactions.maxFeePerGas` Array(Nullable(UInt128)),
   `transactions.maxPriorityFeePerGas` Array(Nullable(UInt128)),

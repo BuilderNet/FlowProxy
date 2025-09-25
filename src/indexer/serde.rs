@@ -12,15 +12,15 @@ pub(super) mod u256es {
     ///
     /// EVM U256 is represented in big-endian, but ClickHouse expects little-endian.
     pub(crate) fn serialize<S: Serializer>(
-        u256: &Vec<U256>,
+        u256es: &Vec<U256>,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
         // It consists of a LEB128 length prefix followed by the raw bytes of each U256 in
         // little-endian order.
 
         // <https://github.com/ClickHouse/clickhouse-rs/blob/v0.13.3/src/rowbinary/ser.rs#L159-L164>
-        let mut seq = serializer.serialize_seq(Some(u256.len()))?;
-        for u256 in u256 {
+        let mut seq = serializer.serialize_seq(Some(u256es.len()))?;
+        for u256 in u256es {
             let buf: [u8; 32] = u256.to_le_bytes();
             seq.serialize_element(&buf)?;
         }
@@ -71,11 +71,7 @@ pub(super) mod hashes {
 
 pub(super) mod address {
     use alloy_primitives::Address;
-    use serde::{
-        de::Deserializer,
-        ser::{SerializeSeq, SerializeTuple as _, Serializer},
-        Deserialize,
-    };
+    use serde::{de::Deserializer, ser::Serializer, Deserialize};
 
     pub(crate) mod option {
         use super::*;
@@ -94,26 +90,6 @@ pub(super) mod address {
             let vec: Option<[u8; 20]> = Deserialize::deserialize(deserializer)?;
             Ok(vec.map(Address::from))
         }
-    }
-
-    pub(crate) fn serialize<S: Serializer>(
-        address: &Address,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut tuple = serializer.serialize_tuple(20)?;
-        for byte in address.0 {
-            tuple.serialize_element(&byte)?;
-        }
-
-        tuple.end()
-    }
-
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Address, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let vec: [u8; 20] = Deserialize::deserialize(deserializer)?;
-        Ok(Address::from(vec))
     }
 }
 
