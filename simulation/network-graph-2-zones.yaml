@@ -1,0 +1,35 @@
+graph [
+  node [
+    id 0
+    label "zone Virginia East US 1"
+    host_bandwidth_down "1 Gbit"
+    host_bandwidth_up "1 Gbit"
+  ]
+  node [
+    id 1
+    label "zone Frankfurt Germany West Central"
+    host_bandwidth_down "1 Gbit"
+    host_bandwidth_up "1 Gbit"
+  ]
+  edge [
+    source 0
+    target 0
+    label "intra-zone Virginia"
+    latency "85 us"
+    packet_loss 0.0
+  ]
+  edge [
+    source 1
+    target 1
+    label "intra-zone Frankfurt"
+    latency "135 us"
+    packet_loss 0.0
+  ]
+  edge [
+    source 0
+    target 1
+    label "inter-zone Virginia-Frankfurt"
+    latency "44 ms"
+    packet_loss 0.0
+  ]
+]
