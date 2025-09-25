@@ -27,7 +27,8 @@ CREATE TABLE bundles (
   `dropping_tx_hashes` Array(FixedString(32)),
   `refund_tx_hashes` Array(FixedString(32)),
 
-  `uuid` Nullable(UUID),
+  `hash` FixedString(32),
+  `internal_uuid` Nullable(UUID),
   `replacement_uuid` Nullable(UUID),
   `replacement_nonce` Nullable(UInt64),
   `refund_percent` Nullable(UInt8),
@@ -35,21 +36,18 @@ CREATE TABLE bundles (
   `signer_address` Nullable(FixedString(20)),
   `refund_identity` Nullable(FixedString(20)),
 
-  `builder_name` LowCardinality(String) COMMENT 'name of the endpoint, or IP if missing',
+  `builder_name` LowCardinality(String),
 
-  `hash` FixedString(32),
-
-  
   INDEX from_bloom_filter `transactions.from` TYPE bloom_filter GRANULARITY 10,
   INDEX transactions_hash_bloom_filter `transactions.hash` TYPE bloom_filter GRANULARITY 10,
   INDEX hash_bloom_filter hash TYPE bloom_filter GRANULARITY 10,
-  INDEX uuid_bloom_filter uuid TYPE bloom_filter GRANULARITY 10,
+  INDEX internal_uuid_bloom_filter internal_uuid TYPE bloom_filter GRANULARITY 10,
   
-  -- For bundles: `uuid` should be set.
-  -- For replacement bundles with transactions: `uuid` and `replacement_uuid` should be set.
+  -- For bundles: `internal_uuid` should be set.
+  -- For replacement bundles with transactions: `internal_uuid` and `replacement_uuid` should be set.
   -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacement_uuid` should be set.
   -- So this is the invariant we want to enforce:
-  CONSTRAINT valid_uuid_or_replacement CHECK (uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
+  CONSTRAINT valid_uuid_or_replacement CHECK (internal_uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')
 PARTITION BY toYYYYMM(time)

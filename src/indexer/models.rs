@@ -84,7 +84,7 @@ pub(crate) struct BundleRow {
 
     /// Bundle uuid.
     #[serde(with = "clickhouse::serde::uuid::option")]
-    pub uuid: Option<Uuid>,
+    pub internal_uuid: Option<Uuid>,
     /// Replacement bundle uuid.
     #[serde(with = "clickhouse::serde::uuid::option")]
     pub replacement_uuid: Option<Uuid>,
@@ -216,7 +216,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .clone()
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
-                    uuid: Some(decoded.uuid),
+                    internal_uuid: Some(decoded.uuid),
                     replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
                     signer_address: Some(bundle.signer),
@@ -262,7 +262,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     dropping_tx_hashes: Vec::new(),
                     refund_tx_hashes: Vec::new(),
                     // Cancellation bundles don't have the uuid set.
-                    uuid: None,
+                    internal_uuid: None,
                     replacement_uuid: Some(replacement.key.key().id),
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
                     signer_address: Some(bundle.signer),
