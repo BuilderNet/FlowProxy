@@ -65,7 +65,7 @@ pub mod testutils {
     impl Random for Bytes {
         fn random<R: Rng>(rng: &mut R) -> Self {
             let len = rng.random_range(0..=1024);
-            let mut bytes = Vec::with_capacity(len);
+            let mut bytes = vec![0u8; len];
             rng.fill_bytes(&mut bytes);
             bytes.into()
         }
