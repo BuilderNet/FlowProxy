@@ -4,6 +4,7 @@ use alloy_primitives::U256;
 use serde::{
     de::{Deserializer, SeqAccess, Visitor},
     ser::{SerializeSeq, Serializer},
+    Deserialize,
 };
 
 /// Serialize Vec<U256> following ClickHouse RowBinary format.
@@ -32,28 +33,8 @@ pub(crate) fn deserialize_vec_u256<'de, D>(deserializer: D) -> Result<Vec<U256>,
 where
     D: Deserializer<'de>,
 {
-    struct U256VecVisitor;
-
-    impl<'de> Visitor<'de> for U256VecVisitor {
-        type Value = Vec<U256>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("a sequence of U256 values")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let mut vec = Vec::new();
-            while let Some(buf) = seq.next_element::<[u8; 32]>()? {
-                vec.push(U256::from_le_bytes(buf));
-            }
-            Ok(vec)
-        }
-    }
-
-    deserializer.deserialize_seq(U256VecVisitor)
+    let vec: Vec<[u8; 32]> = Deserialize::deserialize(deserializer)?;
+    Ok(vec.into_iter().map(U256::from_le_bytes).collect())
 }
 
 pub(super) mod hashes {
