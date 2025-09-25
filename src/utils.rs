@@ -102,12 +102,15 @@ pub mod testutils {
 
     impl Random for TxEip1559 {
         fn random<R: Rng>(rng: &mut R) -> Self {
+            let max_fee_per_gas = rng.random();
+            let max_priority_fee_per_gas = rng.random_range(0..max_fee_per_gas);
+
             Self {
                 chain_id: 1,
                 nonce: 0,
                 gas_limit: 21_000,
-                max_fee_per_gas: rng.random(),
-                max_priority_fee_per_gas: rng.random(),
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
                 to: TxKind::Call(Address::random_with(rng)),
                 value: U256::random_with(rng),
                 access_list: Default::default(),
@@ -118,12 +121,15 @@ pub mod testutils {
 
     impl Random for TxEip4844 {
         fn random<R: Rng>(rng: &mut R) -> Self {
+            let max_fee_per_gas = rng.random();
+            let max_priority_fee_per_gas = rng.random_range(0..max_fee_per_gas);
+
             Self {
                 chain_id: 1,
                 nonce: 0,
                 gas_limit: 21_000,
-                max_fee_per_gas: rng.random(),
-                max_priority_fee_per_gas: rng.random(),
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
                 value: U256::random_with(rng),
                 access_list: Default::default(),
                 input: Bytes::random(rng),
@@ -152,12 +158,15 @@ pub mod testutils {
 
     impl Random for TxEip7702 {
         fn random<R: Rng>(rng: &mut R) -> Self {
+            let max_fee_per_gas = rng.random();
+            let max_priority_fee_per_gas = rng.random_range(0..max_fee_per_gas);
+
             Self {
                 chain_id: 1,
                 nonce: 0,
                 gas_limit: 21_000,
-                max_fee_per_gas: rng.random(),
-                max_priority_fee_per_gas: rng.random(),
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
                 value: U256::random_with(rng),
                 access_list: Default::default(),
                 input: Bytes::random(rng),
