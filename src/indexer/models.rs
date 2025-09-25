@@ -1,9 +1,13 @@
 //! Contains the model used for storing data inside Clickhouse.
 
-use crate::indexer::serde::{address, addresses, hash, hashes, u256es};
+use crate::{
+    indexer::ser::{address, addresses, hash, hashes, u256, u256es},
+    types::SystemTransaction,
+};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, B256, U256};
+use alloy_rlp::Encodable;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -287,38 +291,79 @@ pub(crate) struct PrivateTxRow {
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub time: OffsetDateTime,
     /// Transaction hash.
-    pub hash: String,
+    #[serde(with = "hash")]
+    pub hash: B256,
     /// Transaction from address.
+    #[serde(with = "address")]
     pub from: Address,
     /// Transaction nonce.
     pub nonce: u64,
     /// Signature `r` value.
+    #[serde(with = "u256")]
     pub r: U256,
     /// Signature `s` value.
+    #[serde(with = "u256")]
     pub s: U256,
     /// Signature `v` value.
-    pub v: U256,
+    pub v: u8,
     /// Transaction to addresses if present.
+    #[serde(with = "address::option")]
     pub to: Option<Address>,
     /// Transaction gas limit.
-    pub gas: U256,
+    pub gas: u64,
     /// Transaction type.
     #[serde(rename = "type")]
     pub tx_type: u64,
     /// Transaction input field.
-    pub input: String,
+    pub input: Vec<u8>,
     /// Transaction value.
+    #[serde(with = "u256")]
     pub value: U256,
     /// Transaction gas price.
-    pub gas_price: Option<U256>,
+    pub gas_price: Option<u128>,
     /// Transaction max fee per gas value.
-    pub max_fee_per_gas: Option<U256>,
+    pub max_fee_per_gas: Option<u128>,
     /// Transaction max priority fee per gas value.
-    pub max_priority_fee_per_gas: Option<U256>,
+    pub max_priority_fee_per_gas: Option<u128>,
     /// Transaction access list.
-    pub access_list: Option<String>,
+    pub access_list: Option<Vec<u8>>,
     /// Builder name.
     pub builder_name: String,
+}
+
+impl From<(SystemTransaction, String)> for PrivateTxRow {
+    fn from(value: (SystemTransaction, String)) -> Self {
+        let (system_tx, builder_name) = value;
+        let tx = &*system_tx.transaction; // Dereference the Arc<PooledTransaction>
+
+        // Extract signature components
+        let signature = tx.signature();
+
+        Self {
+            time: OffsetDateTime::now_utc(), // You may want to pass this as a parameter
+            hash: *tx.tx_hash(),
+            from: system_tx.signer,
+            nonce: tx.nonce(),
+            r: signature.r(),
+            s: signature.s(),
+            v: signature.v() as u8,
+            to: tx.to(),
+            gas: tx.gas_limit(),
+            tx_type: tx.tx_type() as u64,
+            input: tx.input().to_vec(),
+            value: tx.value(),
+            gas_price: tx.gas_price(),
+            max_fee_per_gas: Some(tx.max_fee_per_gas()),
+            max_priority_fee_per_gas: tx.max_priority_fee_per_gas(),
+            access_list: tx.access_list().map(|al| {
+                let mut buf: Vec<u8> = Vec::new();
+                let mut slice = buf.as_mut_slice();
+                al.encode(&mut slice);
+                buf
+            }),
+            builder_name,
+        }
+    }
 }
 
 /// Tests to make sure round-trip conversion between raw bundle and clickhouse bundle types is

@@ -1,5 +1,51 @@
 //! Extra serde serialization/deserialization helpers for `Vec<alloy_primitives::U256>`
 
+pub(super) mod u256 {
+    use alloy_primitives::U256;
+    use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};
+
+    /// EVM U256 is represented in big-endian, but ClickHouse expects little-endian.
+    pub(crate) fn serialize<S: Serializer>(u256: &U256, serializer: S) -> Result<S::Ok, S::Error> {
+        let buf: [u8; 32] = u256.to_le_bytes();
+        buf.serialize(serializer)
+    }
+
+    /// Deserialize U256 following ClickHouse RowBinary format.
+    ///
+    /// ClickHouse stores U256 in little-endian, we have to convert it back to big-endian.
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<U256, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let buf: [u8; 32] = Deserialize::deserialize(deserializer)?;
+        Ok(U256::from_le_bytes(buf))
+    }
+
+    pub(crate) mod option {
+        use super::*;
+
+        pub(crate) fn serialize<S: Serializer>(
+            maybe_u256: &Option<U256>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            if let Some(u256) = maybe_u256 {
+                let buf: [u8; 32] = u256.to_le_bytes();
+                serializer.serialize_some(&buf)
+            } else {
+                serializer.serialize_none()
+            }
+        }
+
+        pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Option<U256>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let option: Option<[u8; 32]> = Deserialize::deserialize(deserializer)?;
+            Ok(option.map(U256::from_le_bytes))
+        }
+    }
+}
+
 pub(super) mod u256es {
     use alloy_primitives::U256;
     use serde::{
@@ -94,7 +140,23 @@ pub(super) mod hash {
 
 pub(super) mod address {
     use alloy_primitives::Address;
-    use serde::{de::Deserializer, ser::Serializer, Deserialize};
+    use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};
+
+    pub(crate) fn serialize<S: Serializer>(
+        address: &Address,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let address_bytes = &address.0 .0;
+        address_bytes.serialize(serializer)
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Address, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let buf: [u8; 20] = Deserialize::deserialize(deserializer)?;
+        Ok(Address::from(buf))
+    }
 
     pub(crate) mod option {
         use super::*;
