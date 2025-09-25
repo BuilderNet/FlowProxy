@@ -360,7 +360,8 @@ impl OrderflowIngress {
             .spawn_with_priority(priority, move || {
                 SystemBundle::try_from_bundle_and_signer(bundle, signer)
             })
-            .await?;
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
@@ -425,7 +426,8 @@ impl OrderflowIngress {
                 tx.recover_signer()?;
                 Ok::<(), IngressError>(())
             })
-            .await?;
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
 
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(priority, transaction);
@@ -451,7 +453,7 @@ impl OrderflowIngress {
 }
 
 /// Attempt to decompress the header if `content-encoding` header is set to `gzip`.
-fn maybe_decompress(
+pub fn maybe_decompress(
     gzip_enabled: bool,
     headers: &HeaderMap,
     body: axum::body::Bytes,
@@ -468,7 +470,7 @@ fn maybe_decompress(
 }
 
 /// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and verify the signer of the request.
-fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
+pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
     let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;
