@@ -14,6 +14,8 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
+    let _ = tracing_subscriber::fmt().try_init();
+
     let registry = Registry::new();
 
     let router = Router::new()
@@ -32,14 +34,13 @@ async fn main() {
         .unwrap();
 }
 
-#[tracing::instrument(skip(registry))]
+#[tracing::instrument(skip(registry, creds))]
 async fn register_credentials(
     State(registry): State<Registry>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(creds): Json<BuilderHubOrderflowProxyCredentials>,
 ) -> impl IntoResponse {
-    tracing::info!("Request from IP: {}", addr.ip());
-    // Your handler logic here
+    tracing::info!("Registering credentials for builder: {:?}", creds.ecdsa_pubkey_address);
 
     let signer = creds.ecdsa_pubkey_address;
 
@@ -60,9 +61,15 @@ async fn register_credentials(
 async fn get_builders(
     State(registry): State<Registry>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-) {
-    tracing::info!("Request from IP: {}", addr.ip());
-    // Your handler logic here
+) -> impl IntoResponse {
+    tracing::info!("Getting builders");
+    let builders = registry
+        .builders
+        .iter()
+        .map(|builder| builder.value().clone())
+        .collect::<Vec<BuilderHubBuilder>>();
+
+    Json(builders)
 }
 
 #[derive(Debug, Clone)]
