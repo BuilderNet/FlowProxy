@@ -46,7 +46,8 @@ metrics-exporter-prometheus = { version = "0.17.2", default-features = false, fe
 clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", branch = "main", features = [
   "inserter",
   "time",
-  "uuid"
+  "uuid",
+  "native-tls"
 ] }
 clickhouse-derive = { version = "0.2.0" }
 time = { version = "0.3.44" }
