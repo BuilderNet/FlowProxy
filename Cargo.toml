@@ -104,7 +104,9 @@ strip = "none"
 
 # Include debug info in benchmarks too.
 [profile.bench]
-inherits = "profiling"
+inherits = "release"
+debug = "full"
+strip = "none"
 
 [profile.maxperf]
 inherits = "release"
