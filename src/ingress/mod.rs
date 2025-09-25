@@ -138,6 +138,18 @@ impl OrderflowIngress {
             Err(error) => return JsonRpcResponse::error(None, error),
         };
 
+        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
+        {
+            Ok(request) => request,
+            Err(error) => {
+                trace!(target: "ingress", "Error parsing JSON-RPC request");
+                ingress.metrics.user.json_rpc_parse_errors.increment(1);
+                return JsonRpcResponse::error(None, error);
+            }
+        };
+
+        trace!(target: "ingress", ?request, ?headers, "Parsed JSON-RPC request");
+
         // NOTE: Signature is mandatory
         let Some(signer) = maybe_verify_signature(&headers, &body) else {
             trace!(target: "ingress", "Error verifying signature");
@@ -154,16 +166,6 @@ impl OrderflowIngress {
             }
             data.rate_limit.inc();
         }
-
-        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
-        {
-            Ok(request) => request,
-            Err(error) => {
-                trace!(target: "ingress", "Error parsing JSON-RPC request");
-                ingress.metrics.user.json_rpc_parse_errors.increment(1);
-                return JsonRpcResponse::error(None, error);
-            }
-        };
 
         // Explicitly change the mutability of the `entity` variable.
         if let Some(mut data) = ingress.entity_data(entity) {
