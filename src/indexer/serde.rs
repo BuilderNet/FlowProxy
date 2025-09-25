@@ -1,40 +1,42 @@
 //! Extra serde serialization/deserialization helpers for `Vec<alloy_primitives::U256>`
 
-use alloy_primitives::U256;
-use serde::{
-    de::{Deserializer, SeqAccess, Visitor},
-    ser::{SerializeSeq, Serializer},
-    Deserialize,
-};
+pub(super) mod u256es {
+    use alloy_primitives::U256;
+    use serde::{
+        de::Deserializer,
+        ser::{SerializeSeq, Serializer},
+        Deserialize,
+    };
 
-/// Serialize Vec<U256> following ClickHouse RowBinary format.
-///
-/// EVM U256 is represented in big-endian, but ClickHouse expects little-endian.
-pub(crate) fn serialize_vec_u256<S: Serializer>(
-    vec: &Vec<U256>,
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    // It consists of a LEB128 length prefix followed by the raw bytes of each U256 in
-    // little-endian order.
+    /// Serialize Vec<U256> following ClickHouse RowBinary format.
+    ///
+    /// EVM U256 is represented in big-endian, but ClickHouse expects little-endian.
+    pub(crate) fn serialize<S: Serializer>(
+        u256: &Vec<U256>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        // It consists of a LEB128 length prefix followed by the raw bytes of each U256 in
+        // little-endian order.
 
-    // <https://github.com/ClickHouse/clickhouse-rs/blob/v0.13.3/src/rowbinary/ser.rs#L159-L164>
-    let mut seq = serializer.serialize_seq(Some(vec.len()))?;
-    for u256 in vec {
-        let buf: [u8; 32] = u256.to_le_bytes();
-        seq.serialize_element(&buf.as_slice())?;
+        // <https://github.com/ClickHouse/clickhouse-rs/blob/v0.13.3/src/rowbinary/ser.rs#L159-L164>
+        let mut seq = serializer.serialize_seq(Some(u256.len()))?;
+        for u256 in u256 {
+            let buf: [u8; 32] = u256.to_le_bytes();
+            seq.serialize_element(&buf)?;
+        }
+        seq.end()
     }
-    seq.end()
-}
 
-/// Deserialize Vec<U256> following ClickHouse RowBinary format.
-///
-/// ClickHouse stores U256 in little-endian, we have to convert it back to big-endian.
-pub(crate) fn deserialize_vec_u256<'de, D>(deserializer: D) -> Result<Vec<U256>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let vec: Vec<[u8; 32]> = Deserialize::deserialize(deserializer)?;
-    Ok(vec.into_iter().map(U256::from_le_bytes).collect())
+    /// Deserialize Vec<U256> following ClickHouse RowBinary format.
+    ///
+    /// ClickHouse stores U256 in little-endian, we have to convert it back to big-endian.
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<U256>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<[u8; 32]> = Deserialize::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(U256::from_le_bytes).collect())
+    }
 }
 
 pub(super) mod hashes {
