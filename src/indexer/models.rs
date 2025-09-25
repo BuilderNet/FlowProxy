@@ -3,7 +3,7 @@
 use crate::indexer::serde::{deserialize_vec_u256, hashes, serialize_vec_u256};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ pub(crate) struct BundleRow {
     pub transactions_hash: Vec<B256>,
     /// Collection of from addresses for transactions in the bundle.
     #[serde(rename = "transactions.from")]
-    pub transactions_from: Vec<String>,
+    pub transactions_from: Vec<Address>,
     /// Collection of nonces for transactions in the bundle.
     #[serde(rename = "transactions.nonce")]
     pub transactions_nonce: Vec<u64>,
@@ -44,7 +44,7 @@ pub(crate) struct BundleRow {
     pub transactions_v: Vec<u8>,
     /// Collection of to addresses for transactions in the bundle.
     #[serde(rename = "transactions.to")]
-    pub transactions_to: Vec<Option<String>>,
+    pub transactions_to: Vec<Option<Address>>,
     /// Collection of gas limit values for transactions in the bundle.
     #[serde(rename = "transactions.gas")]
     pub transactions_gas: Vec<u64>,
@@ -85,11 +85,11 @@ pub(crate) struct BundleRow {
     pub max_timestamp: Option<u64>,
 
     /// Collection of reverting transaction hashes.
-    pub reverting_tx_hashes: Vec<String>,
+    pub reverting_tx_hashes: Vec<B256>,
     /// Collection of dropping transaction hashes.
-    pub dropping_tx_hashes: Vec<String>,
+    pub dropping_tx_hashes: Vec<B256>,
     /// Collection of refund transaction hashes.
-    pub refund_tx_hashes: Vec<String>,
+    pub refund_tx_hashes: Vec<B256>,
 
     /// Bundle uuid.
     #[serde(with = "clickhouse::serde::uuid::option")]
@@ -101,11 +101,11 @@ pub(crate) struct BundleRow {
     /// Bundle refund percent.
     pub refund_percent: Option<u8>,
     /// Bundle refund recipient.
-    pub refund_recipient: Option<String>,
+    pub refund_recipient: Option<Address>,
     /// The signer of the bundle,
-    pub signer_address: Option<String>,
+    pub signer_address: Option<Address>,
     /// For 2nd price refunds done by buildernet
-    pub refund_identity: Option<String>,
+    pub refund_identity: Option<Address>,
 
     /// Builder name.
     pub builder_name: String,
@@ -122,11 +122,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                 BundleRow {
                     time: bundle.received_at.into(),
                     transactions_hash: decoded.txs.iter().map(|tx| tx.hash()).collect(),
-                    transactions_from: decoded
-                        .txs
-                        .iter()
-                        .map(|tx| format!("{:?}", tx.signer()))
-                        .collect(),
+                    transactions_from: decoded.txs.iter().map(|tx| tx.signer()).collect(),
                     transactions_nonce: decoded.txs.iter().map(|tx| tx.nonce()).collect(),
                     transactions_r: decoded
                         .txs
@@ -143,11 +139,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .iter()
                         .map(|tx| tx.as_ref().signature().v().into())
                         .collect(),
-                    transactions_to: decoded
-                        .txs
-                        .iter()
-                        .map(|tx| tx.to().map(|t| format!("{t:?}")))
-                        .collect(),
+                    transactions_to: decoded.txs.iter().map(|tx| tx.to().map(|t| t)).collect(),
                     transactions_gas: decoded
                         .txs
                         .iter()
@@ -214,37 +206,21 @@ impl From<(SystemBundle, String)> for BundleRow {
                     block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
                     min_timestamp: bundle.raw_bundle.min_timestamp,
                     max_timestamp: bundle.raw_bundle.max_timestamp,
-                    reverting_tx_hashes: bundle
-                        .raw_bundle
-                        .reverting_tx_hashes
-                        .clone()
-                        .iter()
-                        .map(|h| format!("{h:?}"))
-                        .collect(),
-                    dropping_tx_hashes: bundle
-                        .raw_bundle
-                        .dropping_tx_hashes
-                        .clone()
-                        .iter()
-                        .map(|h| format!("{h:?}"))
-                        .collect(),
+                    reverting_tx_hashes: bundle.raw_bundle.reverting_tx_hashes.clone(),
+                    dropping_tx_hashes: bundle.raw_bundle.dropping_tx_hashes.clone(),
                     refund_tx_hashes: bundle
                         .raw_bundle
                         .refund_tx_hashes
                         .clone()
-                        .map(|v| v.iter().map(|h| format!("{h:?}")).collect())
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
                     uuid: Some(decoded.uuid),
                     replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
-                    signer_address: Some(format!("{:?}", bundle.signer)),
+                    signer_address: Some(bundle.signer),
                     builder_name,
                     refund_percent: bundle.raw_bundle.refund_percent,
-                    refund_recipient: bundle
-                        .raw_bundle
-                        .refund_recipient
-                        .map(|recipient| format!("{recipient:x}")),
+                    refund_recipient: bundle.raw_bundle.refund_recipient,
                     refund_identity: None,
                     hash: format!("{:?}", decoded.hash),
                 }
@@ -280,13 +256,10 @@ impl From<(SystemBundle, String)> for BundleRow {
                     uuid: None,
                     replacement_uuid: Some(replacement.key.key().id),
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
-                    signer_address: Some(format!("{:?}", bundle.signer)),
+                    signer_address: Some(bundle.signer),
                     builder_name,
                     refund_percent: bundle.raw_bundle.refund_percent,
-                    refund_recipient: bundle
-                        .raw_bundle
-                        .refund_recipient
-                        .map(|recipient| format!("{recipient:x}")),
+                    refund_recipient: bundle.raw_bundle.refund_recipient,
                     refund_identity: None,
                     hash: format!("{:?}", bundle.bundle_hash), // always lowercase
                 }
@@ -307,7 +280,7 @@ pub(crate) struct PrivateTxRow {
     /// Transaction hash.
     pub hash: String,
     /// Transaction from address.
-    pub from: String,
+    pub from: Address,
     /// Transaction nonce.
     pub nonce: u64,
     /// Signature `r` value.
@@ -317,7 +290,7 @@ pub(crate) struct PrivateTxRow {
     /// Signature `v` value.
     pub v: U256,
     /// Transaction to addresses if present.
-    pub to: Option<String>,
+    pub to: Option<Address>,
     /// Transaction gas limit.
     pub gas: U256,
     /// Transaction type.
@@ -355,23 +328,13 @@ pub(crate) mod tests {
         Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Encodable2718};
-    use alloy_primitives::{hex, Address, Bytes, FixedBytes, Signature, TxKind, B256, U256, U64};
+    use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256, U64};
     use rbuilder_primitives::serialize::RawBundle;
 
     use crate::{
         indexer::{self, models::BundleRow},
         types::SystemBundle,
     };
-
-    /// Decodes the hex string to the provided number of bytes.
-    ///
-    /// Panics if it's not a valid hex string.
-    fn decode_bytes<const N: usize>(hex: &str) -> FixedBytes<N> {
-        let bytes = alloy_primitives::hex::decode(hex.strip_prefix("0x").unwrap_or(hex)).unwrap();
-        let mut addr = [0u8; N];
-        addr.copy_from_slice(&bytes);
-        addr.into()
-    }
 
     impl From<BundleRow> for RawBundle {
         fn from(value: BundleRow) -> Self {
@@ -399,30 +362,20 @@ pub(crate) mod tests {
                 min_timestamp: value.min_timestamp,
                 max_timestamp: value.max_timestamp,
                 txs: tx_envelopes.into_iter().map(|tx| Bytes::from(tx.encoded_2718())).collect(),
-                reverting_tx_hashes: value
-                    .reverting_tx_hashes
-                    .iter()
-                    .map(|h| decode_bytes(h))
-                    .collect(),
-                dropping_tx_hashes: value
-                    .dropping_tx_hashes
-                    .iter()
-                    .map(|h| decode_bytes(h))
-                    .collect(),
+                reverting_tx_hashes: value.reverting_tx_hashes.clone(),
+                dropping_tx_hashes: value.dropping_tx_hashes.clone(),
                 // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it was
                 // written, because in Clickhouse we cannot have `Nullable(Array(T))`.
-                refund_tx_hashes: Some(
-                    value.refund_tx_hashes.iter().map(|h| decode_bytes(h)).collect(),
-                ),
+                refund_tx_hashes: Some(value.refund_tx_hashes.clone()),
                 // NOTE: we'll always consider this unset, and set the `replacement_uuid` instead.
                 uuid: None,
                 replacement_uuid: value.replacement_uuid,
                 replacement_nonce: value.replacement_nonce,
                 refund_percent: value.refund_percent,
-                refund_recipient: value.refund_recipient.map(|r| decode_bytes(&r).into()),
+                refund_recipient: value.refund_recipient,
                 first_seen_at: None,
                 version: None,
-                signing_address: value.signer_address.map(|h| decode_bytes(&h).into()),
+                signing_address: value.signer_address,
             };
 
             raw_bundle
@@ -436,7 +389,7 @@ pub(crate) mod tests {
         transactions_r: Vec<U256>,
         transactions_s: Vec<U256>,
         transactions_v: Vec<u8>,
-        transactions_to: Vec<Option<String>>,
+        transactions_to: Vec<Option<Address>>,
         transactions_gas: Vec<u64>,
         transactions_type: Vec<u64>,
         transactions_input: Vec<String>,
@@ -457,7 +410,7 @@ pub(crate) mod tests {
 
             // Parse destination address
             let to = match &transactions_to[i] {
-                Some(addr_str) => TxKind::Call(addr_str.parse::<Address>()?),
+                Some(addr) => TxKind::Call(*addr),
                 None => TxKind::Create,
             };
 
@@ -591,7 +544,7 @@ pub(crate) mod tests {
     fn clickhouse_bundle_row_conversion_round_trip_works() {
         let system_bundle = indexer::tests::system_bundle_example();
         let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
-        let signer = decode_bytes(bundle_row.signer_address.as_ref().unwrap()).into();
+        let signer = *bundle_row.signer_address.as_ref().unwrap();
 
         let mut raw_bundle_round_trip: RawBundle = bundle_row.into();
         // For this bundle in particular, ensure it set to `None`, and don't populate it with the
@@ -613,7 +566,7 @@ pub(crate) mod tests {
     fn clickhouse_cancel_bundle_row_conversion_round_trip_works() {
         let system_bundle = indexer::tests::system_cancel_bundle_example();
         let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
-        let signer = decode_bytes(bundle_row.signer_address.as_ref().unwrap()).into();
+        let signer = *bundle_row.signer_address.as_ref().unwrap();
 
         let raw_bundle_round_trip: RawBundle = bundle_row.into();
 

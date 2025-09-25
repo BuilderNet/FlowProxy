@@ -57,8 +57,6 @@ where
 }
 
 pub(super) mod hashes {
-    use std::str::FromStr;
-
     use alloy_primitives::B256;
     use serde::{
         de::Deserializer,
@@ -73,8 +71,7 @@ pub(super) mod hashes {
         let mut seq = serializer.serialize_seq(Some(vec.len()))?;
         for hash in vec {
             // Converts a String to ASCII bytes
-            let bytes = Vec::from(format!("{hash:?}"));
-            seq.serialize_element(&bytes)?;
+            seq.serialize_element(hash.as_slice())?;
         }
 
         seq.end()
@@ -84,10 +81,36 @@ pub(super) mod hashes {
     where
         D: Deserializer<'de>,
     {
-        let vec: Vec<Vec<u8>> = Deserialize::deserialize(deserializer)?;
-        Ok(vec
-            .into_iter()
-            .map(|b| B256::from_str(&String::from_utf8(b).unwrap()).unwrap())
-            .collect())
+        let vec: Vec<&[u8]> = Deserialize::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|b| B256::from_slice(b)).collect())
+    }
+}
+
+pub(super) mod addresses {
+    use alloy_primitives::Address;
+    use serde::{
+        de::Deserializer,
+        ser::{SerializeSeq, Serializer},
+        Deserialize,
+    };
+
+    pub(crate) fn serialize<S: Serializer>(
+        vec: &Vec<Address>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(vec.len()))?;
+        for address in vec {
+            seq.serialize_element(address.as_slice())?;
+        }
+
+        seq.end()
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Address>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: Vec<&[u8]> = Deserialize::deserialize(deserializer)?;
+        Ok(vec.into_iter().map(|b| Address::from_slice(b)).collect())
     }
 }
