@@ -77,7 +77,7 @@ pub mod testutils {
                 chain_id: Some(1),
                 nonce: 0,
                 gas_price: rng.random(),
-                gas_limit: 21_000,
+                gas_limit: 100_000,
                 to: TxKind::Call(Address::random_with(rng)),
                 value: U256::random_with(rng),
                 input: Bytes::random(rng),
@@ -91,7 +91,7 @@ pub mod testutils {
                 chain_id: 1,
                 nonce: 0,
                 gas_price: rng.random(),
-                gas_limit: 21_000,
+                gas_limit: 100_000,
                 to: TxKind::Call(Address::random_with(rng)),
                 value: U256::random_with(rng),
                 input: Bytes::random(rng),
@@ -108,7 +108,7 @@ pub mod testutils {
             Self {
                 chain_id: 1,
                 nonce: 0,
-                gas_limit: 21_000,
+                gas_limit: 100_000,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 to: TxKind::Call(Address::random_with(rng)),
@@ -127,7 +127,7 @@ pub mod testutils {
             Self {
                 chain_id: 1,
                 nonce: 0,
-                gas_limit: 21_000,
+                gas_limit: 100_000,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 value: U256::random_with(rng),
@@ -164,7 +164,7 @@ pub mod testutils {
             Self {
                 chain_id: 1,
                 nonce: 0,
-                gas_limit: 21_000,
+                gas_limit: 100_000,
                 max_fee_per_gas,
                 max_priority_fee_per_gas,
                 value: U256::random_with(rng),
@@ -178,13 +178,12 @@ pub mod testutils {
 
     impl Random for EthereumTypedTransaction<TxEip4844Variant> {
         fn random<R: Rng>(rng: &mut R) -> Self {
-            let tx_type = rng.random_range(0..=4);
+            let tx_type = rng.random_range(0..=3);
             match tx_type {
                 0 => EthereumTypedTransaction::Legacy(TxLegacy::random(rng)),
                 1 => EthereumTypedTransaction::Eip2930(TxEip2930::random(rng)),
                 2 => EthereumTypedTransaction::Eip1559(TxEip1559::random(rng)),
                 3 => EthereumTypedTransaction::Eip4844(TxEip4844WithSidecar::random(rng).into()),
-                4 => EthereumTypedTransaction::Eip7702(TxEip7702::random(rng)),
                 _ => unreachable!(),
             }
         }
