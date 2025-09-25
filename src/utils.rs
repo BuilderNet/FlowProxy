@@ -46,8 +46,9 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
 
 pub mod testutils {
     use alloy_consensus::{
-        EthereumTypedTransaction, SignableTransaction as _, TxEip1559, TxEip2930, TxEip4844,
-        TxEip7702, TxEnvelope, TxLegacy,
+        BlobTransactionSidecar, EthereumTypedTransaction, SidecarBuilder, SignableTransaction as _,
+        SimpleCoder, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar, TxEip7702, TxEnvelope,
+        TxLegacy,
     };
     use alloy_eips::Encodable2718 as _;
     use alloy_primitives::{Address, Bytes, TxKind, U256};
@@ -134,6 +135,22 @@ pub mod testutils {
         }
     }
 
+    impl Random for TxEip4844WithSidecar {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            Self { tx: TxEip4844::random(rng), sidecar: BlobTransactionSidecar::random(rng) }
+        }
+    }
+
+    impl Random for BlobTransactionSidecar {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            let mut data = [0u8; 1024];
+            rng.fill_bytes(&mut data);
+            let sidecar: SidecarBuilder<SimpleCoder> = SidecarBuilder::from_slice(&data);
+
+            sidecar.build().unwrap()
+        }
+    }
+
     impl Random for TxEip7702 {
         fn random<R: Rng>(rng: &mut R) -> Self {
             Self {
@@ -151,14 +168,14 @@ pub mod testutils {
         }
     }
 
-    impl Random for EthereumTypedTransaction<TxEip4844> {
+    impl Random for EthereumTypedTransaction<TxEip4844WithSidecar> {
         fn random<R: Rng>(rng: &mut R) -> Self {
             let tx_type = rng.random_range(0..=4);
             match tx_type {
                 0 => EthereumTypedTransaction::Legacy(TxLegacy::random(rng)),
                 1 => EthereumTypedTransaction::Eip2930(TxEip2930::random(rng)),
                 2 => EthereumTypedTransaction::Eip1559(TxEip1559::random(rng)),
-                3 => EthereumTypedTransaction::Eip4844(TxEip4844::random(rng)),
+                3 => EthereumTypedTransaction::Eip4844(TxEip4844WithSidecar::random(rng)),
                 4 => EthereumTypedTransaction::Eip7702(TxEip7702::random(rng)),
                 _ => unreachable!(),
             }
@@ -173,7 +190,7 @@ pub mod testutils {
             let sighash = transaction.signature_hash();
             let signature = signer.sign_hash_sync(&sighash).unwrap();
 
-            TxEnvelope::new_unhashed(transaction.into(), signature)
+            TxEnvelope::new_unhashed(transaction, signature)
         }
     }
 
@@ -190,13 +207,13 @@ pub mod testutils {
                 signing_address: None,
                 version: Some("v2".to_string()),
                 block_number: None,
-                replacement_uuid: Some(Uuid::new_v4()),
+                replacement_uuid: None,
                 uuid: None,
                 min_timestamp: None,
                 max_timestamp: None,
-                replacement_nonce: None,
-                refund_percent: Some(rng.random()),
-                refund_recipient: None,
+                replacement_nonce: Some(rng.random()),
+                refund_percent: Some(rng.random_range(0..100)),
+                refund_recipient: Some(Address::random_with(rng)),
                 first_seen_at: None,
             }
         }
