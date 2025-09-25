@@ -86,6 +86,54 @@ pub(super) mod hashes {
     }
 }
 
+pub(super) mod address {
+    use alloy_primitives::Address;
+    use serde::{
+        de::Deserializer,
+        ser::{SerializeSeq, SerializeTuple as _, Serializer},
+        Deserialize,
+    };
+
+    pub(crate) mod option {
+        use super::*;
+
+        pub(crate) fn serialize<S: Serializer>(
+            address: &Option<Address>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            serializer.serialize_some(&address.map(|a| a.0))
+        }
+
+        pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Option<Address>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let vec: Option<[u8; 20]> = Deserialize::deserialize(deserializer)?;
+            Ok(vec.map(Address::from))
+        }
+    }
+
+    pub(crate) fn serialize<S: Serializer>(
+        address: &Address,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut tuple = serializer.serialize_tuple(20)?;
+        for byte in address.0 {
+            tuple.serialize_element(&byte)?;
+        }
+
+        tuple.end()
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Address, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let vec: [u8; 20] = Deserialize::deserialize(deserializer)?;
+        Ok(Address::from(vec))
+    }
+}
+
 pub(super) mod addresses {
     use alloy_primitives::Address;
     use serde::{
@@ -93,6 +141,29 @@ pub(super) mod addresses {
         ser::{SerializeSeq, Serializer},
         Deserialize,
     };
+
+    pub(crate) mod option {
+        use super::*;
+
+        pub(crate) fn serialize<S: Serializer>(
+            vec: &Vec<Option<Address>>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            let mut seq = serializer.serialize_seq(Some(vec.len()))?;
+            for address in vec {
+                seq.serialize_element(&address.map(|a| a.0))?;
+            }
+            seq.end()
+        }
+
+        pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Option<Address>>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let vec: Vec<Option<[u8; 20]>> = Deserialize::deserialize(deserializer)?;
+            Ok(vec.into_iter().map(|b| b.map(Address::from)).collect())
+        }
+    }
 
     pub(crate) fn serialize<S: Serializer>(
         vec: &Vec<Address>,

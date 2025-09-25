@@ -1,6 +1,6 @@
 //! Contains the model used for storing data inside Clickhouse.
 
-use crate::indexer::serde::{deserialize_vec_u256, hashes, serialize_vec_u256};
+use crate::indexer::serde::{address, addresses, deserialize_vec_u256, hashes, serialize_vec_u256};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, B256, U256};
@@ -20,7 +20,7 @@ pub(crate) struct BundleRow {
     /// Collection of hashes for transactions in the bundle.
     pub transactions_hash: Vec<B256>,
     /// Collection of from addresses for transactions in the bundle.
-    #[serde(rename = "transactions.from")]
+    #[serde(rename = "transactions.from", with = "addresses")]
     pub transactions_from: Vec<Address>,
     /// Collection of nonces for transactions in the bundle.
     #[serde(rename = "transactions.nonce")]
@@ -43,7 +43,7 @@ pub(crate) struct BundleRow {
     #[serde(rename = "transactions.v")]
     pub transactions_v: Vec<u8>,
     /// Collection of to addresses for transactions in the bundle.
-    #[serde(rename = "transactions.to")]
+    #[serde(rename = "transactions.to", with = "addresses::option")]
     pub transactions_to: Vec<Option<Address>>,
     /// Collection of gas limit values for transactions in the bundle.
     #[serde(rename = "transactions.gas")]
@@ -85,10 +85,13 @@ pub(crate) struct BundleRow {
     pub max_timestamp: Option<u64>,
 
     /// Collection of reverting transaction hashes.
+    #[serde(with = "hashes")]
     pub reverting_tx_hashes: Vec<B256>,
     /// Collection of dropping transaction hashes.
+    #[serde(with = "hashes")]
     pub dropping_tx_hashes: Vec<B256>,
     /// Collection of refund transaction hashes.
+    #[serde(with = "hashes")]
     pub refund_tx_hashes: Vec<B256>,
 
     /// Bundle uuid.
@@ -101,10 +104,13 @@ pub(crate) struct BundleRow {
     /// Bundle refund percent.
     pub refund_percent: Option<u8>,
     /// Bundle refund recipient.
+    #[serde(with = "address::option")]
     pub refund_recipient: Option<Address>,
     /// The signer of the bundle,
+    #[serde(with = "address::option")]
     pub signer_address: Option<Address>,
     /// For 2nd price refunds done by buildernet
+    #[serde(with = "address::option")]
     pub refund_identity: Option<Address>,
 
     /// Builder name.
