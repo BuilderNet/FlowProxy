@@ -451,7 +451,7 @@ impl OrderflowIngress {
 }
 
 /// Attempt to decompress the header if `content-encoding` header is set to `gzip`.
-fn maybe_decompress(
+pub fn maybe_decompress(
     gzip_enabled: bool,
     headers: &HeaderMap,
     body: axum::body::Bytes,
@@ -468,7 +468,7 @@ fn maybe_decompress(
 }
 
 /// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and verify the signer of the request.
-fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
+pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
     let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;

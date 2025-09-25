@@ -1,7 +1,7 @@
 // Common test utilities and types
 // This module is shared across all integration tests
 
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
 use alloy_consensus::{
     EthereumTxEnvelope, EthereumTypedTransaction, SignableTransaction as _, TxEip1559, TxEip4844,
@@ -10,14 +10,19 @@ use alloy_eips::Encodable2718;
 use alloy_primitives::{bytes::BytesMut, Address, Bytes, TxKind, U256};
 use alloy_signer::{Signer, SignerSync};
 use alloy_signer_local::PrivateKeySigner;
+use axum::{extract::State, routing::post, Router};
 use buildernet_orderflow_proxy::{
-    cli::OrderflowIngressArgs, ingress::FLASHBOTS_SIGNATURE_HEADER, jsonrpc::JSONRPC_VERSION_2,
+    cli::OrderflowIngressArgs,
+    ingress::{maybe_decompress, FLASHBOTS_SIGNATURE_HEADER},
+    jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
 };
-use hyper::header;
+use hyper::{header, HeaderMap};
 use rbuilder_primitives::serialize::RawBundle;
 use revm_primitives::keccak256;
-use serde_json::json;
-use tokio::net::TcpListener;
+use serde::de::DeserializeOwned;
+use serde_json::{json, Value};
+use tokio::{net::TcpListener, sync::broadcast};
+use tracing::Instrument as _;
 
 pub(crate) struct IngressClient<S: Signer> {
     pub(crate) url: String,
@@ -25,23 +30,29 @@ pub(crate) struct IngressClient<S: Signer> {
     pub(crate) signer: S,
 }
 
-pub(crate) async fn spawn_ingress() -> IngressClient<PrivateKeySigner> {
-    let args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
+pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
+    let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
+    if let Some(builder_url) = builder_url {
+        args.builder_url = builder_url;
+    }
     let user_listener = TcpListener::bind(&args.user_listen_url).await.unwrap();
     let system_listener = TcpListener::bind(&args.system_listen_url).await.unwrap();
     let builder_listener = TcpListener::bind(&args.builder_listen_url).await.unwrap();
     let address = user_listener.local_addr().unwrap();
 
-    tokio::spawn(async move {
-        buildernet_orderflow_proxy::run_with_listeners(
-            args,
-            user_listener,
-            system_listener,
-            builder_listener,
-        )
-        .await
-        .unwrap();
-    });
+    tokio::spawn(
+        async move {
+            buildernet_orderflow_proxy::run_with_listeners(
+                args,
+                user_listener,
+                system_listener,
+                builder_listener,
+            )
+            .await
+            .unwrap();
+        }
+        .instrument(tracing::info_span!("proxy", ?address)),
+    );
 
     let url = format!("http://{address}");
     let health_url = format!("{url}/health");
@@ -107,6 +118,65 @@ impl<S: Signer> IngressClient<S> {
         let sighash = keccak256(payload);
         let signature = self.signer.sign_hash(&sighash).await.unwrap();
         format!("{:?}:{}", self.signer.address(), signature)
+    }
+}
+
+pub(crate) struct BuilderReceiver {
+    pub(crate) local_addr: SocketAddr,
+    pub(crate) receiver: broadcast::Receiver<Value>,
+}
+
+impl BuilderReceiver {
+    pub(crate) async fn spawn() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        let (sender, receiver) = broadcast::channel(128);
+
+        let router = Router::new().route("/", post(BuilderReceiver::receive)).with_state(sender);
+
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+
+        BuilderReceiver { local_addr: address, receiver }
+    }
+
+    pub(crate) async fn recv<T: DeserializeOwned>(&mut self) -> Result<T, serde_json::Error> {
+        serde_json::from_value(self.receiver.recv().await.unwrap())
+    }
+
+    pub(crate) fn url(&self) -> String {
+        format!("http://{}", self.local_addr)
+    }
+
+    async fn receive(
+        State(sender): State<broadcast::Sender<Value>>,
+        headers: HeaderMap,
+        body: axum::body::Bytes,
+    ) -> JsonRpcResponse<()> {
+        let body = match maybe_decompress(true, &headers, body) {
+            Ok(decompressed) => decompressed,
+            Err(error) => {
+                tracing::error!("Error decompressing body: {:?}", error);
+                return JsonRpcResponse::error(None, error)
+            }
+        };
+
+        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
+        {
+            Ok(request) => request,
+            Err(error) => return JsonRpcResponse::error(None, error),
+        };
+
+        let request_id = request.id;
+        tracing::info!(id = request_id, method = request.method, "Received request");
+
+        tracing::info!("Sending request to builder");
+        tracing::debug!("Request: {:?}", request);
+        let _ = sender.send(request.take_single_param().unwrap());
+
+        JsonRpcResponse::result(request_id, ())
     }
 }
 
