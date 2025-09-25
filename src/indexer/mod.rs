@@ -109,7 +109,7 @@ impl ClickhouseIndexer {
             if let Err(e) = self.bundle_inserter.write(&bundle_row).await {
                 tracing::error!(target: TRACING_TARGET,
                     ?e,
-                    bundle_hash = bundle_row.hash,
+                    bundle_hash = ?bundle_row.hash,
                     "failed to write bundle to clickhouse inserter"
                 )
             }
