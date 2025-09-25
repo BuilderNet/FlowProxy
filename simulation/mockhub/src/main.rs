@@ -2,11 +2,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 use alloy_primitives::Address;
 use axum::{
-    Json, Router,
     extract::{ConnectInfo, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
+    Json, Router,
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -46,7 +46,7 @@ async fn register_credentials(
 
     let builder = BuilderHubBuilder {
         name: format!("{:?}", signer),
-        ip: addr.to_string(),
+        ip: format!("http://{}", addr),
         dns_name: addr.ip().to_string(),
         orderflow_proxy: creds,
         instance: BuilderHubInstanceData { tls_cert: "test".to_string() },
