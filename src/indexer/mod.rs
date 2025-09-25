@@ -158,21 +158,24 @@ pub struct MockIndexer {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::fs;
+    use std::{borrow::Cow, collections::BTreeMap, fs};
 
-    use clickhouse::{
-        error::Result as ClickhouseResult, test::handlers::RecordDdlControl,
-        Client as ClickhouseClient,
-    };
-    use derive_more::{Deref, DerefMut, From, Into};
+    use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
     use rbuilder_primitives::serialize::RawBundle;
+    use testcontainers::{
+        core::{
+            error::Result as TestcontainersResult, wait::HttpWaitStrategy, ContainerPort, WaitFor,
+        },
+        runners::AsyncRunner as _,
+        ContainerAsync, Image,
+    };
     use time::UtcDateTime;
     use tokio::sync::mpsc;
 
     use crate::{
         indexer::{
-            models::BundleRow, BundleIndexer, ClickhouseIndexer, IndexerHandle,
-            BUNDLE_INDEXER_BUFFER_SIZE, BUNDLE_TABLE_NAME,
+            models::BundleRow, ClickhouseIndexer, IndexerHandle, BUNDLE_INDEXER_BUFFER_SIZE,
+            BUNDLE_TABLE_NAME,
         },
         types::SystemBundle,
     };
@@ -208,41 +211,65 @@ pub(crate) mod tests {
     "refundTxHashes": []
 }"#;
 
-    #[derive(From, Into, Deref, DerefMut)]
-    struct MockClickhouseClient {
-        #[deref]
-        #[deref_mut]
-        inner: ClickhouseClient,
-        mock: clickhouse::test::Mock,
+    /// The default clickhouse image name to use for testcontainers testing.
+    const CLICKHOUSE_DEFAULT_IMAGE_NAME: &str = "clickhouse/clickhouse-server";
+    /// The default clickhouse image tag to use for testcontainers testing.
+    const CLICKHOUSE_DEFAULT_IMAGE_TAG: &str = "25.6.2.5";
+    /// Port that the [`ClickHouse`] container has internally, for testcontainers testing.
+    /// Can be rebound externally via [`testcontainers::core::ImageExt::with_mapped_port`].
+    const CLICKHOUSE_PORT: ContainerPort = ContainerPort::Tcp(8123);
+
+    /// A clickhouse image that can be spawn up using testcontainers.
+    ///
+    /// # Example
+    /// ```
+    /// use testcontainers_modules::{clickhouse, testcontainers::runners::SyncRunner};
+    ///
+    /// let clickhouse = clickhouse::ClickHouse::default().start().unwrap();
+    /// let http_port = clickhouse.get_host_port_ipv4(8123).unwrap();
+    ///
+    /// // do something with the started clickhouse instance..
+    /// ```
+    ///
+    /// [`ClickHouse`]: https://clickhouse.com/
+    /// [`Clickhouse docker image`]: https://hub.docker.com/r/clickhouse/clickhouse-server
+    #[derive(Debug, Clone)]
+    struct ClickhouseImage {
+        env_vars: BTreeMap<String, String>,
     }
 
-    impl MockClickhouseClient {
-        fn new() -> Self {
-            let mock = clickhouse::test::Mock::new();
-            let inner = ClickhouseClient::default().with_mock(&mock).with_validation(true);
-            Self { inner, mock }
+    impl Image for ClickhouseImage {
+        fn name(&self) -> &str {
+            CLICKHOUSE_DEFAULT_IMAGE_NAME
         }
 
-        async fn create_bundles_table(&self) -> ClickhouseResult<RecordDdlControl> {
-            let recording = self.mock.add(clickhouse::test::handlers::record_ddl());
-            let create_bundles_table_ddl =
-                fs::read_to_string("./fixtures/create_bundles_table.sql")
-                    .expect("could not read create_bundles_table.sql");
-            self.query(&create_bundles_table_ddl).execute().await?;
-            Ok(recording)
+        fn tag(&self) -> &str {
+            CLICKHOUSE_DEFAULT_IMAGE_TAG
+        }
+
+        fn ready_conditions(&self) -> Vec<WaitFor> {
+            vec![WaitFor::http(HttpWaitStrategy::new("/").with_expected_status_code(200_u16))]
+        }
+
+        fn env_vars(
+            &self,
+        ) -> impl IntoIterator<Item = (impl Into<Cow<'_, str>>, impl Into<Cow<'_, str>>)> {
+            &self.env_vars
+        }
+
+        fn expose_ports(&self) -> &[ContainerPort] {
+            &[CLICKHOUSE_PORT]
         }
     }
 
-    #[allow(dead_code)]
-    impl ClickhouseIndexer {
-        async fn receive_one(&mut self) {
-            let Some(system_bundle) = self.bundle_rx.recv().await else {
-                panic!("Expected to receive a bundle")
-            };
-            let bundle_row = (system_bundle, self.builder_name.clone()).into();
-
-            self.bundle_inserter.write(&bundle_row).await.unwrap();
-            let _ = self.bundle_inserter.commit().await;
+    impl Default for ClickhouseImage {
+        fn default() -> Self {
+            let mut env_vars = BTreeMap::default();
+            env_vars.insert("CLICKHOUSE_DB".to_string(), "default".to_string());
+            env_vars.insert("CLICKHOUSE_USER".to_string(), "default".to_string());
+            env_vars.insert("CLICKHOUSE_PASSWORD".to_string(), "password".to_string());
+            env_vars.insert("CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT".to_string(), "1".to_string());
+            Self { env_vars }
         }
     }
 
@@ -262,87 +289,83 @@ pub(crate) mod tests {
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
-    // NOTE: when working with the mocked clickhouse client, every request must have a
-    // corresponding handler before it's executed, otherwise it will panic.
-    //
-    // This is an example of how such handlers are created and used: <https://github.com/ClickHouse/clickhouse-rs/blob/main/examples/mock.rs>
+    /// Create a test clickhouse client using testcontainers. Returns both the image and the
+    /// client.
+    ///
+    /// IMPORTANT: the image must be manually `drop`ped at the end of the test, otherwise the
+    /// container is cancelled prematurely.
+    async fn create_test_clickhouse_client(
+    ) -> TestcontainersResult<(ContainerAsync<ClickhouseImage>, ClickhouseClient)> {
+        // Start a Docker client (testcontainers manages lifecycle)
+        let clickhouse = ClickhouseImage::default().start().await?;
+        let port = clickhouse.get_host_port_ipv4(8123).await?;
+        let host = clickhouse.get_host().await?;
+        let url = format!("http://{}:{}", host, port);
+
+        Ok((
+            clickhouse,
+            ClickhouseClient::default()
+                .with_url(url)
+                .with_user("default")
+                .with_password("password")
+                .with_validation(true),
+        ))
+    }
+
+    /// Creates the bundles table from the DDL present inside the `fixtures` folder.
+    async fn create_clickhouse_bundles_table(client: &ClickhouseClient) -> ClickhouseResult<()> {
+        let create_bundles_table_ddl = fs::read_to_string("./fixtures/create_bundles_table.sql")
+            .expect("could not read create_bundles_table.sql")
+            // NOTE: for local instances, ReplicatedMergeTree isn't supported.
+            .replace(
+                "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
+                "ENGINE = MergeTree()",
+            );
+        client.query(&create_bundles_table_ddl).execute().await
+    }
 
     #[tokio::test]
     async fn clickhouse_bundles_table_create_table_succeds() {
-        let client = MockClickhouseClient::new();
-        let recording = client.create_bundles_table().await.unwrap();
-        assert!(recording.query().await.contains("CREATE TABLE"));
+        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        create_clickhouse_bundles_table(&client).await.unwrap();
+        drop(image);
     }
 
-    /// Adapated from <https://github.com/ClickHouse/clickhouse-rs/blob/v0.13.3/examples/mock.rs>
     #[tokio::test]
     async fn clickhouse_bundles_insert_single_row_succeeds() {
-        // Scaffolding
-
-        let client = MockClickhouseClient::new();
-        client.create_bundles_table().await.unwrap();
+        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        create_clickhouse_bundles_table(&client).await.unwrap();
 
         let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let handle = IndexerHandle { bundle_tx: tx };
+        let _ = IndexerHandle { bundle_tx: tx };
         let bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
 
-        let indexer = ClickhouseIndexer {
+        let mut indexer = ClickhouseIndexer {
             bundle_rx: rx,
-            client: client.inner.clone(),
+            client: client.clone(),
             bundle_inserter,
             builder_name: "buildernet".to_string(),
         };
 
         let system_bundle = system_bundle_example();
 
-        let expected_bundle_rows =
-            vec![BundleRow::from((system_bundle.clone(), indexer.builder_name.clone()))];
+        indexer
+            .bundle_inserter
+            .write(&(system_bundle.clone(), indexer.builder_name.clone()).into())
+            .await
+            .unwrap();
 
-        // Test logic
-
-        // Add handler for the next INSERT request.
-        let recording = client.mock.add(clickhouse::test::handlers::record());
-
-        tokio::spawn(indexer.run());
-        handle.index_bundle(system_bundle);
-
-        let recording_rows: Vec<BundleRow> = recording.collect().await;
-        assert_eq!(expected_bundle_rows, recording_rows);
-    }
-
-    /// Adapated from <https://github.com/ClickHouse/clickhouse-rs/blob/v0.13.3/examples/mock.rs>
-    #[tokio::test]
-    async fn clickhouse_bundles_insert_single_cancel_bundle_row_succeeds() {
-        // Scaffolding
-
-        let client = MockClickhouseClient::new();
-        client.create_bundles_table().await.unwrap();
-
-        let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let handle = IndexerHandle { bundle_tx: tx };
-        let bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
-
-        let indexer = ClickhouseIndexer {
-            bundle_rx: rx,
-            client: client.inner.clone(),
-            bundle_inserter,
-            builder_name: "buildernet".to_string(),
-        };
+        indexer.bundle_inserter.force_commit().await.unwrap();
 
         let system_bundle = system_cancel_bundle_example();
 
-        let expected_bundle_rows =
-            vec![BundleRow::from((system_bundle.clone(), indexer.builder_name.clone()))];
+        indexer
+            .bundle_inserter
+            .write(&(system_bundle.clone(), indexer.builder_name.clone()).into())
+            .await
+            .unwrap();
 
-        // Test logic
-
-        // Add handler for the next INSERT request.
-        let recording = client.mock.add(clickhouse::test::handlers::record());
-
-        tokio::spawn(indexer.run());
-        handle.index_bundle(system_bundle);
-
-        let recording_rows: Vec<BundleRow> = recording.collect().await;
-        assert_eq!(expected_bundle_rows, recording_rows);
+        indexer.bundle_inserter.force_commit().await.unwrap();
+        drop(image);
     }
 }
