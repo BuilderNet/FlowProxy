@@ -1,6 +1,6 @@
 //! Contains the model used for storing data inside Clickhouse.
 
-use crate::indexer::serde::{address, addresses, hashes, u256es};
+use crate::indexer::serde::{address, addresses, hash, hashes, u256es};
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, B256, U256};
@@ -105,7 +105,8 @@ pub(crate) struct BundleRow {
     pub builder_name: String,
 
     /// The hash of the bundle (unique identifier)
-    pub hash: String,
+    #[serde(with = "hash")]
+    pub hash: B256,
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
@@ -216,7 +217,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     refund_percent: bundle.raw_bundle.refund_percent,
                     refund_recipient: bundle.raw_bundle.refund_recipient,
                     refund_identity: None,
-                    hash: format!("{:?}", decoded.hash),
+                    hash: decoded.hash,
                 }
             }
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
@@ -255,7 +256,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     refund_percent: bundle.raw_bundle.refund_percent,
                     refund_recipient: bundle.raw_bundle.refund_recipient,
                     refund_identity: None,
-                    hash: format!("{:?}", bundle.bundle_hash), // always lowercase
+                    hash: bundle.bundle_hash,
                 }
             }
         };

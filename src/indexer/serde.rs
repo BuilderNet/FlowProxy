@@ -69,6 +69,23 @@ pub(super) mod hashes {
     }
 }
 
+pub(super) mod hash {
+    use alloy_primitives::B256;
+    use serde::{de::Deserializer, ser::Serializer, Deserialize};
+
+    pub(crate) fn serialize<S: Serializer>(hash: &B256, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&hash.0)
+    }
+
+    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<B256, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes: [u8; 32] = Deserialize::deserialize(deserializer)?;
+        Ok(B256::from(bytes))
+    }
+}
+
 pub(super) mod address {
     use alloy_primitives::Address;
     use serde::{de::Deserializer, ser::Serializer, Deserialize};
