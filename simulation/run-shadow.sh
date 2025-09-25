@@ -82,6 +82,8 @@ run () {
     CONTAINER_ID=$(docker create "${DOCKER_CREATE_FLAGS[@]}" "${TAG}" /bin/bash -c \
         "cd /root/buildernet-orderflow-proxy-v2 \
          && cargo build \
+         && cd /root/buildernet-orderflow-proxy-v2/simulation/mockhub \
+         && cargo build \
          && cd /root \
          && /root/.local/bin/shadow /root/buildernet.yaml")
 
@@ -98,6 +100,7 @@ run () {
 
     # Recover the shadow output files
     docker cp "${CONTAINER_ID}":/root/shadow.data/ .
+    echo "Results of the shadow simulation have been copied locally to shadow.data/"
 
     # Cleanup
     if [ "${RV}" != "0" ]; then

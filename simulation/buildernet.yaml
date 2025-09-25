@@ -1,5 +1,5 @@
 general:
-  stop_time: 1000s
+  stop_time: 100s
 
 network:
   graph:
@@ -9,31 +9,37 @@ network:
 #      path: network-graph-2-zones.yaml
 
 hosts:
+  hub:
+    network_node_id: 0
+    processes:
+    - path: /root/buildernet-orderflow-proxy-v2/simulation/mockhub/target/debug/mockhub
+      start_time: 0s
+      expected_final_state: running
   proxy1:
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --peer-store-path ../../peerstore.db
-      start_time: 0s
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
+      start_time: 1s
       expected_final_state: running
   proxy2:
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --peer-store-path ../../peerstore.db
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
   proxy3:
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --peer-store-path ../../peerstore.db
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
       start_time: 31s
       expected_final_state: running
   proxy4:
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --peer-store-path ../../peerstore.db
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
       start_time: 61s
       expected_final_state: running
