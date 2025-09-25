@@ -43,3 +43,162 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
     }
     false
 }
+
+pub mod testutils {
+    use alloy_consensus::{
+        EthereumTypedTransaction, SignableTransaction as _, TxEip1559, TxEip2930, TxEip4844,
+        TxEip7702, TxEnvelope, TxLegacy,
+    };
+    use alloy_eips::Encodable2718 as _;
+    use alloy_primitives::{Address, Bytes, TxKind, U256};
+    use alloy_signer::SignerSync as _;
+    use alloy_signer_local::PrivateKeySigner;
+    use rand::Rng;
+    use rbuilder_primitives::serialize::RawBundle;
+    use uuid::Uuid;
+
+    /// A trait for types that can be randomly generated.
+    pub trait Random {
+        fn random<R: Rng>(rng: &mut R) -> Self;
+    }
+
+    impl Random for Bytes {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            let len = rng.random_range(0..=1024);
+            let mut bytes = Vec::with_capacity(len);
+            rng.fill_bytes(&mut bytes);
+            bytes.into()
+        }
+    }
+
+    impl Random for TxLegacy {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            Self {
+                chain_id: Some(1),
+                nonce: 0,
+                gas_price: rng.random(),
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::random_with(rng)),
+                value: U256::random_with(rng),
+                input: Bytes::random(rng),
+            }
+        }
+    }
+
+    impl Random for TxEip2930 {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            Self {
+                chain_id: 1,
+                nonce: 0,
+                gas_price: rng.random(),
+                gas_limit: 21_000,
+                to: TxKind::Call(Address::random_with(rng)),
+                value: U256::random_with(rng),
+                input: Bytes::random(rng),
+                access_list: Default::default(),
+            }
+        }
+    }
+
+    impl Random for TxEip1559 {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            Self {
+                chain_id: 1,
+                nonce: 0,
+                gas_limit: 21_000,
+                max_fee_per_gas: rng.random(),
+                max_priority_fee_per_gas: rng.random(),
+                to: TxKind::Call(Address::random_with(rng)),
+                value: U256::random_with(rng),
+                access_list: Default::default(),
+                input: Bytes::random(rng),
+            }
+        }
+    }
+
+    impl Random for TxEip4844 {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            Self {
+                chain_id: 1,
+                nonce: 0,
+                gas_limit: 21_000,
+                max_fee_per_gas: rng.random(),
+                max_priority_fee_per_gas: rng.random(),
+                value: U256::random_with(rng),
+                access_list: Default::default(),
+                input: Bytes::random(rng),
+                blob_versioned_hashes: Default::default(),
+                max_fee_per_blob_gas: rng.random(),
+                to: Address::random_with(rng),
+            }
+        }
+    }
+
+    impl Random for TxEip7702 {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            Self {
+                chain_id: 1,
+                nonce: 0,
+                gas_limit: 21_000,
+                max_fee_per_gas: rng.random(),
+                max_priority_fee_per_gas: rng.random(),
+                value: U256::random_with(rng),
+                access_list: Default::default(),
+                input: Bytes::random(rng),
+                to: Address::random_with(rng),
+                authorization_list: Default::default(),
+            }
+        }
+    }
+
+    impl Random for EthereumTypedTransaction<TxEip4844> {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            let tx_type = rng.random_range(0..=4);
+            match tx_type {
+                0 => EthereumTypedTransaction::Legacy(TxLegacy::random(rng)),
+                1 => EthereumTypedTransaction::Eip2930(TxEip2930::random(rng)),
+                2 => EthereumTypedTransaction::Eip1559(TxEip1559::random(rng)),
+                3 => EthereumTypedTransaction::Eip4844(TxEip4844::random(rng)),
+                4 => EthereumTypedTransaction::Eip7702(TxEip7702::random(rng)),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    impl Random for TxEnvelope {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            let signer = PrivateKeySigner::random();
+            let transaction = EthereumTypedTransaction::random(rng);
+
+            let sighash = transaction.signature_hash();
+            let signature = signer.sign_hash_sync(&sighash).unwrap();
+
+            TxEnvelope::new_unhashed(transaction.into(), signature)
+        }
+    }
+
+    impl Random for RawBundle {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            let txs_len = rng.random_range(1..=10);
+            let txs = (0..txs_len).map(|_| TxEnvelope::random(rng).encoded_2718().into()).collect();
+
+            Self {
+                txs,
+                reverting_tx_hashes: vec![],
+                dropping_tx_hashes: vec![],
+                refund_tx_hashes: None,
+                signing_address: None,
+                version: Some("v2".to_string()),
+                block_number: None,
+                replacement_uuid: Some(Uuid::new_v4()),
+                uuid: None,
+                min_timestamp: None,
+                max_timestamp: None,
+                replacement_nonce: None,
+                refund_percent: Some(rng.random()),
+                refund_recipient: None,
+                first_seen_at: None,
+            }
+        }
+    }
+}

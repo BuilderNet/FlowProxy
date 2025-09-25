@@ -1,14 +1,18 @@
+use alloy_consensus::TxEnvelope;
+use alloy_eips::Encodable2718 as _;
 use buildernet_orderflow_proxy::{
     ingress::FLASHBOTS_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
+    utils::testutils::Random,
 };
 use flate2::{write::GzEncoder, Compression};
+use rbuilder_primitives::serialize::RawBundle;
 use reqwest::{header, StatusCode};
 use serde_json::json;
 use std::io::Write;
 
 mod common;
-use common::{create_test_bundle, spawn_ingress, test_transaction_raw};
+use common::spawn_ingress;
 
 mod assert {
     use buildernet_orderflow_proxy::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
@@ -25,6 +29,7 @@ mod assert {
 
 #[tokio::test]
 async fn ingress_http_e2e() {
+    let mut rng = rand::rng();
     let client = spawn_ingress().await;
 
     let empty = json!({});
@@ -75,11 +80,12 @@ async fn ingress_http_e2e() {
     assert!(response.status().is_client_error());
     assert::jsonrpc_error(response, JsonRpcError::InvalidParams).await;
 
-    let raw_tx = test_transaction_raw();
+    let test_tx = TxEnvelope::random(&mut rng);
+    let raw_tx = test_tx.encoded_2718().into();
     let response = client.send_raw_tx(&raw_tx).await;
     assert!(response.status().is_success());
 
-    let bundle = create_test_bundle();
+    let bundle = RawBundle::random(&mut rng);
     let response = client.send_bundle(&bundle).await;
     assert!(response.status().is_success());
 
