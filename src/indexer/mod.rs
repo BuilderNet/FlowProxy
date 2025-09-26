@@ -77,7 +77,7 @@ impl ClickhouseIndexableOrderflow for SystemBundle {
 impl ClickhouseIndexableOrderflow for SystemTransaction {
     type ClickhouseRowType = PrivateTxRow;
 
-    const ORDERFLOW_NAME: &'static str = "bundle";
+    const ORDERFLOW_NAME: &'static str = "transaction";
 
     fn hash(&self) -> B256 {
         self.tx_hash()
