@@ -29,7 +29,7 @@ reset-db:
   # Create the bundles table.
   ./clickhouse client --host $CLICKHOUSE_HOST --user $CLICKHOUSE_USER --secure --password $CLICKHOUSE_PASSWORD -d buildernet_orderflow_proxy --queries-file ./fixtures/create_bundles_table.sql
 
-query := "SELECT * EXCEPT (internal_uuid, replacement_uuid) \
+query := "SELECT * REPLACE(toString(internal_uuid) AS internal_uuid, toString(replacement_uuid) AS replacement_uuid) \
 FROM bundles \
 WHERE (timestamp >= '2025-09-26 12:32:00.000000') AND (timestamp <= '2025-09-26 12:42:00.000000') \
 INTO OUTFILE 'filename' \
