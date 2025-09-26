@@ -85,14 +85,13 @@ run () {
          && cd /root/buildernet-orderflow-proxy-v2/simulation/mockhub \
          && cargo build \
          && cd /root \
-         && /root/.local/bin/shadow /root/buildernet.yaml")
+         && /root/.local/bin/shadow /root/shadow-configs/buildernet.yaml")
 
     # Copy the source files
     docker cp .. "${CONTAINER_ID}":/root/buildernet-orderflow-proxy-v2/
 
     # Copy the shadow configuration files
-    scenario=buildernet.yaml
-    docker cp ${scenario} "${CONTAINER_ID}":/root
+    docker cp shadow-configs/ "${CONTAINER_ID}":/root
 
     # Start the container and execute the commands listed above
     RV=0
