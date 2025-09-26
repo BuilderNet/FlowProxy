@@ -5,76 +5,124 @@ use std::{fmt::Debug, time::Duration};
 
 use clickhouse::{
     inserter::{Inserter, Quantities},
-    Client as ClickhouseClient,
+    Client as ClickhouseClient, Row, RowWrite,
 };
+use serde::Serialize;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::info;
 
-use crate::{cli::ClickhouseArgs, indexer::models::BundleRow, types::SystemBundle};
+use crate::{
+    cli::ClickhouseArgs,
+    indexer::models::{BundleRow, PrivateTxRow},
+    types::{SystemBundle, SystemTransaction},
+};
+
+use alloy_primitives::B256;
 
 mod models;
-mod serde;
+mod ser;
 
 /// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 4096;
+/// The size of the channel buffer for the bundle indexer.
+pub const TRANSACTION_INDEXER_BUFFER_SIZE: usize = 4096;
 /// The name of the Clickhouse table to store bundles in.
 pub const BUNDLE_TABLE_NAME: &str = "bundles";
+/// The name of the Clickhouse table to store transactions in.
+pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 /// The tracing target for this indexer crate.
 const TRACING_TARGET: &str = "indexer";
 
-/// Trait for adding bundle indexing functionality.
-pub trait BundleIndexer: Sync + Send {
+/// A simple alias to refer to a builder name.
+pub(crate) type BuilderName = String;
+
+/// Trait for adding order indexing functionality.
+pub trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
+    fn index_transaction(&self, system_transaction: SystemTransaction);
+}
+
+/// An high-level order type that can be indexed in clickhouse.
+trait ClickhouseIndexableOrder: Sized {
+    /// The associated inner row type that can be serialized into Clickhouse data.
+    type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
+
+    /// The type of such order, e.g. "bundles" or "transactions". For informational purposes.
+    const ORDER_TYPE: &'static str;
+
+    /// An identifier of such order.
+    fn hash(&self) -> B256;
+
+    /// Internal function that takes the inner row types and extracts the reference needed for
+    /// Clickhouse inserter functions like `Inserter::write`. While a default implementation is not
+    /// provided, it should suffice to simply return `row`.
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_>;
+}
+
+impl ClickhouseIndexableOrder for SystemBundle {
+    type ClickhouseRowType = BundleRow;
+
+    const ORDER_TYPE: &'static str = "bundle";
+
+    fn hash(&self) -> B256 {
+        self.bundle_hash
+    }
+
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
+        row
+    }
+}
+
+impl ClickhouseIndexableOrder for SystemTransaction {
+    type ClickhouseRowType = PrivateTxRow;
+
+    const ORDER_TYPE: &'static str = "transaction";
+
+    fn hash(&self) -> B256 {
+        self.tx_hash()
+    }
+
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
+        row
+    }
 }
 
 /// An handle to the indexer, which mainly consists of channel senders to send data to be indexed.
 #[derive(Debug)]
 pub struct IndexerHandle {
     bundle_tx: mpsc::Sender<SystemBundle>,
+    transaction_tx: mpsc::Sender<SystemTransaction>,
+
+    #[allow(dead_code)] // Not awaited as of now.
+    bundle_indexer_task: JoinHandle<()>,
+    #[allow(dead_code)] // Not awaited as of now.
+    transaction_indexer_task: JoinHandle<()>,
 }
 
-/// The Clickhouse indexer implementation.
-pub struct ClickhouseIndexer {
-    /// The underlying Clickhouse client, used to create the Clickhouse `Inserter`.
-    #[allow(dead_code)]
-    pub(crate) client: ClickhouseClient,
-    /// A Clickhouse inserter which supports batching and periodic commits upon configurable
-    /// conditions.
-    pub(crate) bundle_inserter: Inserter<BundleRow>,
-    /// The receiver half of the channel to receive bundles to index.
-    pub(crate) bundle_rx: mpsc::Receiver<SystemBundle>,
-    /// The name of the local builder, to store in the `builder_name` column.
-    pub(crate) builder_name: String,
-}
-
-impl Debug for ClickhouseIndexer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClickhouseIndexer")
-            .field("client", &"ClickhouseClient")
-            .field("bundle_rx", &self.bundle_rx)
-            .field("bundle_inserter", &"Inserter")
-            .field("builder_name", &self.builder_name)
-            .finish()
-    }
-}
+/// A namespace struct to spawn a Clickhouse indexer.
+#[derive(Debug, Clone)]
+pub struct ClickhouseIndexer;
 
 impl ClickhouseIndexer {
-    /// Create and spawn a new Clickhouse indexer task, returning the indexer handle and its
-    /// task handle.
-    pub fn spawn(
-        args: Option<ClickhouseArgs>,
-        builder_name: String,
-    ) -> (IndexerHandle, JoinHandle<()>) {
-        let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let handle = IndexerHandle { bundle_tx: tx };
+    /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
+    pub fn spawn(args: Option<ClickhouseArgs>, builder_name: BuilderName) -> IndexerHandle {
+        let (bundle_tx, mut bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let (transaction_tx, mut transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
 
         let Some(args) = args else {
             info!("Running with mocked indexer");
-            let mut indexer = MockIndexer { bundle_rx: rx };
-            let task_handle = tokio::task::spawn(async move {
-                while let Some(_b) = indexer.bundle_rx.recv().await {}
-            });
-            return (handle, task_handle);
+            let _bundle_indexer_task =
+                tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+            let _transaction_indexer_task =
+                tokio::task::spawn(
+                    async move { while let Some(_t) = transaction_rx.recv().await {} },
+                );
+            return IndexerHandle {
+                bundle_tx,
+                transaction_tx,
+                bundle_indexer_task: _bundle_indexer_task,
+                transaction_indexer_task: _transaction_indexer_task,
+            };
         };
 
         info!(host = %args.host, "Running with clickhouse indexer");
@@ -93,73 +141,87 @@ impl ClickhouseIndexer {
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
             .with_max_rows(65_536);
 
-        let indexer = ClickhouseIndexer { bundle_rx: rx, client, bundle_inserter, builder_name };
-        let task_handle = tokio::spawn(indexer.run());
+        let transaction_inserter = client
+            .inserter::<PrivateTxRow>(BUNDLE_TABLE_NAME)
+            .with_period(Some(Duration::from_secs(3))) // Dump every 3s
+            .with_period_bias(0.1)
+            .with_max_bytes(128 * 1024 * 1024) // 128MiB
+            .with_max_rows(65_536);
 
-        (handle, task_handle)
-    }
+        let bundle_indexer_task =
+            tokio::spawn(run_indexer(bundle_rx, bundle_inserter, builder_name.clone()));
+        let transaction_indexer_task =
+            tokio::spawn(run_indexer(transaction_rx, transaction_inserter, builder_name.clone()));
 
-    /// Run the indexer until the receiving channel is closed.
-    async fn run(mut self) {
-        while let Some(system_bundle) = self.bundle_rx.recv().await {
-            tracing::trace!(target: TRACING_TARGET, hash = %system_bundle.bundle_hash, "received bundle to index");
-
-            let bundle_row = (system_bundle, self.builder_name.clone()).into();
-
-            if let Err(e) = self.bundle_inserter.write(&bundle_row).await {
-                tracing::error!(target: TRACING_TARGET,
-                    ?e,
-                    bundle_hash = ?bundle_row.hash,
-                    "failed to write bundle to clickhouse inserter"
-                )
-            }
-
-            // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
-            // `force_commit` or not. It kinda sucks. I should fork it and make a PR
-            // eventually.
-            //
-            // TODO(thedevbirb): implement a file-based backup in case this call fails due to
-            // connection timeouts or whatever.
-            match self.bundle_inserter.commit().await {
-                Ok(quantities) => {
-                    if quantities == Quantities::ZERO {
-                        tracing::trace!(target: TRACING_TARGET, hash = %bundle_row.hash, "committed bundle to inserter");
-                    } else {
-                        tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch to clickhouse")
-                    }
-                }
-                Err(e) => {
-                    tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle to clickhouse")
-                }
-            }
-        }
-
-        tracing::error!(target: TRACING_TARGET, "bundle tx channel closed, indexer will stop running");
-        if let Err(e) = self.bundle_inserter.end().await {
-            tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion to indexer");
-        }
+        IndexerHandle { bundle_tx, transaction_tx, bundle_indexer_task, transaction_indexer_task }
     }
 }
 
-impl BundleIndexer for IndexerHandle {
+/// Run the indexer of the specified type until the receiving channel is closed.
+async fn run_indexer<T: ClickhouseIndexableOrder>(
+    mut rx: mpsc::Receiver<T>,
+    mut inserter: Inserter<T::ClickhouseRowType>,
+    builder_name: BuilderName,
+) {
+    while let Some(order) = rx.recv().await {
+        tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
+
+        let hash = order.hash();
+        let order_row: T::ClickhouseRowType = (order, builder_name.clone()).into();
+        let value_ref = T::to_row_ref(&order_row);
+
+        if let Err(e) = inserter.write(value_ref).await {
+            tracing::error!(target: TRACING_TARGET,
+                ?e,
+                %hash,
+                "failed to write {} to clickhouse inserter", T::ORDER_TYPE
+            )
+        }
+
+        // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
+        // `force_commit` or not. It kinda sucks. I should fork it and make a PR
+        // eventually.
+        //
+        // TODO(thedevbirb): implement a file-based backup in case this call fails due to
+        // connection timeouts or whatever.
+        match inserter.commit().await {
+            Ok(quantities) => {
+                if quantities == Quantities::ZERO {
+                    tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
+                } else {
+                    tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
+                }
+            }
+            Err(e) => {
+                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
+            }
+        }
+    }
+
+    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
+    if let Err(e) = inserter.end().await {
+        tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of {}s to indexer", T::ORDER_TYPE);
+    }
+}
+
+impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
         }
     }
-}
-
-/// A mock indexer which just receives bundles and does nothing with them. Useful for testing or
-/// for running without an indexer.
-#[derive(Debug)]
-pub struct MockIndexer {
-    pub bundle_rx: mpsc::Receiver<SystemBundle>,
+    fn index_transaction(&self, system_transaction: SystemTransaction) {
+        if let Err(e) = self.transaction_tx.try_send(system_transaction) {
+            tracing::error!(?e, "failed to send transaction to index");
+        }
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::{borrow::Cow, collections::BTreeMap, fs, time::Duration};
+    use std::{borrow::Cow, collections::BTreeMap, fs, sync::Arc};
 
+    use alloy_consensus::transaction::SignerRecoverable;
     use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
     use rbuilder_primitives::serialize::RawBundle;
     use testcontainers::{
@@ -170,14 +232,13 @@ pub(crate) mod tests {
         ContainerAsync, Image,
     };
     use time::UtcDateTime;
-    use tokio::sync::mpsc;
 
     use crate::{
         indexer::{
-            models::BundleRow, ClickhouseIndexer, IndexerHandle, BUNDLE_INDEXER_BUFFER_SIZE,
-            BUNDLE_TABLE_NAME,
+            models::{BundleRow, PrivateTxRow},
+            BUNDLE_TABLE_NAME, TRANSACTIONS_TABLE_NAME,
         },
-        types::SystemBundle,
+        types::{decode_transaction, SystemBundle, SystemTransaction},
     };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
@@ -289,6 +350,15 @@ pub(crate) mod tests {
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
+    pub(crate) fn system_transaction_example() -> SystemTransaction {
+        let bytes = alloy_primitives::hex!("02f89201820132850826299e00850826299e0082a1d694f82300c34f0d11b0420ac3ce85f0ebe4e3e0544280a40d2959800000000000000000000000000000000000000000000000000000000000000001c001a0030c9637d6d442bd2f9a43f69ec09dbaedb12e08ef1fe38ae5ce855bbcfc36ada064101cb4c00d6c21e792a2959c896992c9bbf8e2d84ce7647d561bfbcf59365a");
+        let transaction =
+            Arc::new(decode_transaction(&alloy_primitives::Bytes::from(bytes)).unwrap());
+        let signer = transaction.recover_signer().unwrap();
+        let received_at = UtcDateTime::now();
+        SystemTransaction { transaction, signer, received_at }
+    }
+
     /// Create a test clickhouse client using testcontainers. Returns both the image and the
     /// client.
     ///
@@ -324,6 +394,22 @@ pub(crate) mod tests {
         client.query(&create_bundles_table_ddl).execute().await
     }
 
+    /// Creates the transactions table from the DDL present inside the `fixtures` folder.
+    async fn create_clickhouse_transactions_table(
+        client: &ClickhouseClient,
+    ) -> ClickhouseResult<()> {
+        let create_transactions_table = fs::read_to_string(
+            "./fixtures/create_transactions_table.sql",
+        )
+        .expect("could not read create_transactions_table.sql")
+        // NOTE: for local instances, ReplicatedMergeTree isn't supported.
+        .replace(
+            "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
+            "ENGINE = MergeTree()",
+        );
+        client.query(&create_transactions_table).execute().await
+    }
+
     #[tokio::test]
     async fn clickhouse_bundles_table_create_table_succeds() {
         let (image, client) = create_test_clickhouse_client().await.unwrap();
@@ -336,35 +422,22 @@ pub(crate) mod tests {
         let (image, client) = create_test_clickhouse_client().await.unwrap();
         create_clickhouse_bundles_table(&client).await.unwrap();
 
-        let (tx, rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let _ = IndexerHandle { bundle_tx: tx };
-        let bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
-
-        let mut indexer = ClickhouseIndexer {
-            bundle_rx: rx,
-            client: client.clone(),
-            bundle_inserter,
-            builder_name: "buildernet".to_string(),
-        };
+        let mut bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
+        let builder_name = "buildernet".to_string();
 
         // Insert system bundle and system cancel bundle
 
         let system_bundle = system_bundle_example();
-        let system_bundle_row = (system_bundle.clone(), indexer.builder_name.clone()).into();
+        let system_bundle_row = (system_bundle.clone(), builder_name.clone()).into();
 
-        indexer.bundle_inserter.write(&system_bundle_row).await.unwrap();
-        println!("{}", system_bundle_row.time);
-
-        indexer.bundle_inserter.force_commit().await.unwrap();
-
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        bundle_inserter.write(&system_bundle_row).await.unwrap();
+        bundle_inserter.commit().await.unwrap();
 
         let system_bundle_cancel = system_cancel_bundle_example();
-        let system_bundle_cancel_row =
-            (system_bundle_cancel.clone(), indexer.builder_name.clone()).into();
+        let system_bundle_cancel_row = (system_bundle_cancel.clone(), builder_name.clone()).into();
 
-        indexer.bundle_inserter.write(&system_bundle_cancel_row).await.unwrap();
-        indexer.bundle_inserter.force_commit().await.unwrap();
+        bundle_inserter.write(&system_bundle_cancel_row).await.unwrap();
+        bundle_inserter.commit().await.unwrap();
 
         // Now select then, and verify they match with original input.
 
@@ -375,6 +448,36 @@ pub(crate) mod tests {
             .unwrap();
 
         assert_eq!(select_rows, vec![system_bundle_row, system_bundle_cancel_row]);
+
+        drop(image);
+    }
+
+    #[tokio::test]
+    async fn clickhouse_transactions_insert_single_row_succeeds() {
+        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        create_clickhouse_transactions_table(&client).await.unwrap();
+
+        let mut bundle_inserter =
+            client.inserter::<PrivateTxRow>(TRANSACTIONS_TABLE_NAME).with_max_rows(0); // force commit immediately
+        let builder_name = "buildernet".to_string();
+
+        // Insert system transaction
+
+        let system_transaction = system_transaction_example();
+        let system_transaction_row = (system_transaction.clone(), builder_name.clone()).into();
+
+        bundle_inserter.write(&system_transaction_row).await.unwrap();
+        bundle_inserter.commit().await.unwrap();
+
+        // Now select then, and verify they match with original input.
+
+        let select_rows = client
+            .query(&format!("SELECT * FROM {TRANSACTIONS_TABLE_NAME} ORDER BY time ASC"))
+            .fetch_all::<PrivateTxRow>()
+            .await
+            .unwrap();
+
+        assert_eq!(select_rows, vec![system_transaction_row]);
 
         drop(image);
     }

@@ -226,6 +226,8 @@ pub struct SystemTransaction {
     pub transaction: Arc<PooledTransaction>,
     /// The original transaction signer.
     pub signer: Address,
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    pub received_at: UtcDateTime,
 }
 
 impl Deref for SystemTransaction {
@@ -238,8 +240,12 @@ impl Deref for SystemTransaction {
 
 impl SystemTransaction {
     /// Create a new system transaction from a transaction and a signer.
-    pub fn from_transaction_and_signer(transaction: PooledTransaction, signer: Address) -> Self {
-        Self { transaction: Arc::new(transaction), signer }
+    pub fn from_transaction_and_signer(
+        transaction: PooledTransaction,
+        signer: Address,
+        received_at: UtcDateTime,
+    ) -> Self {
+        Self { transaction: Arc::new(transaction), signer, received_at }
     }
 
     /// Encode the transaction as EIP-2718 encoded bytes.

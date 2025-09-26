@@ -2,7 +2,7 @@ use crate::{
     cache::OrderCache,
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
-    indexer::{BundleIndexer, IndexerHandle},
+    indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
@@ -193,7 +193,10 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress.send_raw_transaction(entity, tx).await.map(EthResponse::TxHash)
+                ingress
+                    .send_raw_transaction(entity, tx, received_at_utc)
+                    .await
+                    .map(EthResponse::TxHash)
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
@@ -414,6 +417,7 @@ impl OrderflowIngress {
         &self,
         entity: Entity,
         transaction: PooledTransaction,
+        received_at: UtcDateTime,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
         let tx_hash = *transaction.hash();
@@ -427,7 +431,8 @@ impl OrderflowIngress {
         self.order_cache.insert(tx_hash);
 
         let Entity::Signer(signer) = entity else { unreachable!() };
-        let transaction = SystemTransaction::from_transaction_and_signer(transaction, signer);
+        let transaction =
+            SystemTransaction::from_transaction_and_signer(transaction, signer, received_at);
 
         // Determine priority for processing given request.
         let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
@@ -442,6 +447,8 @@ impl OrderflowIngress {
                 Ok::<(), IngressError>(())
             })
             .await?;
+
+        self.indexer_handle.index_transaction(transaction.clone());
 
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(priority, transaction);
