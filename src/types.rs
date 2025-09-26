@@ -139,10 +139,11 @@ impl SystemBundle {
     /// Create a new system bundle from a raw bundle and a signer.
     /// Returns an error if the bundle fails to decode.
     pub fn try_from_bundle_and_signer(
-        bundle: RawBundle,
+        mut bundle: RawBundle,
         signer: Address,
     ) -> Result<Self, RawBundleConvertError> {
         let decoded = bundle.clone().decode(TxEncoding::WithBlobData)?;
+        bundle.signing_address = Some(signer);
 
         let bundle_hash = bundle.bundle_hash();
 

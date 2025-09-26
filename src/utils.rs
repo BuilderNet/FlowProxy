@@ -142,7 +142,12 @@ pub mod testutils {
 
     impl Random for TxEip4844WithSidecar {
         fn random<R: Rng>(rng: &mut R) -> Self {
-            Self { tx: TxEip4844::random(rng), sidecar: BlobTransactionSidecar::random(rng) }
+            let mut tx = TxEip4844::random(rng);
+            let sidecar = BlobTransactionSidecar::random(rng);
+
+            tx.blob_versioned_hashes = sidecar.versioned_hashes().collect();
+
+            Self { tx, sidecar }
         }
     }
 

@@ -263,6 +263,7 @@ impl OrderflowIngress {
         {
             Ok(request) => request,
             Err(error) => {
+                error!(target: "ingress", "Error parsing JSON-RPC request");
                 ingress.metrics.system.json_rpc_parse_errors.increment(1);
                 return JsonRpcResponse::error(None, error);
             }
@@ -279,11 +280,13 @@ impl OrderflowIngress {
         let (raw, response) = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(raw) = request.take_single_param() else {
+                    error!(target: "ingress", "Error parsing bundle from system request");
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 let Ok(bundle) = serde_json::from_value::<RawBundle>(raw.clone()) else {
+                    error!(target: "ingress", "Error parsing bundle from system request");
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
