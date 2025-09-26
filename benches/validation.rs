@@ -52,7 +52,7 @@ fn generate_signed_bundles(size: u64, rng: &mut StdRng) -> Vec<SignedRequest> {
             let hash = keccak256(&json_str);
             let signer = PrivateKeySigner::random();
 
-            let signature = signer.sign_message_sync(format!("{:?}", hash).as_bytes()).unwrap();
+            let signature = signer.sign_message_sync(format!("{hash:?}").as_bytes()).unwrap();
 
             let mut headers = HeaderMap::new();
             headers.insert(
