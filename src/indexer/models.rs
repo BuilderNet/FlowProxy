@@ -11,7 +11,7 @@ use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
-use serde_bytes::{self};
+use serde_bytes;
 use time::OffsetDateTime;
 use uuid::Uuid;
 

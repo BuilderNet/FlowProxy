@@ -2,7 +2,7 @@ use crate::{
     cache::OrderCache,
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
-    indexer::{IndexerHandle, OrderflowIndexer as _},
+    indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,

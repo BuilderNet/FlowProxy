@@ -36,22 +36,21 @@ const TRACING_TARGET: &str = "indexer";
 /// A simple alias to refer to a builder name.
 pub(crate) type BuilderName = String;
 
-/// Trait for adding orderflow indexing functionality.
-pub trait OrderflowIndexer: Sync + Send {
+/// Trait for adding order indexing functionality.
+pub trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
     fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
-/// An high-level orderflow type that can be indexed in clickhouse.
-trait ClickhouseIndexableOrderflow: Sized {
+/// An high-level order type that can be indexed in clickhouse.
+trait ClickhouseIndexableOrder: Sized {
     /// The associated inner row type that can be serialized into Clickhouse data.
     type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
 
-    /// The canonical name of such orderflow, e.g. "bundles" or "transactions". For informational
-    /// purposes.
-    const ORDERFLOW_NAME: &'static str;
+    /// The type of such order, e.g. "bundles" or "transactions". For informational purposes.
+    const ORDER_TYPE: &'static str;
 
-    /// An identifier of such orderflow.
+    /// An identifier of such order.
     fn hash(&self) -> B256;
 
     /// Internal function that takes the inner row types and extracts the reference needed for
@@ -60,10 +59,10 @@ trait ClickhouseIndexableOrderflow: Sized {
     fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_>;
 }
 
-impl ClickhouseIndexableOrderflow for SystemBundle {
+impl ClickhouseIndexableOrder for SystemBundle {
     type ClickhouseRowType = BundleRow;
 
-    const ORDERFLOW_NAME: &'static str = "bundle";
+    const ORDER_TYPE: &'static str = "bundle";
 
     fn hash(&self) -> B256 {
         self.bundle_hash
@@ -74,10 +73,10 @@ impl ClickhouseIndexableOrderflow for SystemBundle {
     }
 }
 
-impl ClickhouseIndexableOrderflow for SystemTransaction {
+impl ClickhouseIndexableOrder for SystemTransaction {
     type ClickhouseRowType = PrivateTxRow;
 
-    const ORDERFLOW_NAME: &'static str = "transaction";
+    const ORDER_TYPE: &'static str = "transaction";
 
     fn hash(&self) -> B256 {
         self.tx_hash()
@@ -159,23 +158,23 @@ impl ClickhouseIndexer {
 }
 
 /// Run the indexer of the specified type until the receiving channel is closed.
-async fn run_indexer<T: ClickhouseIndexableOrderflow>(
+async fn run_indexer<T: ClickhouseIndexableOrder>(
     mut rx: mpsc::Receiver<T>,
     mut inserter: Inserter<T::ClickhouseRowType>,
     builder_name: BuilderName,
 ) {
-    while let Some(orderflow) = rx.recv().await {
-        tracing::trace!(target: TRACING_TARGET, hash = %orderflow.hash(), "received {} to index", T::ORDERFLOW_NAME);
+    while let Some(order) = rx.recv().await {
+        tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
 
-        let hash = orderflow.hash();
-        let orderflow_row: T::ClickhouseRowType = (orderflow, builder_name.clone()).into();
-        let value_ref = T::to_row_ref(&orderflow_row);
+        let hash = order.hash();
+        let order_row: T::ClickhouseRowType = (order, builder_name.clone()).into();
+        let value_ref = T::to_row_ref(&order_row);
 
         if let Err(e) = inserter.write(value_ref).await {
             tracing::error!(target: TRACING_TARGET,
                 ?e,
                 %hash,
-                "failed to write {} to clickhouse inserter", T::ORDERFLOW_NAME
+                "failed to write {} to clickhouse inserter", T::ORDER_TYPE
             )
         }
 
@@ -188,24 +187,24 @@ async fn run_indexer<T: ClickhouseIndexableOrderflow>(
         match inserter.commit().await {
             Ok(quantities) => {
                 if quantities == Quantities::ZERO {
-                    tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDERFLOW_NAME);
+                    tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
                 } else {
-                    tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDERFLOW_NAME)
+                    tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
                 }
             }
             Err(e) => {
-                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDERFLOW_NAME)
+                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
             }
         }
     }
 
-    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDERFLOW_NAME);
+    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
     if let Err(e) = inserter.end().await {
-        tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of {}s to indexer", T::ORDERFLOW_NAME);
+        tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of {}s to indexer", T::ORDER_TYPE);
     }
 }
 
-impl OrderflowIndexer for IndexerHandle {
+impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
