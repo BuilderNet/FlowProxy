@@ -1,45 +1,35 @@
 general:
-  stop_time: 100s
+  stop_time: 1000s
 
+# Intra-zone latencies: https://latency.azure.cloud63.fr
+# Inter-zone latencies: https://learn.microsoft.com/en-us/azure/networking/azure-network-latency
 network:
   graph:
-    type: 1_gbit_switch
-#    type: gml
-#    file:
-#      path: network-graph-2-zones.yaml
+#    type: 1_gbit_switch
+    type: gml
+    file:
+      path: network-graph-2-zones.yaml
 
 hosts:
   hub:
     network_node_id: 0
     processes:
-    - path: /root/buildernet-orderflow-proxy-v2/simulation/mockhub/target/debug/mockhub
+    - path: /root/mockhub
       start_time: 0s
       expected_final_state: running
-  proxy1:
+  proxy1: &proxy-virginia
     network_node_id: 0
     processes:
-    - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
+    - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
-  proxy2:
-    network_node_id: 0
+  proxy2: *proxy-virginia
+  proxy3: &proxy-frankfurt
+    network_node_id: 1
     processes:
-    - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
+    - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
-  proxy3:
-    network_node_id: 0
-    processes:
-    - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
-      start_time: 31s
-      expected_final_state: running
-  proxy4:
-    network_node_id: 0
-    processes:
-    - path: /root/buildernet-orderflow-proxy-v2/target/debug/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
-      start_time: 61s
-      expected_final_state: running
+  proxy4: *proxy-frankfurt
