@@ -55,7 +55,7 @@ pub(crate) struct BundleRow {
     pub transactions_type: Vec<u8>,
     /// Collection of inputs for transactions in the bundle.
     #[serde(rename = "transactions.input")]
-    pub transactions_input: Vec<String>,
+    pub transactions_input: Vec<Vec<u8>>,
     /// Collection of values for transactions in the bundle.
     #[serde(rename = "transactions.value", with = "u256es")]
     pub transactions_value: Vec<U256>,
@@ -70,10 +70,10 @@ pub(crate) struct BundleRow {
     pub transactions_max_priority_fee_per_gas: Vec<Option<u128>>,
     /// Collection of access lists for transactions in the bundle.
     #[serde(rename = "transactions.accessList")]
-    pub transactions_access_list: Vec<Option<String>>,
+    pub transactions_access_list: Vec<Option<Vec<u8>>>,
     /// Collection of authorization lists for transactions in the bundle.
     #[serde(rename = "transactions.authorizationList")]
-    pub transactions_authorization_list: Vec<Option<String>>,
+    pub transactions_authorization_list: Vec<Option<Vec<u8>>>,
 
     /// Bundle block number.
     pub block_number: Option<u64>,
@@ -164,7 +164,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_input: decoded
                         .txs
                         .iter()
-                        .map(|tx| alloy_primitives::hex::encode_prefixed(tx.as_ref().input()))
+                        .map(|tx| tx.as_ref().input().to_vec())
                         .collect(),
                     transactions_value: decoded.txs.iter().map(|tx| tx.value()).collect(),
                     transactions_gas_price: decoded
@@ -202,10 +202,9 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                                 if access_list.is_empty() {
                                     None
                                 } else {
-                                    Some(
-                                        serde_json::to_string(&access_list)
-                                            .expect("to serialize access list"),
-                                    )
+                                    let mut buf: Vec<u8> = Vec::new();
+                                    access_list.encode(&mut buf);
+                                    Some(buf)
                                 }
                             })
                         })
@@ -214,9 +213,10 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                         .txs
                         .iter()
                         .map(|tx| {
-                            tx.as_ref().authorization_list().as_ref().map(|access_list| {
-                                serde_json::to_string(&access_list)
-                                    .expect("to serialize authorization_list")
+                            tx.as_ref().authorization_list().as_ref().map(|signed_authorizations| {
+                                let mut buf: Vec<u8> = Vec::new();
+                                signed_authorizations.to_vec().encode(&mut buf);
+                                buf
                             })
                         })
                         .collect(),
@@ -413,7 +413,7 @@ pub(crate) mod tests {
         TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Encodable2718};
-    use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256, U64};
+    use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, U256, U64};
     use alloy_rlp::Decodable;
     use rbuilder_primitives::serialize::RawBundle;
 
@@ -443,8 +443,7 @@ pub(crate) mod tests {
                 value.transactions_max_priority_fee_per_gas.clone(),
                 value.transactions_access_list.clone(),
                 value.transactions_authorization_list.clone(),
-            )
-            .unwrap();
+            );
 
             RawBundle {
                 block_number: value.block_number.map(|b| U64::from(b)),
@@ -479,14 +478,14 @@ pub(crate) mod tests {
         transactions_to: Vec<Option<Address>>,
         transactions_gas: Vec<u64>,
         transactions_type: Vec<u8>,
-        transactions_input: Vec<String>,
+        transactions_input: Vec<Vec<u8>>,
         transactions_value: Vec<U256>,
         transactions_gas_price: Vec<Option<u128>>,
         transactions_max_fee_per_gas: Vec<Option<u128>>,
         transactions_max_priority_fee_per_gas: Vec<Option<u128>>,
-        transactions_access_list: Vec<Option<String>>,
-        transactions_authorization_list: Vec<Option<String>>,
-    ) -> Result<Vec<TxEnvelope>, Box<dyn std::error::Error>> {
+        transactions_access_list: Vec<Option<Vec<u8>>>,
+        transactions_authorization_list: Vec<Option<Vec<u8>>>,
+    ) -> Vec<TxEnvelope> {
         let tx_count = transactions_hash.len();
         let mut envelopes = Vec::with_capacity(tx_count);
 
@@ -502,17 +501,19 @@ pub(crate) mod tests {
             };
 
             // Parse input data
-            let input = Bytes::from(hex::decode(&transactions_input[i])?);
+            let input = Bytes::from(transactions_input[i].clone());
 
             // Parse access list if present
             let access_list = match &transactions_access_list[i] {
-                Some(al_str) => serde_json::from_str::<AccessList>(al_str)?,
+                Some(al_bytes) => AccessList::decode(&mut al_bytes.as_slice()).unwrap(),
                 None => AccessList::default(),
             };
 
             // Parse authorization list if present
             let authorization_list = match &transactions_authorization_list[i] {
-                Some(auth_str) => serde_json::from_str::<Vec<SignedAuthorization>>(auth_str)?,
+                Some(auth_bytes) => {
+                    Vec::<SignedAuthorization>::decode(&mut auth_bytes.as_slice()).unwrap()
+                }
                 None => Vec::new(),
             };
 
@@ -573,9 +574,7 @@ pub(crate) mod tests {
                         to: match to {
                             TxKind::Call(addr) => addr,
                             TxKind::Create => {
-                                return Err(
-                                    "EIP-4844 transactions cannot be contract creation".into()
-                                )
+                                panic!("EIP-4844 transactions cannot be contract creation")
                             }
                         },
                         value: transactions_value[i],
@@ -602,9 +601,7 @@ pub(crate) mod tests {
                         to: match to {
                             TxKind::Call(addr) => addr,
                             TxKind::Create => {
-                                return Err(
-                                    "EIP-7702 transactions cannot be contract creation".into()
-                                )
+                                panic!("EIP-7702 transactions cannot be contract creation")
                             }
                         },
                         value: transactions_value[i],
@@ -615,16 +612,14 @@ pub(crate) mod tests {
                     TxEnvelope::Eip7702(Signed::new_unchecked(tx, signature, transactions_hash[i]))
                 }
                 _ => {
-                    return Err(
-                        format!("Unsupported transaction type: {}", transactions_type[i]).into()
-                    )
+                    panic!("Unsupported transaction type: {}", transactions_type[i])
                 }
             };
 
             envelopes.push(tx_envelope);
         }
 
-        Ok(envelopes)
+        envelopes
     }
 
     impl From<PrivateTxRow> for SystemTransaction {
