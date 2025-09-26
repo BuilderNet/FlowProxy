@@ -18,6 +18,8 @@ use uuid::Uuid;
 use crate::types::{DecodedBundle, SystemBundle};
 
 /// Model representing Clickhouse bundle row.
+///
+/// NOTE: Make sure the fields are in the same order as the columns in the Clickhouse table.
 #[derive(Clone, clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleRow {
@@ -90,6 +92,9 @@ pub(crate) struct BundleRow {
     #[serde(with = "hashes")]
     pub refund_tx_hashes: Vec<B256>,
 
+    /// The hash of the bundle (unique identifier)
+    #[serde(with = "hash")]
+    pub hash: B256,
     /// Bundle uuid.
     #[serde(with = "clickhouse::serde::uuid::option")]
     pub internal_uuid: Option<Uuid>,
@@ -111,10 +116,6 @@ pub(crate) struct BundleRow {
 
     /// Builder name.
     pub builder_name: String,
-
-    /// The hash of the bundle (unique identifier)
-    #[serde(with = "hash")]
-    pub hash: B256,
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
@@ -198,10 +199,17 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                         .iter()
                         .map(|tx| {
                             tx.as_ref().access_list().as_ref().map(|access_list| {
-                                serde_json::to_string(&access_list)
-                                    .expect("to serialize access list")
+                                if access_list.is_empty() {
+                                    None
+                                } else {
+                                    Some(
+                                        serde_json::to_string(&access_list)
+                                            .expect("to serialize access list"),
+                                    )
+                                }
                             })
                         })
+                        .flatten()
                         .collect(),
                     transactions_authorization_list: decoded
                         .txs
@@ -288,6 +296,8 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
 }
 
 /// Model representing clickhouse private transaction row.
+///
+/// NOTE: Make sure the fields are in the same order as the columns in the Clickhouse table.
 #[derive(clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct PrivateTxRow {

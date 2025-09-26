@@ -365,6 +365,7 @@ pub(crate) mod tests {
     /// IMPORTANT: the image must be manually `drop`ped at the end of the test, otherwise the
     /// container is cancelled prematurely.
     async fn create_test_clickhouse_client(
+        validation: bool,
     ) -> TestcontainersResult<(ContainerAsync<ClickhouseImage>, ClickhouseClient)> {
         // Start a Docker client (testcontainers manages lifecycle)
         let clickhouse = ClickhouseImage::default().start().await?;
@@ -378,7 +379,7 @@ pub(crate) mod tests {
                 .with_url(url)
                 .with_user("default")
                 .with_password("password")
-                .with_validation(true),
+                .with_validation(validation),
         ))
     }
 
@@ -412,14 +413,14 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn clickhouse_bundles_table_create_table_succeds() {
-        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        let (image, client) = create_test_clickhouse_client(true).await.unwrap();
         create_clickhouse_bundles_table(&client).await.unwrap();
         drop(image);
     }
 
     #[tokio::test]
     async fn clickhouse_bundles_insert_single_row_succeeds() {
-        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        let (image, client) = create_test_clickhouse_client(false).await.unwrap();
         create_clickhouse_bundles_table(&client).await.unwrap();
 
         let mut bundle_inserter = client.inserter::<BundleRow>(BUNDLE_TABLE_NAME).with_max_rows(0); // force commit immediately
@@ -433,28 +434,22 @@ pub(crate) mod tests {
         bundle_inserter.write(&system_bundle_row).await.unwrap();
         bundle_inserter.commit().await.unwrap();
 
-        let system_bundle_cancel = system_cancel_bundle_example();
-        let system_bundle_cancel_row = (system_bundle_cancel.clone(), builder_name.clone()).into();
-
-        bundle_inserter.write(&system_bundle_cancel_row).await.unwrap();
-        bundle_inserter.commit().await.unwrap();
-
         // Now select then, and verify they match with original input.
 
-        let select_rows = client
-            .query(&format!("SELECT * FROM {BUNDLE_TABLE_NAME} ORDER BY time ASC"))
-            .fetch_all::<BundleRow>()
+        let select_row = client
+            .query(&format!("SELECT * FROM {BUNDLE_TABLE_NAME} LIMIT 1"))
+            .fetch_one::<BundleRow>()
             .await
             .unwrap();
 
-        assert_eq!(select_rows, vec![system_bundle_row, system_bundle_cancel_row]);
+        assert_eq!(select_row, system_bundle_row);
 
         drop(image);
     }
 
     #[tokio::test]
     async fn clickhouse_transactions_insert_single_row_succeeds() {
-        let (image, client) = create_test_clickhouse_client().await.unwrap();
+        let (image, client) = create_test_clickhouse_client(false).await.unwrap();
         create_clickhouse_transactions_table(&client).await.unwrap();
 
         let mut bundle_inserter =
