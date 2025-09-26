@@ -330,12 +330,16 @@ pub(crate) struct PrivateTxRow {
     pub max_fee_per_gas: Option<u128>,
     /// Transaction max priority fee per gas value.
     pub max_priority_fee_per_gas: Option<u128>,
+    /// Blob transaction fee field,
+    pub max_fee_per_blob_gas: Option<u128>,
     /// Transaction access list.
     #[serde(with = "serde_bytes")]
     pub access_list: Option<Vec<u8>>,
     /// EIP-7702 authorization list
     #[serde(with = "serde_bytes")]
     pub authorization_list: Option<Vec<u8>>,
+    #[serde(with = "hashes")]
+    pub blob_versioned_hashes: Vec<B256>,
     /// Builder name.
     pub builder_name: String,
 }
@@ -372,6 +376,7 @@ impl From<(SystemTransaction, BuilderName)> for PrivateTxRow {
             gas_price: tx.gas_price(),
             max_fee_per_gas: Some(tx.max_fee_per_gas()),
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas(),
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas(),
             access_list: tx.access_list().map(|al| {
                 let mut buf: Vec<u8> = Vec::new();
                 al.encode(&mut buf);
@@ -382,6 +387,7 @@ impl From<(SystemTransaction, BuilderName)> for PrivateTxRow {
                 al.to_vec().encode(&mut buf);
                 buf
             }),
+            blob_versioned_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
             builder_name,
         }
     }
@@ -701,10 +707,10 @@ pub(crate) mod tests {
                             value: tx_row.value,
                             input,
                             access_list,
-                            blob_versioned_hashes: Vec::new(),
-                            max_fee_per_blob_gas: 0,
+                            blob_versioned_hashes: tx_row.blob_versioned_hashes,
+                            max_fee_per_blob_gas: tx_row.max_fee_per_blob_gas.unwrap(),
                         },
-                        sidecar: BlobTransactionSidecar::default(), // TODO: blob support.
+                        sidecar: BlobTransactionSidecar::default(), // TODO: raw blob support.
                     };
                     Envelope::Eip4844(Signed::new_unchecked(tx, signature, tx_row.hash))
                 }

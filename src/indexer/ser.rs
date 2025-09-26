@@ -1,5 +1,4 @@
 //! Extra serde serialization/deserialization helpers for `Vec<alloy_primitives::U256>`
-
 pub(super) mod u256 {
     use alloy_primitives::U256;
     use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};

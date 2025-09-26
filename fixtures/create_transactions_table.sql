@@ -16,8 +16,10 @@ CREATE TABLE transactions (
   `gas_price` Nullable(UInt128),
   `max_fee_per_gas` Nullable(UInt128),
   `max_priority_fee_per_gas` Nullable(UInt128),
+  `max_fee_per_blob_gas` Nullable(UInt128),
   `access_list` Nullable(String),
   `authorization_list` Nullable(String),
+  `blob_versioned_hashes` Array(FixedString(32)),
   `builder_name` LowCardinality(String),
 
   INDEX from_bloom_filter `from` TYPE bloom_filter GRANULARITY 10,

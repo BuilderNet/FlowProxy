@@ -33,6 +33,7 @@ pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 /// The tracing target for this indexer crate.
 const TRACING_TARGET: &str = "indexer";
 
+/// A simple alias to refer to a builder name.
 pub(crate) type BuilderName = String;
 
 /// Trait for adding orderflow indexing functionality.
@@ -41,13 +42,21 @@ pub trait OrderflowIndexer: Sync + Send {
     fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
+/// An high-level orderflow type that can be indexed in clickhouse.
 trait ClickhouseIndexableOrderflow: Sized {
+    /// The associated inner row type that can be serialized into Clickhouse data.
     type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
 
+    /// The canonical name of such orderflow, e.g. "bundles" or "transactions". For informational
+    /// purposes.
     const ORDERFLOW_NAME: &'static str;
 
+    /// An identifier of such orderflow.
     fn hash(&self) -> B256;
 
+    /// Internal function that takes the inner row types and extracts the reference needed for
+    /// Clickhouse inserter functions like `Inserter::write`. While a default implementation is not
+    /// provided, it should suffice to simply return `row`.
     fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_>;
 }
 
@@ -85,31 +94,30 @@ pub struct IndexerHandle {
     bundle_tx: mpsc::Sender<SystemBundle>,
     transaction_tx: mpsc::Sender<SystemTransaction>,
 
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Not awaited as of now.
     bundle_indexer_task: JoinHandle<()>,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Not awaited as of now.
     transaction_indexer_task: JoinHandle<()>,
 }
 
+/// A namespace struct to spawn a Clickhouse indexer.
 #[derive(Debug, Clone)]
 pub struct ClickhouseIndexer;
 
 impl ClickhouseIndexer {
-    /// Create and spawn a new Clickhouse indexer task, returning the indexer handle and its
-    /// task handle.
+    /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
     pub fn spawn(args: Option<ClickhouseArgs>, builder_name: BuilderName) -> IndexerHandle {
-        let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let (transaction_tx, transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
+        let (bundle_tx, mut bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let (transaction_tx, mut transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
 
         let Some(args) = args else {
             info!("Running with mocked indexer");
-            let mut indexer = MockIndexer { bundle_rx, transaction_rx };
-            let _bundle_indexer_task = tokio::task::spawn(async move {
-                while let Some(_b) = indexer.bundle_rx.recv().await {}
-            });
-            let _transaction_indexer_task = tokio::task::spawn(async move {
-                while let Some(_t) = indexer.transaction_rx.recv().await {}
-            });
+            let _bundle_indexer_task =
+                tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+            let _transaction_indexer_task =
+                tokio::task::spawn(
+                    async move { while let Some(_t) = transaction_rx.recv().await {} },
+                );
             return IndexerHandle {
                 bundle_tx,
                 transaction_tx,
@@ -137,7 +145,7 @@ impl ClickhouseIndexer {
         let transaction_inserter = client
             .inserter::<PrivateTxRow>(BUNDLE_TABLE_NAME)
             .with_period(Some(Duration::from_secs(3))) // Dump every 3s
-            .with_period_bias(0.1) // 4±(0.1*4)
+            .with_period_bias(0.1)
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
             .with_max_rows(65_536);
 
@@ -208,14 +216,6 @@ impl OrderflowIndexer for IndexerHandle {
             tracing::error!(?e, "failed to send transaction to index");
         }
     }
-}
-
-/// A mock indexer which just receives bundles and does nothing with them. Useful for testing or
-/// for running without an indexer.
-#[derive(Debug)]
-pub struct MockIndexer {
-    pub bundle_rx: mpsc::Receiver<SystemBundle>,
-    pub transaction_rx: mpsc::Receiver<SystemTransaction>,
 }
 
 #[cfg(test)]
