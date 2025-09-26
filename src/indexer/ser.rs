@@ -21,6 +21,7 @@ pub(super) mod u256 {
         Ok(U256::from_le_bytes(buf))
     }
 
+    #[allow(dead_code)]
     pub(crate) mod option {
         use super::*;
 

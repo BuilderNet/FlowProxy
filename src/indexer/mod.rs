@@ -33,6 +33,8 @@ pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 /// The tracing target for this indexer crate.
 const TRACING_TARGET: &str = "indexer";
 
+pub(crate) type BuilderName = String;
+
 /// Trait for adding orderflow indexing functionality.
 pub trait OrderflowIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
@@ -40,7 +42,7 @@ pub trait OrderflowIndexer: Sync + Send {
 }
 
 trait ClickhouseIndexableOrderflow: Sized {
-    type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, String)>;
+    type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
 
     const ORDERFLOW_NAME: &'static str;
 
@@ -95,7 +97,7 @@ pub struct ClickhouseIndexer;
 impl ClickhouseIndexer {
     /// Create and spawn a new Clickhouse indexer task, returning the indexer handle and its
     /// task handle.
-    pub fn spawn(args: Option<ClickhouseArgs>, builder_name: String) -> IndexerHandle {
+    pub fn spawn(args: Option<ClickhouseArgs>, builder_name: BuilderName) -> IndexerHandle {
         let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
         let (transaction_tx, transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
 
@@ -152,7 +154,7 @@ impl ClickhouseIndexer {
 async fn run_indexer<T: ClickhouseIndexableOrderflow>(
     mut rx: mpsc::Receiver<T>,
     mut inserter: Inserter<T::ClickhouseRowType>,
-    builder_name: String,
+    builder_name: BuilderName,
 ) {
     while let Some(orderflow) = rx.recv().await {
         tracing::trace!(target: TRACING_TARGET, hash = %orderflow.hash(), "received {} to index", T::ORDERFLOW_NAME);
