@@ -79,8 +79,7 @@ impl IngressForwarders {
         let body = bundle.encode();
 
         let body_hash = keccak256(&body);
-        let signature =
-            self.signer.sign_message_sync(format!("{:?}", body_hash).as_bytes()).unwrap();
+        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
         let header = format!("{:?}:{}", self.signer.address(), signature);
 
         // Difference: we encode the whole bundle (including the signer), and we
@@ -102,8 +101,7 @@ impl IngressForwarders {
         let _ = self.local.send(priority, local);
 
         let body_hash = keccak256(&body);
-        let signature =
-            self.signer.sign_message_sync(format!("{:?}", body_hash).as_bytes()).unwrap();
+        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
         let header = format!("{:?}:{}", self.signer.address(), signature);
 
         // Difference: we add the signature header.
