@@ -1,14 +1,16 @@
+use alloy_primitives::Bytes;
 use buildernet_orderflow_proxy::{
     ingress::FLASHBOTS_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
 };
 use flate2::{write::GzEncoder, Compression};
+use rbuilder_primitives::serialize::RawBundle;
 use reqwest::{header, StatusCode};
 use serde_json::json;
 use std::io::Write;
 
 mod common;
-use common::{create_test_bundle, spawn_ingress, test_transaction_raw};
+use common::{create_test_bundle, spawn_ingress, test_transaction_raw, BuilderReceiver};
 
 mod assert {
     use buildernet_orderflow_proxy::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
@@ -25,7 +27,8 @@ mod assert {
 
 #[tokio::test]
 async fn ingress_http_e2e() {
-    let client = spawn_ingress().await;
+    let mut builder = BuilderReceiver::spawn().await;
+    let client = spawn_ingress(Some(builder.url())).await;
 
     let empty = json!({});
     let response =
@@ -79,9 +82,19 @@ async fn ingress_http_e2e() {
     let response = client.send_raw_tx(&raw_tx).await;
     assert!(response.status().is_success());
 
+    let received = builder.recv::<Bytes>().await.unwrap();
+    assert_eq!(received, raw_tx);
+
     let bundle = create_test_bundle();
     let response = client.send_bundle(&bundle).await;
     assert!(response.status().is_success());
+
+    let received = builder.recv::<RawBundle>().await.unwrap();
+    assert_eq!(received, bundle);
+
+    let mut bundle = create_test_bundle();
+    // NOTE: Modify bundle here so it doesn't get deduplicated.
+    bundle.txs.push(test_transaction_raw());
 
     let request = json!({
         "id": 0,
@@ -102,4 +115,7 @@ async fn ingress_http_e2e() {
         .await
         .unwrap();
     assert!(response.status().is_success());
+
+    let received = builder.recv::<RawBundle>().await.unwrap();
+    assert_eq!(received, bundle);
 }
