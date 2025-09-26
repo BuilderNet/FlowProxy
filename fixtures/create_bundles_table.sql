@@ -10,7 +10,7 @@ CREATE TABLE bundles (
   `transactions.v` Array(UInt8),
   `transactions.to` Array(Nullable(FixedString(20))),
   `transactions.gas` Array(UInt64),
-  `transactions.type` Array(UInt64),
+  `transactions.type` Array(UInt8),
   `transactions.input` Array(String),
   `transactions.value` Array(UInt256),
   `transactions.gasPrice` Array(Nullable(UInt128)),

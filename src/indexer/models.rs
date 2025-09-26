@@ -52,7 +52,7 @@ pub(crate) struct BundleRow {
     pub transactions_gas: Vec<u64>,
     /// Collection of transaction types for transactions in the bundle.
     #[serde(rename = "transactions.type")]
-    pub transactions_type: Vec<u64>,
+    pub transactions_type: Vec<u8>,
     /// Collection of inputs for transactions in the bundle.
     #[serde(rename = "transactions.input")]
     pub transactions_input: Vec<String>,
@@ -159,7 +159,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_type: decoded
                         .txs
                         .iter()
-                        .map(|tx| tx.as_ref().tx_type() as u64)
+                        .map(|tx| tx.as_ref().tx_type() as u8)
                         .collect(),
                     transactions_input: decoded
                         .txs
@@ -197,7 +197,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_access_list: decoded
                         .txs
                         .iter()
-                        .map(|tx| {
+                        .filter_map(|tx| {
                             tx.as_ref().access_list().as_ref().map(|access_list| {
                                 if access_list.is_empty() {
                                     None
@@ -209,7 +209,6 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                                 }
                             })
                         })
-                        .flatten()
                         .collect(),
                     transactions_authorization_list: decoded
                         .txs
@@ -479,7 +478,7 @@ pub(crate) mod tests {
         transactions_v: Vec<u8>,
         transactions_to: Vec<Option<Address>>,
         transactions_gas: Vec<u64>,
-        transactions_type: Vec<u64>,
+        transactions_type: Vec<u8>,
         transactions_input: Vec<String>,
         transactions_value: Vec<U256>,
         transactions_gas_price: Vec<Option<u128>>,
