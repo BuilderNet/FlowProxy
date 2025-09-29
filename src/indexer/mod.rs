@@ -132,7 +132,7 @@ impl ClickhouseIndexer {
             .with_database(args.database)
             .with_user(args.username)
             .with_password(args.password)
-            .with_validation(true);
+            .with_validation(false);
 
         let bundle_inserter = client
             .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
