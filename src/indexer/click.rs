@@ -15,8 +15,7 @@ use crate::{
     cli::ClickhouseArgs,
     indexer::{
         models::{BundleRow, PrivateTxRow},
-        BuilderName, IndexerHandle, BUNDLE_INDEXER_BUFFER_SIZE, BUNDLE_TABLE_NAME, TRACING_TARGET,
-        TRANSACTION_INDEXER_BUFFER_SIZE,
+        BuilderName, OrderIndexerTasks, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET,
     },
     types::{SystemBundle, SystemTransaction},
 };
@@ -68,29 +67,15 @@ impl ClickhouseIndexableOrder for SystemTransaction {
 
 /// A namespace struct to spawn a Clickhouse indexer.
 #[derive(Debug, Clone)]
-pub struct ClickhouseIndexer;
+pub(crate) struct ClickhouseIndexer;
 
 impl ClickhouseIndexer {
     /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
-    pub fn spawn(args: Option<ClickhouseArgs>, builder_name: BuilderName) -> IndexerHandle {
-        let (bundle_tx, mut bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let (transaction_tx, mut transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
-
-        let Some(args) = args else {
-            info!("Running with mocked indexer");
-            let _bundle_indexer_task =
-                tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
-            let _transaction_indexer_task =
-                tokio::task::spawn(
-                    async move { while let Some(_t) = transaction_rx.recv().await {} },
-                );
-            return IndexerHandle {
-                bundle_tx,
-                transaction_tx,
-                bundle_indexer_task: _bundle_indexer_task,
-                transaction_indexer_task: _transaction_indexer_task,
-            };
-        };
+    pub(crate) fn spawn(
+        args: ClickhouseArgs,
+        builder_name: BuilderName,
+        receivers: OrderReceivers,
+    ) -> OrderIndexerTasks {
         let (host, database, username, password) = (
             args.host.expect("host is set"),
             args.database.expect("database is set"),
@@ -99,6 +84,8 @@ impl ClickhouseIndexer {
         );
 
         info!(%host, "Running with clickhouse indexer");
+
+        let OrderReceivers { bundle_rx, mut bundle_receipt_rx, transaction_rx } = receivers;
 
         let client = ClickhouseClient::default()
             .with_url(host)
@@ -125,10 +112,19 @@ impl ClickhouseIndexer {
 
         let bundle_indexer_task =
             tokio::spawn(run_indexer(bundle_rx, bundle_inserter, builder_name.clone()));
+        // TODO: support bundle receipts in Clickhouse.
+        let bundle_receipt_indexer_task =
+            tokio::task::spawn(
+                async move { while let Some(_b) = bundle_receipt_rx.recv().await {} },
+            );
         let transaction_indexer_task =
             tokio::spawn(run_indexer(transaction_rx, transaction_inserter, builder_name.clone()));
 
-        IndexerHandle { bundle_tx, transaction_tx, bundle_indexer_task, transaction_indexer_task }
+        OrderIndexerTasks {
+            bundle_indexer_task,
+            bundle_receipt_indexer_task,
+            transaction_indexer_task,
+        }
     }
 }
 

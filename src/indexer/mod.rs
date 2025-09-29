@@ -5,10 +5,15 @@ use std::fmt::Debug;
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::types::{BundleReceipt, SystemBundle, SystemTransaction};
+use crate::{
+    cli::IndexerArgs,
+    indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
+    types::{BundleReceipt, SystemBundle, SystemTransaction},
+};
 
-pub mod click;
+mod click;
 mod models;
+mod parq;
 mod ser;
 
 /// The size of the channel buffer for the bundle indexer.
@@ -34,13 +39,22 @@ pub trait OrderIndexer: Sync + Send {
     fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
-/// An handle to the indexer, which mainly consists of channel senders to send data to be indexed.
-#[derive(Debug)]
-pub struct IndexerHandle {
+#[derive(Debug, Clone)]
+pub(crate) struct OrderSenders {
     bundle_tx: mpsc::Sender<SystemBundle>,
     bundle_receipt_tx: mpsc::Sender<BundleReceipt>,
     transaction_tx: mpsc::Sender<SystemTransaction>,
+}
 
+#[derive(Debug)]
+pub(crate) struct OrderReceivers {
+    bundle_rx: mpsc::Receiver<SystemBundle>,
+    bundle_receipt_rx: mpsc::Receiver<BundleReceipt>,
+    transaction_rx: mpsc::Receiver<SystemTransaction>,
+}
+
+#[derive(Debug)]
+pub(crate) struct OrderIndexerTasks {
     #[allow(dead_code)] // Not awaited as of now.
     bundle_indexer_task: JoinHandle<()>,
     #[allow(dead_code)] // Not awaited as of now.
@@ -49,24 +63,93 @@ pub struct IndexerHandle {
     transaction_indexer_task: JoinHandle<()>,
 }
 
+impl OrderSenders {
+    pub(crate) fn new() -> (Self, OrderReceivers) {
+        let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let (bundle_receipt_tx, bundle_receipt_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let (transaction_tx, transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
+        let senders = Self { bundle_tx, bundle_receipt_tx, transaction_tx };
+        let receivers = OrderReceivers { bundle_rx, bundle_receipt_rx, transaction_rx };
+        (senders, receivers)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Indexer;
+
+impl Indexer {
+    pub fn spawn(args: Option<IndexerArgs>, builder_name: BuilderName) -> IndexerHandle {
+        let (senders, receivers) = OrderSenders::new();
+
+        let Some(args) = args else {
+            let tasks = MockIndexer.spawn(receivers);
+            return IndexerHandle { senders, tasks };
+        };
+
+        if let Some(clickhouse_args) = args.clickhouse {
+            let tasks = ClickhouseIndexer::spawn(clickhouse_args, builder_name, receivers);
+            IndexerHandle { senders, tasks }
+        } else if let Some(parquet_args) = args.parquet {
+            let tasks = ParquetIndexer::spawn(parquet_args, builder_name, receivers)
+                .expect("to spawn parquet indexer");
+            IndexerHandle { senders, tasks }
+        } else {
+            unreachable!("Either clickhouse or parquet args must be present");
+        }
+    }
+}
+
+/// An handle to the indexer, which mainly consists of channel senders to send data to be indexed.
+#[derive(Debug)]
+pub struct IndexerHandle {
+    senders: OrderSenders,
+
+    #[allow(dead_code)] // Not awaited as of now.
+    tasks: OrderIndexerTasks,
+}
+
 impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
-        if let Err(e) = self.bundle_tx.try_send(system_bundle) {
+        if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
         }
     }
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt) {
-        if let Err(e) = self.bundle_receipt_tx.try_send(bundle_receipt) {
+        if let Err(e) = self.senders.bundle_receipt_tx.try_send(bundle_receipt) {
             tracing::error!(?e, "failed to send bundle receipt to index");
         }
     }
     fn index_transaction(&self, system_transaction: SystemTransaction) {
-        if let Err(e) = self.transaction_tx.try_send(system_transaction) {
+        if let Err(e) = self.senders.transaction_tx.try_send(system_transaction) {
             tracing::error!(?e, "failed to send transaction to index");
         }
     }
 }
 
+struct MockIndexer;
+
+impl MockIndexer {
+    fn spawn(self, receivers: OrderReceivers) -> OrderIndexerTasks {
+        tracing::info!(target: TRACING_TARGET, "Running with mocked indexer");
+
+        let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx, mut transaction_rx } = receivers;
+
+        let bundle_indexer_task =
+            tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+        let bundle_receipt_indexer_task =
+            tokio::task::spawn(
+                async move { while let Some(_b) = bundle_receipt_rx.recv().await {} },
+            );
+        let transaction_indexer_task =
+            tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
+
+        OrderIndexerTasks {
+            bundle_indexer_task,
+            bundle_receipt_indexer_task,
+            transaction_indexer_task,
+        }
+    }
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use std::{borrow::Cow, collections::BTreeMap, fs, sync::Arc};
