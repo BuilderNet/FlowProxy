@@ -64,7 +64,7 @@ impl UtcDateTimeHeader for UtcDateTime {
 
     /// Parse a [`UtcDateTime`] from a UNIX timestamp in microseconds header value.
     fn parse_header(value: &HeaderValue) -> Option<Self> {
-        let micros: i128 = value.to_str().unwrap().parse().ok()?;
+        let micros: i128 = value.to_str().ok()?.parse().ok()?;
         UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).ok()
     }
 }
