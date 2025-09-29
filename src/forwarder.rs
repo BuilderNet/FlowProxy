@@ -6,6 +6,7 @@ use crate::{
     },
     priority::{pchannel, Priority},
     types::{SystemBundle, SystemTransaction},
+    utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;
 use alloy_signer::SignerSync as _;
@@ -64,10 +65,7 @@ impl IngressForwarders {
         }
 
         if let Some(sent_at) = sent_at_header {
-            headers.insert(
-                BUILDERNET_SENT_AT_HEADER,
-                sent_at.unix_timestamp_nanos().to_string().parse().unwrap(),
-            );
+            headers.insert(BUILDERNET_SENT_AT_HEADER, sent_at.format_header());
         }
 
         Arc::new(BuilderRequest::new(body).with_headers(headers))

@@ -10,6 +10,7 @@ use crate::{
         decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
         SystemTransaction,
     },
+    utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
 };
 use alloy_consensus::{
@@ -260,10 +261,9 @@ impl OrderflowIngress {
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
-        let sent_at = headers.get(BUILDERNET_SENT_AT_HEADER).map(|h| {
-            UtcDateTime::from_unix_timestamp_nanos(h.to_str().unwrap().parse().unwrap())
-                .expect("Failed to parse sent at header")
-        });
+        let sent_at = headers
+            .get(BUILDERNET_SENT_AT_HEADER)
+            .map(|h| UtcDateTime::parse_header(h).expect("Failed to parse sent at header"));
         let received_at = Instant::now();
         ingress.metrics.system.requests_received.increment(1);
 
