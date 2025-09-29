@@ -5,7 +5,7 @@ use std::fmt::Debug;
 
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::types::{SystemBundle, SystemTransaction};
+use crate::types::{BundleReceipt, SystemBundle, SystemTransaction};
 
 pub mod click;
 mod models;
@@ -13,6 +13,8 @@ mod ser;
 
 /// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 4096;
+/// The size of the channel buffer for the bundle receipt indexer.
+pub const BUNDLE_RECEIPT_INDEXER_BUFFER_SIZE: usize = 8192;
 /// The size of the channel buffer for the bundle indexer.
 pub const TRANSACTION_INDEXER_BUFFER_SIZE: usize = 4096;
 /// The name of the Clickhouse table to store bundles in.
@@ -28,6 +30,7 @@ pub(crate) type BuilderName = String;
 /// Trait for adding order indexing functionality.
 pub trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
+    fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt);
     fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
@@ -35,10 +38,13 @@ pub trait OrderIndexer: Sync + Send {
 #[derive(Debug)]
 pub struct IndexerHandle {
     bundle_tx: mpsc::Sender<SystemBundle>,
+    bundle_receipt_tx: mpsc::Sender<BundleReceipt>,
     transaction_tx: mpsc::Sender<SystemTransaction>,
 
     #[allow(dead_code)] // Not awaited as of now.
     bundle_indexer_task: JoinHandle<()>,
+    #[allow(dead_code)] // Not awaited as of now.
+    bundle_receipt_indexer_task: JoinHandle<()>,
     #[allow(dead_code)] // Not awaited as of now.
     transaction_indexer_task: JoinHandle<()>,
 }
@@ -47,6 +53,11 @@ impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
+        }
+    }
+    fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt) {
+        if let Err(e) = self.bundle_receipt_tx.try_send(bundle_receipt) {
+            tracing::error!(?e, "failed to send bundle receipt to index");
         }
     }
     fn index_transaction(&self, system_transaction: SystemTransaction) {
