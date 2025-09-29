@@ -228,3 +228,114 @@ async fn run_indexer(
         tracing::error!(target: TRACING_TARGET, ?e, "Failed to close Parquet writer");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::B256;
+    use time::UtcDateTime;
+
+    use crate::{
+        cli::ParquetArgs,
+        indexer::{self, parq::ParquetIndexer},
+        priority::Priority,
+        types::BundleReceipt,
+    };
+
+    use std::sync::Arc;
+    use std::{fs::File, io};
+
+    use arrow::record_batch::RecordBatch;
+    use parquet::file::reader::SerializedFileReader;
+
+    /// Read all BundleReceipts from a parquet file.
+    // pub fn read_bundle_receipts(path: &str) -> io::Result<Vec<BundleReceipt>> {
+    //     let file = File::open(path)?;
+    //     let parquet_reader = SerializedFileReader::new(file)?;
+    //     let mut arrow_reader = ArrowReader::new(Arc::new(parquet_reader));
+    //
+    //     let mut receipts = Vec::new();
+    //
+    //     // Batch size = how many rows you pull at once
+    //     let record_batch_reader = arrow_reader.get_record_reader(1024)?;
+    //     for batch in record_batch_reader {
+    //         let batch = batch?;
+    //         receipts.extend(from_record_batch(&batch));
+    //     }
+    //
+    //     Ok(receipts)
+    // }
+
+    /// Convert an Arrow RecordBatch into BundleReceipt structs.
+    // fn from_record_batch(batch: &RecordBatch) -> Vec<BundleReceipt> {
+    //     let mut out = Vec::with_capacity(batch.num_rows());
+    //
+    //     let bundle_hash = as_fixed_size_binary_array(batch.column(0));
+    //     let sent_at = as_timestamp_microsecond_array(batch.column(1));
+    //     let received_at = as_timestamp_microsecond_array(batch.column(2));
+    //     let dst_builder_name = as_string_array(batch.column(3));
+    //     let src_builder_name = as_string_array(batch.column(4));
+    //     let payload_size = as_uint32_array(batch.column(5));
+    //     let priority = as_uint8_array(batch.column(6));
+    //
+    //     for i in 0..batch.num_rows() {
+    //         let bundle_hash_bytes = bundle_hash.value(i);
+    //         let mut fixed = [0u8; 32];
+    //         fixed.copy_from_slice(bundle_hash_bytes);
+    //         let bundle_hash = B256::from(fixed);
+    //
+    //         let sent_at = if sent_at.is_null(i) {
+    //             None
+    //         } else {
+    //             let micros = sent_at.value(i);
+    //             Some(UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).unwrap())
+    //         };
+    //
+    //         let received_at = {
+    //             let micros = received_at.value(i);
+    //             UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).unwrap()
+    //         };
+    //
+    //         let src_builder_name = src_builder_name.value(i).to_string();
+    //
+    //         let payload_size = payload_size.value(i);
+    //         let priority = match priority.value(i) {
+    //             0 => Priority::Low,
+    //             1 => Priority::Medium,
+    //             2 => Priority::High,
+    //             x => panic!("unsupport priority level: {x}"),
+    //         };
+    //
+    //         out.push(BundleReceipt {
+    //             bundle_hash,
+    //             sent_at,
+    //             received_at,
+    //             src_builder_name,
+    //             payload_size,
+    //             priority,
+    //         });
+    //     }
+    //
+    //     out
+    // }
+
+    #[test]
+    pub fn asdf() {
+        let parquet_tempfile = tempfile::Builder::new().suffix(".parquet").tempfile().unwrap();
+
+        let args = ParquetArgs { bundle_receipts_file_path: parquet_tempfile.path().to_path_buf() };
+
+        let example_bundle_receipt = BundleReceipt {
+            bundle_hash: B256::ZERO,
+            sent_at: Some(UtcDateTime::now()),
+            received_at: UtcDateTime::now(),
+            src_builder_name: "buildernet_src".to_string(),
+            payload_size: 0,
+            priority: Priority::High,
+        };
+
+        let (senders, receivers) = indexer::OrderSenders::new();
+        let _ = ParquetIndexer::spawn(args, "buildernet_dst".to_string(), receivers).unwrap();
+
+        senders.bundle_receipt_tx.try_send(example_bundle_receipt).unwrap();
+    }
+}
