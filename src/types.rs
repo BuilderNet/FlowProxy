@@ -20,6 +20,7 @@ use rbuilder_primitives::{
 use revm_primitives::B256;
 use serde::Serialize;
 use serde_json::json;
+use time::UtcDateTime;
 use uuid::Uuid;
 
 /// Bundle type that is used for the system API. It contains the verified signer with the original
@@ -40,6 +41,10 @@ pub struct SystemBundle {
     /// The bundle hash.
     #[serde(skip)]
     pub bundle_hash: B256,
+
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    #[serde(skip)]
+    pub received_at: UtcDateTime,
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
@@ -141,6 +146,7 @@ impl SystemBundle {
     pub fn try_from_bundle_and_signer(
         mut bundle: RawBundle,
         signer: Address,
+        received_at: UtcDateTime,
     ) -> Result<Self, RawBundleConvertError> {
         let decoded = bundle.clone().decode(TxEncoding::WithBlobData)?;
         bundle.signing_address = Some(signer);
@@ -152,6 +158,7 @@ impl SystemBundle {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded.into()),
             bundle_hash,
+            received_at,
         })
     }
 
@@ -220,6 +227,8 @@ pub struct SystemTransaction {
     pub transaction: Arc<PooledTransaction>,
     /// The original transaction signer.
     pub signer: Address,
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    pub received_at: UtcDateTime,
 }
 
 impl Deref for SystemTransaction {
@@ -232,8 +241,12 @@ impl Deref for SystemTransaction {
 
 impl SystemTransaction {
     /// Create a new system transaction from a transaction and a signer.
-    pub fn from_transaction_and_signer(transaction: PooledTransaction, signer: Address) -> Self {
-        Self { transaction: Arc::new(transaction), signer }
+    pub fn from_transaction_and_signer(
+        transaction: PooledTransaction,
+        signer: Address,
+        received_at: UtcDateTime,
+    ) -> Self {
+        Self { transaction: Arc::new(transaction), signer, received_at }
     }
 
     /// Encode the transaction as EIP-2718 encoded bytes.
