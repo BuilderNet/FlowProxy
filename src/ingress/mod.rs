@@ -277,6 +277,7 @@ impl OrderflowIngress {
         {
             Ok(request) => request,
             Err(error) => {
+                error!(target: "ingress", "Error parsing JSON-RPC request");
                 ingress.metrics.system.json_rpc_parse_errors.increment(1);
                 return JsonRpcResponse::error(None, error);
             }
@@ -293,11 +294,13 @@ impl OrderflowIngress {
         let (raw, response) = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(raw) = request.take_single_param() else {
+                    error!(target: "ingress", "Error parsing bundle from system request");
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 let Ok(bundle) = serde_json::from_value::<RawBundle>(raw.clone()) else {
+                    error!(target: "ingress", "Error parsing bundle from system request");
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
@@ -379,7 +382,8 @@ impl OrderflowIngress {
             .spawn_with_priority(priority, move || {
                 SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at)
             })
-            .await?;
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
@@ -446,7 +450,8 @@ impl OrderflowIngress {
                 tx.recover_signer()?;
                 Ok::<(), IngressError>(())
             })
-            .await?;
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
 
         self.indexer_handle.index_transaction(transaction.clone());
 
