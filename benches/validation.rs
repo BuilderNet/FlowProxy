@@ -13,10 +13,12 @@ use hyper::HeaderMap;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rbuilder_primitives::serialize::RawBundle;
 use serde_json::json;
+use time::UtcDateTime;
 
 struct RawBundleWithSigner {
     raw_bundle: RawBundle,
     signer: Address,
+    received_at: UtcDateTime,
 }
 
 struct SignedRequest {
@@ -26,7 +28,11 @@ struct SignedRequest {
 
 impl Random for RawBundleWithSigner {
     fn random<R: Rng>(rng: &mut R) -> Self {
-        Self { raw_bundle: RawBundle::random(rng), signer: Address::random_with(rng) }
+        Self {
+            raw_bundle: RawBundle::random(rng),
+            signer: Address::random_with(rng),
+            received_at: UtcDateTime::now(),
+        }
     }
 }
 
@@ -77,15 +83,15 @@ pub fn bench_validation(c: &mut Criterion) {
         // We use iter_batched here so we have an owned value for the benchmarked function (second
         // closure)
         b.iter_batched(
-            || {
-                // Generate inputs
-                generate_bundles_with_signer(size, &mut rng)
-            },
+            || generate_bundles_with_signer(size, &mut rng),
             |inputs| {
                 for input in inputs {
-                    let result =
-                        SystemBundle::try_from_bundle_and_signer(input.raw_bundle, input.signer)
-                            .unwrap();
+                    let result = SystemBundle::try_from_bundle_and_signer(
+                        input.raw_bundle,
+                        input.signer,
+                        input.received_at,
+                    )
+                    .unwrap();
                     black_box(result);
                 }
             },
