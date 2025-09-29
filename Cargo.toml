@@ -42,7 +42,9 @@ metrics-exporter-prometheus = { version = "0.17.2", default-features = false, fe
   "http-listener"
 ] }
 
-# clickhouse
+# indexing
+arrow = { version = "56.2.0" }
+parquet = { version = "56.2.0" }
 clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", branch = "main", features = [
   "inserter",
   "time",
