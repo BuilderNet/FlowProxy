@@ -132,6 +132,8 @@ impl ClickhouseIndexer {
             .with_database(args.database)
             .with_user(args.username)
             .with_password(args.password)
+            // NOTE: Validation is disabled for performance reasons, and because validation doesn't
+            // support Uint256 data types.
             .with_validation(false);
 
         let bundle_inserter = client
