@@ -2,6 +2,7 @@ use crate::{
     cache::OrderCache,
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
+    indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
@@ -15,7 +16,7 @@ use alloy_consensus::{
     crypto::secp256k1::recover_signer,
     transaction::{PooledTransaction, SignerRecoverable},
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256};
+use alloy_primitives::{eip191_hash_message, keccak256, Address, Bytes, B256};
 use alloy_signer::Signature;
 use axum::{
     body::Body,
@@ -37,6 +38,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use time::UtcDateTime;
 use tracing::*;
 
 pub mod error;
@@ -57,6 +59,9 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 
+/// Whether to use the legacy signature verification.
+const USE_LEGACY_SIGNATURE: bool = true;
+
 #[derive(Debug)]
 pub struct OrderflowIngress {
     pub gzip_enabled: bool,
@@ -73,6 +78,7 @@ pub struct OrderflowIngress {
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
     pub metrics: OrderflowIngressMetrics,
+    pub indexer_handle: IndexerHandle,
 }
 
 impl OrderflowIngress {
@@ -126,6 +132,8 @@ impl OrderflowIngress {
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
         let received_at = Instant::now();
+        let received_at_utc = UtcDateTime::now();
+
         ingress.metrics.user.requests_received.increment(1);
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
@@ -134,7 +142,8 @@ impl OrderflowIngress {
         };
 
         // NOTE: Signature is mandatory
-        let Some(signer) = maybe_verify_signature(&headers, &body) else {
+        let Some(signer) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) else {
+            trace!(target: "ingress", "Error verifying signature");
             return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
         };
 
@@ -142,6 +151,7 @@ impl OrderflowIngress {
 
         if let Some(mut data) = ingress.entity_data(entity) {
             if data.rate_limit.count() > ingress.rate_limit_count {
+                trace!(target: "ingress", "Rate limited request");
                 ingress.metrics.user.requests_rate_limited.increment(1);
                 return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
             }
@@ -152,6 +162,7 @@ impl OrderflowIngress {
         {
             Ok(request) => request,
             Err(error) => {
+                trace!(target: "ingress", "Error parsing JSON-RPC request");
                 ingress.metrics.user.json_rpc_parse_errors.increment(1);
                 return JsonRpcResponse::error(None, error);
             }
@@ -172,7 +183,10 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress.on_bundle(entity, bundle).await.map(EthResponse::BundleHash)
+                ingress
+                    .on_bundle(entity, bundle, received_at_utc)
+                    .await
+                    .map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(Ok(tx)) = request.take_single_param().map(|value| {
@@ -182,7 +196,10 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress.send_raw_transaction(entity, tx).await.map(EthResponse::TxHash)
+                ingress
+                    .send_raw_transaction(entity, tx, received_at_utc)
+                    .await
+                    .map(EthResponse::TxHash)
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
@@ -249,7 +266,7 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            if let Some(address) = maybe_verify_signature(&headers, &body) {
+            if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
                 }
@@ -263,6 +280,7 @@ impl OrderflowIngress {
         {
             Ok(request) => request,
             Err(error) => {
+                error!(target: "ingress", "Error parsing JSON-RPC request");
                 ingress.metrics.system.json_rpc_parse_errors.increment(1);
                 return JsonRpcResponse::error(None, error);
             }
@@ -279,11 +297,13 @@ impl OrderflowIngress {
         let (raw, response) = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(raw) = request.take_single_param() else {
+                    error!(target: "ingress", "Error parsing bundle from system request");
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 let Ok(bundle) = serde_json::from_value::<RawBundle>(raw.clone()) else {
+                    error!(target: "ingress", "Error parsing bundle from system request");
                     ingress.metrics.system.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
@@ -337,7 +357,12 @@ impl OrderflowIngress {
     }
 
     /// Handles a new bundle.
-    async fn on_bundle(&self, entity: Entity, bundle: RawBundle) -> Result<B256, IngressError> {
+    async fn on_bundle(
+        &self,
+        entity: Entity,
+        bundle: RawBundle,
+        received_at: UtcDateTime,
+    ) -> Result<B256, IngressError> {
         let start = Instant::now();
         trace!(target: "ingress", ?entity, "Processing bundle");
         // Convert to system bundle.
@@ -358,9 +383,10 @@ impl OrderflowIngress {
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
-                SystemBundle::try_from_bundle_and_signer(bundle, signer)
+                SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at)
             })
-            .await?;
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
@@ -374,7 +400,7 @@ impl OrderflowIngress {
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
-        // TODO: Index here
+        self.indexer_handle.index_bundle(bundle.clone());
 
         self.send_bundle(priority, bundle).await
     }
@@ -398,6 +424,7 @@ impl OrderflowIngress {
         &self,
         entity: Entity,
         transaction: PooledTransaction,
+        received_at: UtcDateTime,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
         let tx_hash = *transaction.hash();
@@ -411,7 +438,8 @@ impl OrderflowIngress {
         self.order_cache.insert(tx_hash);
 
         let Entity::Signer(signer) = entity else { unreachable!() };
-        let transaction = SystemTransaction::from_transaction_and_signer(transaction, signer);
+        let transaction =
+            SystemTransaction::from_transaction_and_signer(transaction, signer, received_at);
 
         // Determine priority for processing given request.
         let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
@@ -425,7 +453,10 @@ impl OrderflowIngress {
                 tx.recover_signer()?;
                 Ok::<(), IngressError>(())
             })
-            .await?;
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
+
+        self.indexer_handle.index_transaction(transaction.clone());
 
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(priority, transaction);
@@ -468,13 +499,22 @@ pub fn maybe_decompress(
 }
 
 /// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and verify the signer of the request.
-pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
+pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) -> Option<Address> {
     let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;
-    let body_hash = keccak256(body);
-    let signer = recover_signer(&signature, body_hash).ok()?;
-    Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+
+    if legacy {
+        let hash_str = format!("{:?}", keccak256(body));
+        let message_hash = eip191_hash_message(hash_str.as_bytes());
+        let signer = recover_signer(&signature, message_hash).ok()?;
+
+        Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+    } else {
+        let body_hash = keccak256(body);
+        let signer = recover_signer(&signature, body_hash).ok()?;
+        Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+    }
 }
 
 /// Attempt to retrieve BuilderNet priority set by other ingresses.
