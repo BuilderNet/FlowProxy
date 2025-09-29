@@ -198,17 +198,15 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                         .txs
                         .iter()
                         .map(|tx| {
-                            tx.as_ref().access_list().as_ref().map(|access_list| {
-                                if access_list.is_empty() {
-                                    None
-                                } else {
-                                    let mut buf: Vec<u8> = Vec::new();
-                                    access_list.encode(&mut buf);
-                                    Some(buf)
-                                }
-                            })
+                            let access_list = tx.as_ref().access_list()?;
+                            if access_list.is_empty() {
+                                return None;
+                            }
+
+                            let mut buf: Vec<u8> = Vec::new();
+                            access_list.encode(&mut buf);
+                            Some(buf)
                         })
-                        .flatten()
                         .collect(),
                     transactions_authorization_list: decoded
                         .txs
