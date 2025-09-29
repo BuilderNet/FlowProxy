@@ -46,11 +46,8 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
     false
 }
 
-/// Format a [`UtcDateTime`] as a UNIX timestamp in microseconds.
-pub fn format_timestamp_micros(time: UtcDateTime) -> String {
-    (time.unix_timestamp_nanos() / 1_000).to_string()
-}
-
+/// A trait for types that can be formatted and parsed as a UNIX timestamp in microseconds header
+/// value.
 pub trait UtcDateTimeHeader: Sized {
     fn format_header(&self) -> HeaderValue;
     fn parse_header(value: &HeaderValue) -> Option<Self>;
