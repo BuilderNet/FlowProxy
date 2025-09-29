@@ -10,6 +10,7 @@ use crate::{
         decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
         SystemTransaction,
     },
+    utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
 };
 use alloy_consensus::{
@@ -49,6 +50,9 @@ pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
 
 /// Header name for flashbots priority.
 pub const BUILDERNET_PRIORITY_HEADER: &str = "X-Buildernet-Priority";
+
+/// Header name for BuilderNet sent at timestamp.
+pub const BUILDERNET_SENT_AT_HEADER: &str = "X-Buildernet-Sent-At";
 
 /// Header name for XFF header.
 pub const XFF_HEADER: &str = "X-Forwarded-For";
@@ -257,6 +261,9 @@ impl OrderflowIngress {
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
+        let sent_at = headers
+            .get(BUILDERNET_SENT_AT_HEADER)
+            .map(|h| UtcDateTime::parse_header(h).expect("Failed to parse sent at header"));
         let received_at = Instant::now();
         ingress.metrics.system.requests_received.increment(1);
 
@@ -272,7 +279,7 @@ impl OrderflowIngress {
                 }
             }
 
-            error!(target: "ingress", "Error verifying signature peer signatures");
+            error!(target: "ingress", header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER), "Error verifying peer signature");
             return JsonRpcResponse::error(None, JsonRpcError::Internal);
         };
 
@@ -320,6 +327,9 @@ impl OrderflowIngress {
 
                 ingress.order_cache.insert(bundle_hash);
 
+                // TODO: Index bundle receipt
+                _ = sent_at;
+
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
@@ -342,6 +352,9 @@ impl OrderflowIngress {
                 }
 
                 ingress.order_cache.insert(tx_hash);
+
+                // TODO: Index transaction receipt
+                _ = sent_at;
 
                 (raw, EthResponse::TxHash(tx_hash))
             }

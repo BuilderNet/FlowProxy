@@ -1,10 +1,12 @@
 use alloy_eips::eip2718::EIP4844_TX_TYPE_ID;
 use alloy_primitives::Bytes;
 use alloy_rlp::{Buf as _, Header};
+use axum::http::HeaderValue;
 use std::{
     sync::LazyLock,
     time::{Duration, Instant},
 };
+use time::UtcDateTime;
 
 use crate::{builderhub::LocalPeerStore, validation::MAINNET_CHAIN_ID};
 
@@ -42,6 +44,26 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
         }
     }
     false
+}
+
+/// A trait for types that can be formatted and parsed as a UNIX timestamp in microseconds header
+/// value.
+pub trait UtcDateTimeHeader: Sized {
+    fn format_header(&self) -> HeaderValue;
+    fn parse_header(value: &HeaderValue) -> Option<Self>;
+}
+
+impl UtcDateTimeHeader for UtcDateTime {
+    /// Format a [`UtcDateTime`] as a UNIX timestamp in microseconds header value.
+    fn format_header(&self) -> HeaderValue {
+        (self.unix_timestamp_nanos() / 1_000).to_string().parse().unwrap()
+    }
+
+    /// Parse a [`UtcDateTime`] from a UNIX timestamp in microseconds header value.
+    fn parse_header(value: &HeaderValue) -> Option<Self> {
+        let micros: i128 = value.to_str().ok()?.parse().ok()?;
+        UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).ok()
+    }
 }
 
 pub mod testutils {
