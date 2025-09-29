@@ -148,15 +148,20 @@ impl SystemBundle {
         signer: Address,
         received_at: UtcDateTime,
     ) -> Result<Self, RawBundleConvertError> {
-        let decoded = bundle.clone().decode(TxEncoding::WithBlobData)?;
         bundle.signing_address = Some(signer);
 
         let bundle_hash = bundle.bundle_hash();
 
+        let mut decoded = bundle.clone().decode(TxEncoding::WithBlobData)?.into();
+
+        if let DecodedBundle::Bundle(bundle) = &mut decoded {
+            bundle.signer = Some(signer);
+        }
+
         Ok(Self {
             signer,
             raw_bundle: Arc::new(bundle),
-            decoded_bundle: Arc::new(decoded.into()),
+            decoded_bundle: Arc::new(decoded),
             bundle_hash,
             received_at,
         })
