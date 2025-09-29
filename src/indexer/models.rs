@@ -197,27 +197,25 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_access_list: decoded
                         .txs
                         .iter()
-                        .filter_map(|tx| {
-                            tx.as_ref().access_list().as_ref().map(|access_list| {
-                                if access_list.is_empty() {
-                                    None
-                                } else {
-                                    let mut buf: Vec<u8> = Vec::new();
-                                    access_list.encode(&mut buf);
-                                    Some(buf)
-                                }
-                            })
+                        .map(|tx| {
+                            let access_list = tx.as_ref().access_list()?;
+
+                            if access_list.is_empty() {
+                                return None;
+                            }
+                            let mut buf: Vec<u8> = Vec::new();
+                            access_list.encode(&mut buf);
+                            Some(buf)
                         })
                         .collect(),
                     transactions_authorization_list: decoded
                         .txs
                         .iter()
                         .map(|tx| {
-                            tx.as_ref().authorization_list().as_ref().map(|signed_authorizations| {
-                                let mut buf: Vec<u8> = Vec::new();
-                                signed_authorizations.to_vec().encode(&mut buf);
-                                buf
-                            })
+                            let authorization_list = tx.as_ref().authorization_list()?;
+                            let mut buf: Vec<u8> = Vec::new();
+                            authorization_list.to_vec().encode(&mut buf);
+                            Some(buf)
                         })
                         .collect(),
                     block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
