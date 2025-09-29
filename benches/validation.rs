@@ -1,3 +1,6 @@
+//! Benchmarks for everything related to bundle validation.
+//! - `bench_validation` benchmarks the validation of a bundle.
+
 use std::hint::black_box;
 
 use alloy_primitives::Address;
@@ -33,10 +36,7 @@ pub fn bench_validation(c: &mut Criterion) {
         // We use iter_batched here so we have an owned value for the benchmarked function (second
         // closure)
         b.iter_batched(
-            || {
-                // Generate inputs
-                generate_inputs(size, &mut rng)
-            },
+            || generate_inputs(size, &mut rng),
             |inputs| {
                 for input in inputs {
                     let result =
