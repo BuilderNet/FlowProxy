@@ -65,7 +65,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     IngressClient { url, client, signer }
 }
 
-impl<S: Signer> IngressClient<S> {
+impl<S: Signer + Sync> IngressClient<S> {
     pub(crate) fn build_request(
         &self,
         body: impl Into<reqwest::Body>,
@@ -111,8 +111,8 @@ impl<S: Signer> IngressClient<S> {
     }
 
     pub(crate) async fn sign_payload(&self, payload: &[u8]) -> String {
-        let sighash = keccak256(payload);
-        let signature = self.signer.sign_hash(&sighash).await.unwrap();
+        let sighash = format!("{:?}", keccak256(payload));
+        let signature = self.signer.sign_message(sighash.as_bytes()).await.unwrap();
         format!("{:?}:{}", self.signer.address(), signature)
     }
 }

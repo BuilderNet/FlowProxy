@@ -16,7 +16,7 @@ use alloy_consensus::{
     crypto::secp256k1::recover_signer,
     transaction::{PooledTransaction, SignerRecoverable},
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256};
+use alloy_primitives::{eip191_hash_message, keccak256, Address, Bytes, B256};
 use alloy_signer::Signature;
 use axum::{
     body::Body,
@@ -58,6 +58,9 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
+
+/// Whether to use the legacy signature verification.
+const USE_LEGACY_SIGNATURE: bool = true;
 
 #[derive(Debug)]
 pub struct OrderflowIngress {
@@ -139,7 +142,7 @@ impl OrderflowIngress {
         };
 
         // NOTE: Signature is mandatory
-        let Some(signer) = maybe_verify_signature(&headers, &body) else {
+        let Some(signer) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) else {
             trace!(target: "ingress", "Error verifying signature");
             return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
         };
@@ -263,7 +266,7 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            if let Some(address) = maybe_verify_signature(&headers, &body) {
+            if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
                 }
@@ -496,13 +499,22 @@ pub fn maybe_decompress(
 }
 
 /// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and verify the signer of the request.
-pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8]) -> Option<Address> {
+pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) -> Option<Address> {
     let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;
-    let body_hash = keccak256(body);
-    let signer = recover_signer(&signature, body_hash).ok()?;
-    Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+
+    if legacy {
+        let hash_str = format!("{:?}", keccak256(body));
+        let message_hash = eip191_hash_message(hash_str.as_bytes());
+        let signer = recover_signer(&signature, message_hash).ok()?;
+
+        Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+    } else {
+        let body_hash = keccak256(body);
+        let signer = recover_signer(&signature, body_hash).ok()?;
+        Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
+    }
 }
 
 /// Attempt to retrieve BuilderNet priority set by other ingresses.
