@@ -26,7 +26,7 @@ pub mod ingress;
 use ingress::OrderflowIngress;
 
 use crate::{
-    builderhub::PeerStore, cache::OrderCache, indexer::ClickhouseIndexer,
+    builderhub::PeerStore, cache::OrderCache, indexer::click::ClickhouseIndexer,
     ingress::OrderflowIngressMetrics,
 };
 
