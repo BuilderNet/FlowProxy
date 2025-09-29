@@ -197,7 +197,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_access_list: decoded
                         .txs
                         .iter()
-                        .filter_map(|tx| {
+                        .map(|tx| {
                             tx.as_ref().access_list().as_ref().map(|access_list| {
                                 if access_list.is_empty() {
                                     None
@@ -208,6 +208,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                                 }
                             })
                         })
+                        .flatten()
                         .collect(),
                     transactions_authorization_list: decoded
                         .txs
