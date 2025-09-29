@@ -57,6 +57,9 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 
+/// Whether to use the legacy signature verification.
+const USE_LEGACY_SIGNATURE: bool = true;
+
 #[derive(Debug)]
 pub struct OrderflowIngress {
     pub gzip_enabled: bool,
@@ -134,7 +137,7 @@ impl OrderflowIngress {
         };
 
         // NOTE: Signature is mandatory
-        let Some(signer) = maybe_verify_signature(&headers, &body, true) else {
+        let Some(signer) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) else {
             return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
         };
 
@@ -249,7 +252,7 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            if let Some(address) = maybe_verify_signature(&headers, &body, true) {
+            if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
                 }
