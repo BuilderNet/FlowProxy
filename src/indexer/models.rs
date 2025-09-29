@@ -756,12 +756,10 @@ pub(crate) mod tests {
         let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
         let signer = *bundle_row.signer_address.as_ref().unwrap();
 
-        let mut raw_bundle_round_trip: RawBundle = bundle_row.into();
-        // For this bundle in particular, ensure it set to `None`, and don't populate it with the
-        // value saved from the bundle saved in db.
-        raw_bundle_round_trip.signing_address = None;
+        let raw_bundle_round_trip: RawBundle = bundle_row.into();
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
+
         let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
             raw_bundle_round_trip,
             signer,
