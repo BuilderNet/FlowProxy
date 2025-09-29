@@ -1,5 +1,7 @@
+use std::path::PathBuf;
+
 use alloy_signer_local::PrivateKeySigner;
-use clap::{Args, Parser, ValueHint};
+use clap::{ArgGroup, Args, Parser, ValueHint};
 
 /// The maximum request size in bytes (10 MiB).
 const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
@@ -19,6 +21,24 @@ pub struct ClickhouseArgs {
 
     #[clap(long = "clickhouse.database", env = "CLICKHOUSE_DATABASE")]
     pub database: Option<String>,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug, Args)]
+pub struct ParquetArgs {
+    /// The file path to store bundle receipts data.
+    pub bundle_receipts_file_path: PathBuf,
+}
+
+/// Arguments required to setup indexing.
+#[derive(PartialEq, Eq, Clone, Debug, Args)]
+#[command(group(
+    ArgGroup::new("indexing").required(true).args(&["clickhouse", "parquet"]).multiple(false))
+)] // One of the two MUST be provided.
+pub struct IndexerArgs {
+    #[clap(flatten)]
+    pub clickhouse: Option<ClickhouseArgs>,
+    #[clap(flatten)]
+    pub parquet: Option<ParquetArgs>,
 }
 
 #[derive(Parser, Debug)]
@@ -93,7 +113,7 @@ pub struct OrderflowIngressArgs {
     pub cache_size: u64,
 
     #[clap(flatten)]
-    pub clickhouse: Option<ClickhouseArgs>,
+    pub indexing: Option<IndexerArgs>,
 }
 
 impl Default for OrderflowIngressArgs {
@@ -117,7 +137,7 @@ impl Default for OrderflowIngressArgs {
             cache_ttl: 60,
             cache_size: 4096,
 
-            clickhouse: None,
+            indexing: None,
         }
     }
 }
