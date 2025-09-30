@@ -37,6 +37,6 @@ INTO OUTFILE 'filename' \
 FORMAT Parquet
 SETTINGS output_format_parquet_string_as_string = 0"
 
-[confirm("Do you want to extract data into a parquet file?")]
+#[confirm("Do you want to extract data into a parquet file?")]
 extract-data FILE:
   ./clickhouse client --host $CLICKHOUSE_HOST --user $CLICKHOUSE_USER --secure --password $CLICKHOUSE_PASSWORD -d buildernet_orderflow_proxy --query "{{replace(query, "filename", FILE)}}"

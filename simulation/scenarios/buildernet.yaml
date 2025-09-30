@@ -22,13 +22,13 @@ hosts:
     processes:
     - path: /root/submitter
       args: --url http://proxy3:9754 --path testdata.parquet --scale 1
-      start_time: 1s
+      start_time: 2s
       expected_final_state: running
   proxy1: &proxy-virginia
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
   proxy2: *proxy-virginia
@@ -36,7 +36,7 @@ hosts:
     network_node_id: 1
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-url http://0.0.0.0:2020 --builder-hub-url http://hub:3000
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
   proxy4: *proxy-frankfurt
