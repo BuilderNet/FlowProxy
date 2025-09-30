@@ -40,6 +40,7 @@ pub trait OrderIndexer: Sync + Send {
     fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
+/// The collection of channel senders to send data to be indexed.
 #[derive(Debug, Clone)]
 pub(crate) struct OrderSenders {
     bundle_tx: mpsc::Sender<SystemBundle>,
@@ -47,6 +48,7 @@ pub(crate) struct OrderSenders {
     transaction_tx: mpsc::Sender<SystemTransaction>,
 }
 
+/// The collection of channel receivers to receive data to be indexed.
 #[derive(Debug)]
 pub(crate) struct OrderReceivers {
     bundle_rx: mpsc::Receiver<SystemBundle>,
@@ -54,6 +56,7 @@ pub(crate) struct OrderReceivers {
     transaction_rx: mpsc::Receiver<SystemTransaction>,
 }
 
+/// The collection of long-running indexing tasks.
 #[derive(Debug)]
 pub(crate) struct OrderIndexerTasks {
     #[allow(dead_code)] // Not awaited as of now.
@@ -65,6 +68,7 @@ pub(crate) struct OrderIndexerTasks {
 }
 
 impl OrderSenders {
+    /// Creates a new set of order indexer channel senders and receivers.
     pub(crate) fn new() -> (Self, OrderReceivers) {
         let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
         let (bundle_receipt_tx, bundle_receipt_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
@@ -75,6 +79,7 @@ impl OrderSenders {
     }
 }
 
+/// A namespace struct for spawning an indexer.
 #[derive(Debug, Clone)]
 pub struct Indexer;
 
@@ -136,6 +141,7 @@ impl OrderIndexer for IndexerHandle {
     }
 }
 
+/// A mock indexer that simply drains the channels.
 struct MockIndexer;
 
 impl MockIndexer {

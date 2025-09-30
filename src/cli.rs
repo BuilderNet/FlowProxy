@@ -23,6 +23,7 @@ pub struct ClickhouseArgs {
     pub database: Option<String>,
 }
 
+/// Arguments required to setup file-based parquet indexing.
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
 #[group(id = "parquet", conflicts_with = "clickhouse")]
 pub struct ParquetArgs {

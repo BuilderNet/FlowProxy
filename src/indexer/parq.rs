@@ -51,7 +51,7 @@ static BUNDLE_RECEIPTS_PARQUET_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 /// The abstraction over a [`parquet::arrow::ArrowWriter`] that allows appending bundle receipts,
 /// buffering them into Arrow arrays and flushing them to Parquet files every few seconds.
 ///
-/// Ensure that when dropped, the writer is flushed
+/// It ensures that when dropped, the writer is flushed and closed.
 struct BundleReceiptWriter {
     pub bundle_hash: FixedSizeBinaryBuilder,
     pub sent_at: TimestampMicrosecondBuilder,
@@ -68,6 +68,7 @@ struct BundleReceiptWriter {
     pub writer: Option<ArrowWriter<File>>,
 }
 
+/// Ensure that when dropped, the writer is flushed and closed.
 impl Drop for BundleReceiptWriter {
     fn drop(&mut self) {
         if let Err(e) = self.flush() {
@@ -113,6 +114,8 @@ impl BundleReceiptWriter {
     }
 
     /// Flush the internal Arrow buffer to the Parquet file.
+    ///
+    /// NOTE: if it fails, data is lost, as the internal buffers are cleared.
     fn flush(&mut self) -> ArrowResult<()> {
         if self.bundle_hash.len() == 0 {
             return Ok(());
@@ -140,7 +143,7 @@ impl BundleReceiptWriter {
         )?;
 
         // Write and flush to Parquet file immediately.
-        let writer = self.writer.as_mut().expect("some");
+        let writer = self.writer.as_mut().expect("not dropped");
         writer.write(&record_batch)?;
         writer.flush()?;
 
