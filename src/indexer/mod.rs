@@ -4,6 +4,7 @@
 use std::fmt::Debug;
 
 use tokio::{sync::mpsc, task::JoinHandle};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::IndexerArgs,
@@ -78,7 +79,11 @@ impl OrderSenders {
 pub struct Indexer;
 
 impl Indexer {
-    pub fn spawn(args: Option<IndexerArgs>, builder_name: BuilderName) -> IndexerHandle {
+    pub fn spawn(
+        args: Option<IndexerArgs>,
+        builder_name: BuilderName,
+        token: CancellationToken,
+    ) -> IndexerHandle {
         let (senders, receivers) = OrderSenders::new();
 
         let Some(args) = args else {
@@ -87,10 +92,15 @@ impl Indexer {
         };
 
         if let Some(clickhouse_args) = args.clickhouse {
-            let tasks = ClickhouseIndexer::spawn(clickhouse_args, builder_name, receivers);
+            let tasks = ClickhouseIndexer::spawn(
+                clickhouse_args,
+                builder_name,
+                receivers,
+                token.child_token(),
+            );
             IndexerHandle { senders, tasks }
         } else if let Some(parquet_args) = args.parquet {
-            let tasks = ParquetIndexer::spawn(parquet_args, builder_name, receivers)
+            let tasks = ParquetIndexer::spawn(parquet_args, builder_name, receivers, token)
                 .expect("to spawn parquet indexer");
             IndexerHandle { senders, tasks }
         } else {

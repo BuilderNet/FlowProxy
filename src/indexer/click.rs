@@ -9,6 +9,7 @@ use clickhouse::{
 };
 use serde::Serialize;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
@@ -75,6 +76,7 @@ impl ClickhouseIndexer {
         args: ClickhouseArgs,
         builder_name: BuilderName,
         receivers: OrderReceivers,
+        token: CancellationToken,
     ) -> OrderIndexerTasks {
         let (host, database, username, password) = (
             args.host.expect("host is set"),
@@ -110,15 +112,23 @@ impl ClickhouseIndexer {
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
             .with_max_rows(65_536);
 
-        let bundle_indexer_task =
-            tokio::spawn(run_indexer(bundle_rx, bundle_inserter, builder_name.clone()));
+        let bundle_indexer_task = tokio::spawn(run_indexer(
+            bundle_rx,
+            bundle_inserter,
+            builder_name.clone(),
+            token.child_token(),
+        ));
         // TODO: support bundle receipts in Clickhouse.
         let bundle_receipt_indexer_task =
             tokio::task::spawn(
                 async move { while let Some(_b) = bundle_receipt_rx.recv().await {} },
             );
-        let transaction_indexer_task =
-            tokio::spawn(run_indexer(transaction_rx, transaction_inserter, builder_name.clone()));
+        let transaction_indexer_task = tokio::spawn(run_indexer(
+            transaction_rx,
+            transaction_inserter,
+            builder_name.clone(),
+            token,
+        ));
 
         OrderIndexerTasks {
             bundle_indexer_task,
@@ -133,43 +143,55 @@ async fn run_indexer<T: ClickhouseIndexableOrder>(
     mut rx: mpsc::Receiver<T>,
     mut inserter: Inserter<T::ClickhouseRowType>,
     builder_name: BuilderName,
+    token: CancellationToken,
 ) {
-    while let Some(order) = rx.recv().await {
-        tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
+    loop {
+        tokio::select! {
+            maybe_order = rx.recv() => {
+                let Some(order) = maybe_order else {
+                    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
+                    break;
+                };
+                tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
 
-        let hash = order.hash();
-        let order_row: T::ClickhouseRowType = (order, builder_name.clone()).into();
-        let value_ref = T::to_row_ref(&order_row);
+                let hash = order.hash();
+                let order_row: T::ClickhouseRowType = (order, builder_name.clone()).into();
+                let value_ref = T::to_row_ref(&order_row);
 
-        if let Err(e) = inserter.write(value_ref).await {
-            tracing::error!(target: TRACING_TARGET,
-                ?e,
-                %hash,
-                "failed to write {} to clickhouse inserter", T::ORDER_TYPE
-            )
-        }
-
-        // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
-        // `force_commit` or not. It kinda sucks. I should fork it and make a PR
-        // eventually.
-        //
-        // TODO(thedevbirb): implement a file-based backup in case this call fails due to
-        // connection timeouts or whatever.
-        match inserter.commit().await {
-            Ok(quantities) => {
-                if quantities == Quantities::ZERO {
-                    tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
-                } else {
-                    tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
+                if let Err(e) = inserter.write(value_ref).await {
+                    tracing::error!(target: TRACING_TARGET,
+                        ?e,
+                        %hash,
+                        "failed to write {} to clickhouse inserter", T::ORDER_TYPE
+                    )
                 }
-            }
-            Err(e) => {
-                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
+
+                // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
+                // `force_commit` or not. It kinda sucks. I should fork it and make a PR
+                // eventually.
+                //
+                // TODO(thedevbirb): implement a file-based backup in case this call fails due to
+                // connection timeouts or whatever.
+                match inserter.commit().await {
+                    Ok(quantities) => {
+                        if quantities == Quantities::ZERO {
+                            tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
+                        } else {
+                            tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
+                    }
+                }
+            },
+            _ = token.cancelled() => {
+                tracing::info!(target: TRACING_TARGET, "Received shutdown message");
+                break;
             }
         }
     }
 
-    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
     if let Err(e) = inserter.end().await {
         tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of {}s to indexer", T::ORDER_TYPE);
     }

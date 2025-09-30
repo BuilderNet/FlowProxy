@@ -12,6 +12,7 @@ use arrow::{
 };
 use parquet::{arrow::ArrowWriter, file::properties::WriterPropertiesBuilder};
 use tokio::{sync::mpsc, time::Instant};
+use tokio_util::sync::CancellationToken;
 
 use std::{
     fs::{File, OpenOptions},
@@ -33,17 +34,9 @@ static BUNDLE_RECEIPTS_PARQUET_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
         // The bundle hash.
         Field::new("bundle_hash", DataType::FixedSizeBinary(32), !NULLABLE),
         // The time the bundle has been sent at, as present in the JSON-RPC header.
-        Field::new(
-            "sent_at",
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            NULLABLE,
-        ),
+        Field::new("sent_at", DataType::Timestamp(TimeUnit::Microsecond, None), NULLABLE),
         // The time the local operator has received the payload.
-        Field::new(
-            "received_at",
-            DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-            !NULLABLE,
-        ),
+        Field::new("received_at", DataType::Timestamp(TimeUnit::Microsecond, None), !NULLABLE),
         // This local operator.
         Field::new("dst_builder_name", DataType::Utf8, !NULLABLE),
         // The name of the operator which sent us the payload.
@@ -57,6 +50,8 @@ static BUNDLE_RECEIPTS_PARQUET_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 
 /// The abstraction over a [`parquet::arrow::ArrowWriter`] that allows appending bundle receipts,
 /// buffering them into Arrow arrays and flushing them to Parquet files every few seconds.
+///
+/// Ensure that when dropped, the writer is flushed
 struct BundleReceiptWriter {
     pub bundle_hash: FixedSizeBinaryBuilder,
     pub sent_at: TimestampMicrosecondBuilder,
@@ -66,9 +61,24 @@ struct BundleReceiptWriter {
     pub payload_size: UInt32Builder,
     pub priority: UInt8Builder,
 
-    /// The inner Parquet writer that support Arrow datatypes.
-    pub writer: ArrowWriter<File>,
     pub builder_name: BuilderName,
+
+    /// The inner Parquet Arrow writer. It is wrapped in an `Option` to allow taking it in the
+    /// `Drop` implementation. It is guaranteed to be `Some` during the lifetime of the struct.
+    pub writer: Option<ArrowWriter<File>>,
+}
+
+impl Drop for BundleReceiptWriter {
+    fn drop(&mut self) {
+        if let Err(e) = self.flush() {
+            eprintln!("failed to flush bundle receipt writer while being dropped: {e}");
+        }
+
+        let writer = std::mem::take(&mut self.writer).expect("some");
+        if let Err(e) = writer.close() {
+            eprintln!("failed to close bundle arrow writer while being dropped: {e}");
+        }
+    }
 }
 
 impl BundleReceiptWriter {
@@ -82,7 +92,7 @@ impl BundleReceiptWriter {
             payload_size: UInt32Builder::new(),
             priority: UInt8Builder::new(),
 
-            writer,
+            writer: writer.into(),
             builder_name,
         }
     }
@@ -130,16 +140,12 @@ impl BundleReceiptWriter {
         )?;
 
         // Write and flush to Parquet file immediately.
-        self.writer.write(&record_batch)?;
-        self.writer.flush()?;
+        let writer = self.writer.as_mut().expect("some");
+        writer.write(&record_batch)?;
+        writer.flush()?;
 
-        Ok(())
-    }
+        tracing::debug!(target: TRACING_TARGET, rows = record_batch.num_rows(), "Flushed bundle receipt writer to disk");
 
-    /// Close the Parquet writer, flushing any remaining data.
-    fn close(mut self) -> ArrowResult<()> {
-        self.flush()?;
-        self.writer.close()?;
         Ok(())
     }
 }
@@ -152,6 +158,7 @@ impl ParquetIndexer {
         parquet_args: ParquetArgs,
         builder_name: BuilderName,
         receivers: OrderReceivers,
+        token: CancellationToken,
     ) -> io::Result<OrderIndexerTasks> {
         let OrderReceivers { mut bundle_rx, bundle_receipt_rx, mut transaction_rx } = receivers;
 
@@ -177,7 +184,7 @@ impl ParquetIndexer {
         let bundle_indexer_task =
             tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
         let bundle_receipt_indexer_task =
-            tokio::spawn(run_indexer(bundle_receipt_rx, receipts_writer));
+            tokio::spawn(run_indexer(bundle_receipt_rx, receipts_writer, token));
         let transaction_indexer_task =
             tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
 
@@ -195,6 +202,7 @@ impl ParquetIndexer {
 async fn run_indexer(
     mut rx: mpsc::Receiver<BundleReceipt>,
     mut receipt_writer: BundleReceiptWriter,
+    token: CancellationToken,
 ) {
     let start = Instant::now();
     let mut interval = tokio::time::interval_at(start, Duration::from_secs(4));
@@ -205,6 +213,7 @@ async fn run_indexer(
         tokio::select! {
             maybe_receipt = rx.recv() => {
                 let Some(receipt) = maybe_receipt else {
+                    tracing::error!(target: TRACING_TARGET, "Bundle receipt channel closed, shutting down Parquet indexer");
                     break;
                 };
 
@@ -218,124 +227,190 @@ async fn run_indexer(
                 if let Err(e) = receipt_writer.flush() {
                     tracing::error!(target: TRACING_TARGET, ?e, "Failed to flush Parquet writer");
                 }
-            }
+            },
 
+            _ = token.cancelled() => {
+                tracing::info!(target: TRACING_TARGET, "Received shutdown message");
+                break;
+            }
         }
     }
 
-    tracing::error!(target: TRACING_TARGET, "Bundle receipt channel closed, shutting down Parquet indexer");
-    if let Err(e) = receipt_writer.close() {
-        tracing::error!(target: TRACING_TARGET, ?e, "Failed to close Parquet writer");
-    }
+    drop(receipt_writer);
 }
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::B256;
+    use alloy_primitives::{Address, B256, U32};
     use time::UtcDateTime;
+    use tokio_util::sync::CancellationToken;
+
+    // Uncomment to enable logging during tests.
+    // use tracing::level_filters::LevelFilter;
+    // use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     use crate::{
         cli::ParquetArgs,
         indexer::{self, parq::ParquetIndexer},
         priority::Priority,
         types::BundleReceipt,
+        utils::testutils::Random,
     };
 
-    use std::sync::Arc;
-    use std::{fs::File, io};
+    use std::{fs::File, io, time::Duration};
 
-    use arrow::record_batch::RecordBatch;
-    use parquet::file::reader::SerializedFileReader;
+    use arrow::{
+        array::{
+            Array as _, FixedSizeBinaryArray, StringArray, TimestampMicrosecondArray, UInt32Array,
+            UInt8Array,
+        },
+        record_batch::RecordBatch,
+    };
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    impl Random for BundleReceipt {
+        fn random<R: rand::Rng>(rng: &mut R) -> Self {
+            Self {
+                bundle_hash: B256::random_with(rng),
+                sent_at: Some(UtcDateTime::now()),
+                received_at: UtcDateTime::now(),
+                src_builder_name: Address::random_with(rng).to_string(),
+                dst_builder_name: Some(Address::random_with(rng).to_string()),
+                payload_size: U32::random_with(rng).to(),
+                priority: Priority::Medium,
+            }
+        }
+    }
 
     /// Read all BundleReceipts from a parquet file.
-    // pub fn read_bundle_receipts(path: &str) -> io::Result<Vec<BundleReceipt>> {
-    //     let file = File::open(path)?;
-    //     let parquet_reader = SerializedFileReader::new(file)?;
-    //     let mut arrow_reader = ArrowReader::new(Arc::new(parquet_reader));
-    //
-    //     let mut receipts = Vec::new();
-    //
-    //     // Batch size = how many rows you pull at once
-    //     let record_batch_reader = arrow_reader.get_record_reader(1024)?;
-    //     for batch in record_batch_reader {
-    //         let batch = batch?;
-    //         receipts.extend(from_record_batch(&batch));
-    //     }
-    //
-    //     Ok(receipts)
-    // }
+    fn read_bundle_receipts(path: &str) -> io::Result<Vec<BundleReceipt>> {
+        let file = File::open(path)?;
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+        let reader = builder.build().unwrap();
+
+        let receipts = reader.flat_map(|b| from_record_batch(&b.unwrap())).collect::<Vec<_>>();
+
+        Ok(receipts)
+    }
 
     /// Convert an Arrow RecordBatch into BundleReceipt structs.
-    // fn from_record_batch(batch: &RecordBatch) -> Vec<BundleReceipt> {
-    //     let mut out = Vec::with_capacity(batch.num_rows());
-    //
-    //     let bundle_hash = as_fixed_size_binary_array(batch.column(0));
-    //     let sent_at = as_timestamp_microsecond_array(batch.column(1));
-    //     let received_at = as_timestamp_microsecond_array(batch.column(2));
-    //     let dst_builder_name = as_string_array(batch.column(3));
-    //     let src_builder_name = as_string_array(batch.column(4));
-    //     let payload_size = as_uint32_array(batch.column(5));
-    //     let priority = as_uint8_array(batch.column(6));
-    //
-    //     for i in 0..batch.num_rows() {
-    //         let bundle_hash_bytes = bundle_hash.value(i);
-    //         let mut fixed = [0u8; 32];
-    //         fixed.copy_from_slice(bundle_hash_bytes);
-    //         let bundle_hash = B256::from(fixed);
-    //
-    //         let sent_at = if sent_at.is_null(i) {
-    //             None
-    //         } else {
-    //             let micros = sent_at.value(i);
-    //             Some(UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).unwrap())
-    //         };
-    //
-    //         let received_at = {
-    //             let micros = received_at.value(i);
-    //             UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).unwrap()
-    //         };
-    //
-    //         let src_builder_name = src_builder_name.value(i).to_string();
-    //
-    //         let payload_size = payload_size.value(i);
-    //         let priority = match priority.value(i) {
-    //             0 => Priority::Low,
-    //             1 => Priority::Medium,
-    //             2 => Priority::High,
-    //             x => panic!("unsupport priority level: {x}"),
-    //         };
-    //
-    //         out.push(BundleReceipt {
-    //             bundle_hash,
-    //             sent_at,
-    //             received_at,
-    //             src_builder_name,
-    //             payload_size,
-    //             priority,
-    //         });
-    //     }
-    //
-    //     out
-    // }
+    fn from_record_batch(batch: &RecordBatch) -> Vec<BundleReceipt> {
+        let mut out = Vec::with_capacity(batch.num_rows());
 
-    #[test]
-    pub fn asdf() {
+        let bundle_hash: FixedSizeBinaryArray = batch.column(0).to_data().into();
+        let sent_at: TimestampMicrosecondArray = batch.column(1).to_data().into();
+        let received_at: TimestampMicrosecondArray = batch.column(2).to_data().into();
+        let dst_builder_name: StringArray = batch.column(3).to_data().into();
+        let src_builder_name: StringArray = batch.column(4).to_data().into();
+        let payload_size: UInt32Array = batch.column(5).to_data().into();
+        let priority: UInt8Array = batch.column(6).to_data().into();
+
+        for i in 0..batch.num_rows() {
+            let bundle_hash_bytes = bundle_hash.value(i);
+            let mut fixed = [0u8; 32];
+            fixed.copy_from_slice(bundle_hash_bytes);
+            let bundle_hash = B256::from(fixed);
+
+            let sent_at = if sent_at.is_null(i) {
+                None
+            } else {
+                let micros = sent_at.value(i);
+                Some(UtcDateTime::from_unix_timestamp_nanos((micros * 1_000) as i128).unwrap())
+            };
+
+            let received_at = {
+                let micros = received_at.value(i);
+                UtcDateTime::from_unix_timestamp_nanos((micros * 1_000) as i128).unwrap()
+            };
+
+            let src_builder_name = src_builder_name.value(i).to_string();
+            let dst_builder_name = dst_builder_name.value(i).to_string();
+
+            let payload_size = payload_size.value(i);
+            let priority = match priority.value(i) {
+                0 => Priority::High,
+                1 => Priority::Medium,
+                2 => Priority::Low,
+                x => panic!("unsupport priority level: {x}"),
+            };
+
+            out.push(BundleReceipt {
+                bundle_hash,
+                sent_at,
+                received_at,
+                src_builder_name,
+                dst_builder_name: Some(dst_builder_name),
+                payload_size,
+                priority,
+            });
+        }
+
+        out
+    }
+
+    /// An E2E of the parquet indexer, which spins up the indexer, sends it some bundle receipts,
+    /// and then reads back the parquet file to ensure the data is correct.
+    #[tokio::test]
+    async fn indexer_parquet_file_works() {
+        // Uncomment to toggle logs.
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+
+        // 1. --- Setup.
+
         let parquet_tempfile = tempfile::Builder::new().suffix(".parquet").tempfile().unwrap();
+        let path = parquet_tempfile.path().to_path_buf();
 
-        let args = ParquetArgs { bundle_receipts_file_path: parquet_tempfile.path().to_path_buf() };
+        tracing::debug!(?path, "Created tempfile");
 
-        let example_bundle_receipt = BundleReceipt {
-            bundle_hash: B256::ZERO,
-            sent_at: Some(UtcDateTime::now()),
-            received_at: UtcDateTime::now(),
-            src_builder_name: "buildernet_src".to_string(),
-            payload_size: 0,
-            priority: Priority::High,
-        };
+        let args = ParquetArgs { bundle_receipts_file_path: path.clone() };
 
         let (senders, receivers) = indexer::OrderSenders::new();
-        let _ = ParquetIndexer::spawn(args, "buildernet_dst".to_string(), receivers).unwrap();
 
-        senders.bundle_receipt_tx.try_send(example_bundle_receipt).unwrap();
+        let token = CancellationToken::new();
+        let _ = ParquetIndexer::spawn(
+            args,
+            "buildernet_dst".to_string(),
+            receivers,
+            token.child_token(),
+        )
+        .unwrap();
+
+        // 2. --- Spam.
+
+        let mut rng = rand::rng();
+        let example_bundle_receipts = (0..8192)
+            .map(|_| {
+                let mut r = BundleReceipt::random(&mut rng);
+                r.dst_builder_name = Some("buildernet_dst".to_string());
+                r
+            })
+            .collect::<Vec<_>>();
+
+        for r in &example_bundle_receipts {
+            senders.bundle_receipt_tx.try_send(r.clone()).unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // Cancel the indexer task.
+        token.cancel();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // 3. --- Check.
+
+        let receipts = read_bundle_receipts(path.to_str().unwrap()).unwrap();
+
+        // Less noisy errors.
+        let equal = example_bundle_receipts == receipts;
+        if !equal {
+            assert_eq!(example_bundle_receipts.len(), receipts.len());
+            for (expected, got) in example_bundle_receipts.iter().zip(&receipts) {
+                assert_eq!(expected, got, "expected != got");
+            }
+        }
+
+        // Ensure parquet tempfile is dropped at the very end of the test and not before.
+        drop(parquet_tempfile);
     }
 }
