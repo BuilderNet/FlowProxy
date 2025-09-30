@@ -125,13 +125,20 @@ impl ClickhouseIndexer {
             };
         };
 
-        info!(host = %args.host, "Running with clickhouse indexer");
+        let (host, database, username, password) = (
+            args.host.expect("host is set"),
+            args.database.expect("database is set"),
+            args.username.expect("username is set"),
+            args.password.expect("password is set"),
+        );
+
+        info!(%host, "Running with clickhouse indexer");
 
         let client = ClickhouseClient::default()
-            .with_url(args.host)
-            .with_database(args.database)
-            .with_user(args.username)
-            .with_password(args.password)
+            .with_url(host)
+            .with_database(database)
+            .with_user(username)
+            .with_password(password)
             // NOTE: Validation is disabled for performance reasons, and because validation doesn't
             // support Uint256 data types.
             .with_validation(false);
