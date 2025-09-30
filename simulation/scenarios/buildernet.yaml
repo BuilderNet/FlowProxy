@@ -23,7 +23,7 @@ hosts:
     network_node_id: 1
     processes:
     - path: /root/submitter
-      args: --url http://proxy3:9754 --path ../../../testdata/testdata.parquet --scale 1
+      args: --url http://proxy2:9754 --path ../../../testdata/testdata.parquet --scale 1
       # Wait 35s for the proxies to connect to each other
       start_time: 35s
       expected_final_state: running
