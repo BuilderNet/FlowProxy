@@ -3,7 +3,7 @@ container-name := 'shadow-buildernet'
 
 # Extra shared memory for shadow + flag for determinism
 # Explanation: https://github.com/shadow/shadow/blob/main/ci/run.sh
-run-args := '--shm-size=1024g --security-opt=seccomp=unconfined'
+run-args := '--shm-size=1024g --security-opt=seccomp=unconfined --cpuset-cpus=0-7'
 
 # Display available commands
 help:
