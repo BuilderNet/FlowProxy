@@ -3,8 +3,8 @@ use std::{str::FromStr as _, time::SystemTime};
 use alloy_consensus::{
     Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope, TxLegacy,
 };
-use alloy_eips::{Encodable2718 as _, eip2930::AccessList, eip7702::SignedAuthorization};
-use alloy_primitives::{Address, B256, Bytes, Signature, TxKind, U64, U256};
+use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Encodable2718 as _};
+use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, U256, U64};
 use alloy_rlp::Decodable as _;
 use rbuilder_primitives::serialize::RawBundle;
 use uuid::Uuid;
@@ -142,6 +142,7 @@ impl From<BundleRow> for RawBundle {
             ),
             version: None,
             signing_address: value.signer_address,
+            delayed_refund: None,
         }
     }
 }
