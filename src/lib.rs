@@ -105,10 +105,21 @@ pub async fn run_with_listeners(
         });
     }
 
-    let builder_url = Url::from_str(&args.builder_url)?;
-    let local_sender =
-        spawn_forwarder(String::from("local-builder"), args.builder_url, client.clone())?;
-    let forwarders = IngressForwarders::new(local_sender, peers, orderflow_signer);
+    // Spawn forwarders
+    let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
+    let forwarders = if let Some(ref builder_url) = builder_url {
+        let local_sender = spawn_forwarder(
+            String::from("local-builder"),
+            builder_url.to_string(),
+            client.clone(),
+        )?;
+
+        IngressForwarders::new(local_sender, peers, orderflow_signer)
+    } else {
+        // No builder URL provided, so mock local forwarder.
+        let (local_sender, _) = priority::pchannel::unbounded_channel();
+        IngressForwarders::new(local_sender, peers, orderflow_signer)
+    };
 
     let order_cache = OrderCache::new(args.cache_ttl, args.cache_size);
 
@@ -123,7 +134,7 @@ pub async fn run_with_listeners(
         entities: DashMap::default(),
         order_cache,
         forwarders,
-        local_builder_url: Some(builder_url),
+        local_builder_url: builder_url,
         metrics: OrderflowIngressMetrics::default(),
         indexer_handle,
     });
