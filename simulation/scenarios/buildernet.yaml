@@ -21,7 +21,7 @@ hosts:
     network_node_id: 1
     processes:
     - path: /root/submitter
-      args: --url http://proxy3:9754 --path testdata/testdata.parquet --scale 1
+      args: --url http://proxy3:9754 --path ../../../testdata/testdata.parquet --scale 1
       start_time: 2s
       expected_final_state: running
   proxy1: &proxy-virginia
@@ -31,6 +31,8 @@ hosts:
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
+      environment:
+        - RUST_LOG=debug
   proxy2: *proxy-virginia
   proxy3: &proxy-frankfurt
     network_node_id: 1
