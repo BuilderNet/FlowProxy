@@ -259,6 +259,7 @@ pub mod testutils {
                 refund_percent: Some(rng.random_range(0..100)),
                 refund_recipient: Some(Address::random_with(rng)),
                 first_seen_at: None,
+                delayed_refund: None,
             }
         }
     }

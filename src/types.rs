@@ -93,6 +93,7 @@ impl BundleHash for RawBundle {
                 min_timestamp: _,
                 max_timestamp: _,
                 replacement_nonce: _,
+                delayed_refund: _,
             } = bundle;
 
             block_number.hash(state);

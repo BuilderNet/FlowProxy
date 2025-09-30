@@ -462,6 +462,7 @@ pub(crate) mod tests {
                 first_seen_at: None,
                 version: None,
                 signing_address: value.signer_address,
+                delayed_refund: None,
             }
         }
     }
