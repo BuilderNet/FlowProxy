@@ -26,11 +26,11 @@ get-results:
 
 # View the logs of the given Shadow process
 logs process:
-	docker exec shadow bash -c 'cat shadow.data/hosts/{{process}}/*.1000.stdout' | less -R	
+	docker exec {{container-name}} bash -c 'cat shadow.data/hosts/{{process}}/*.1000.stdout' | less -R	
 
 # Tail the logs of the given Shadow process
 tail process:
-	docker exec shadow bash -c 'tail -f shadow.data/hosts/{{process}}/*.1000.stdout'
+	docker exec {{container-name}} bash -c 'tail -f shadow.data/hosts/{{process}}/*.1000.stdout'
 
 # Delete the copied directory containing the simulation results
 clean-results:
