@@ -63,6 +63,8 @@ WORKDIR /root
 RUN apt-get update
 RUN apt-get install -y libglib2.0-0 libglib2.0-dev
 
+COPY simulation/testdata/ /root/testdata/
+
 # Copy the compiled binaries and libraries to the fresh image
 COPY --from=build-proxy /root/.local/bin/shadow .
 COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/profiling/buildernet-orderflow-proxy .
