@@ -6,7 +6,7 @@ FROM rust:1.88.0-slim-trixie AS build-shadow
 # Parameters used in follow-up installation scripts
 ENV CONTAINER="debian:"
 ENV CC="gcc"
-ENV BUILDTYPE="debug"
+ENV BUILDTYPE="release"
 
 ENV CARGO_TERM_COLOR=always
 
