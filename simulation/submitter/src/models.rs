@@ -1,4 +1,4 @@
-use std::str::FromStr as _;
+use std::{str::FromStr as _, time::SystemTime};
 
 use alloy_consensus::{
     Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702, TxEnvelope, TxLegacy,
@@ -10,6 +10,7 @@ use rbuilder_primitives::serialize::RawBundle;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
     pub time: i64,
@@ -136,7 +137,9 @@ impl From<BundleRow> for RawBundle {
             replacement_nonce: None,
             refund_percent: value.refund_percent,
             refund_recipient: value.refund_recipient,
-            first_seen_at: None,
+            first_seen_at: Some(
+                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as f64,
+            ),
             version: None,
             signing_address: value.signer_address,
         }

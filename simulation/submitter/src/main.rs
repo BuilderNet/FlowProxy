@@ -235,10 +235,8 @@ impl Submitter {
 
                     let response = client.execute(request).await.unwrap();
                     let status = response.status();
-                    if status.is_success() {
-                        eprintln!("Successfully submitted bundle");
-                    } else {
-                        eprintln!("Failed to submit bundle: {}", status);
+                    if !status.is_success() {
+                        eprintln!("Failed to submit bundle: {}", response.text().await.unwrap());
                     }
                 }
             });
