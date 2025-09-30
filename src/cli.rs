@@ -34,7 +34,7 @@ pub struct ParquetArgs {
         value_hint = ValueHint::FilePath,
         default_value = "bundle_receipts.parquet"
     )]
-    pub bundle_receipts_file_path: PathBuf,
+    pub bundle_receipts_file_path: Option<PathBuf>,
 }
 
 /// Arguments required to setup indexing.

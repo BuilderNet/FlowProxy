@@ -165,10 +165,9 @@ impl ParquetIndexer {
     ) -> io::Result<OrderIndexerTasks> {
         let OrderReceivers { mut bundle_rx, bundle_receipt_rx, mut transaction_rx } = receivers;
 
-        let parquet_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(parquet_args.bundle_receipts_file_path)?;
+        let parquet_file = OpenOptions::new().create(true).append(true).open(
+            parquet_args.bundle_receipts_file_path.expect("bundle receipts file path is set"),
+        )?;
 
         let writer_properties = WriterPropertiesBuilder::default()
             .set_max_row_group_size(100_000)
@@ -377,7 +376,7 @@ mod tests {
 
         tracing::debug!(?path, "Created tempfile");
 
-        let args = ParquetArgs { bundle_receipts_file_path: path.clone() };
+        let args = ParquetArgs { bundle_receipts_file_path: Some(path.clone()) };
 
         let (senders, receivers) = indexer::OrderSenders::new();
 

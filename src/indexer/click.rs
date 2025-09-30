@@ -177,7 +177,7 @@ async fn run_indexer<T: ClickhouseIndexableOrder>(
                         if quantities == Quantities::ZERO {
                             tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
                         } else {
-                            tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
+                            tracing::debug!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
                         }
                     }
                     Err(e) => {
