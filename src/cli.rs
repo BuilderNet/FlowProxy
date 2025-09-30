@@ -6,18 +6,19 @@ const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Arguments required to create a clickhouse client.
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
+#[group(id = "clickhouse", requires_all = ["host", "username", "password", "database"])]
 pub struct ClickhouseArgs {
     #[clap(long = "clickhouse.host", env = "CLICKHOUSE_HOST")]
-    pub host: String,
+    pub host: Option<String>,
 
     #[clap(long = "clickhouse.user", env = "CLICKHOUSE_USER")]
-    pub username: String,
+    pub username: Option<String>,
 
     #[clap(long = "clickhouse.password", env = "CLICKHOUSE_PASSWORD")]
-    pub password: String,
+    pub password: Option<String>,
 
     #[clap(long = "clickhouse.database", env = "CLICKHOUSE_DATABASE")]
-    pub database: String,
+    pub database: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -161,5 +162,82 @@ impl OrderflowIngressArgs {
     pub fn disable_builder_hub(mut self) -> Self {
         self.builder_hub_url = None;
         self
+    }
+}
+
+/// Test that optional indexing args are validated correctly and match expected usage.
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use crate::cli::OrderflowIngressArgs;
+
+    #[test]
+    fn indexing_args_optional_succeds() {
+        let args = vec![
+            "test", // binary name
+            "--user-listen-url",
+            "0.0.0.0:9754",
+            "--system-listen-url",
+            "0.0.0.0:9755",
+            "--builder-listen-url",
+            "0.0.0.0:8756",
+            "--builder-url",
+            "http://0.0.0.0:2020",
+            "--builder-hub-url",
+            "http://localhost:3000",
+        ];
+
+        let _ = OrderflowIngressArgs::try_parse_from(args).expect("optional indexing args");
+    }
+
+    #[test]
+    fn indexing_args_partial_fail() {
+        let args = vec![
+            "test", // binary name
+            "--user-listen-url",
+            "0.0.0.0:9754",
+            "--system-listen-url",
+            "0.0.0.0:9755",
+            "--builder-listen-url",
+            "0.0.0.0:8756",
+            "--builder-url",
+            "http://0.0.0.0:2020",
+            "--builder-hub-url",
+            "http://localhost:3000",
+            "--clickhouse.host",
+            "http://127.0.0.1:12345",
+        ];
+
+        let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("arguments were not provided"));
+        assert!(err.to_string().to_lowercase().contains("clickhouse"));
+    }
+
+    #[test]
+    fn indexing_args_provided_succeds() {
+        let args = vec![
+            "test", // binary name
+            "--user-listen-url",
+            "0.0.0.0:9754",
+            "--system-listen-url",
+            "0.0.0.0:9755",
+            "--builder-listen-url",
+            "0.0.0.0:8756",
+            "--builder-url",
+            "http://0.0.0.0:2020",
+            "--builder-hub-url",
+            "http://localhost:3000",
+            "--clickhouse.host",
+            "http://127.0.0.1:12345",
+            "--clickhouse.database",
+            "pronto",
+            "--clickhouse.password",
+            "pronto",
+            "--clickhouse.user",
+            "pronto",
+        ];
+
+        let _ = OrderflowIngressArgs::try_parse_from(args).expect("indexing args are provided");
     }
 }
