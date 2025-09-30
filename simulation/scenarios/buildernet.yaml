@@ -32,7 +32,7 @@ hosts:
       start_time: 1s
       expected_final_state: running
       environment:
-        - RUST_LOG=debug
+        RUST_LOG: debug
   # proxy2: *proxy-virginia
   proxy3: &proxy-frankfurt
     network_node_id: 1
