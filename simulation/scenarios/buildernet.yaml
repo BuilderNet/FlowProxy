@@ -17,6 +17,13 @@ hosts:
     - path: /root/mockhub
       start_time: 0s
       expected_final_state: running
+  submitter:
+    network_node_id: 1
+    processes:
+    - path: /root/submitter
+      args: --url http://proxy3:9754 --path testdata.parquet --scale 1
+      start_time: 1s
+      expected_final_state: running
   proxy1: &proxy-virginia
     network_node_id: 0
     processes:

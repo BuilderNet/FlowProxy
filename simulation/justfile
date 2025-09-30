@@ -17,7 +17,7 @@ build:
 # Run a shadow simulation with the given scenario file, see list in scenarios/
 run scenario='buildernet.yaml': clean-container
 	docker run {{run-args}} --name {{container-name}} -it {{repo}}:{{image}} \
-		/bin/bash -c './shadow {{scenario}}'
+		/bin/bash -c './shadow --template-directory /root/buildernet-orderflow-proxy/simulation/testdata/ {{scenario}}'
 	@just get-results
 
 # Download the simulation results from the container

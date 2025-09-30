@@ -44,12 +44,14 @@ COPY . /root/buildernet-orderflow-proxy
 
 # Build the orderflow proxy
 WORKDIR /root/buildernet-orderflow-proxy
-RUN cargo build
+RUN cargo build --profile profiling
 
 # Build the mock of the hub used in shadow
 WORKDIR /root/buildernet-orderflow-proxy/simulation/mockhub
-RUN cargo build
+RUN cargo build --release
 
+WORKDIR /root/buildernet-orderflow-proxy/simulation/submitter
+RUN cargo build --release
 
 #
 # Stage 3: Slim image for runtime
@@ -63,8 +65,9 @@ RUN apt-get install -y libglib2.0-0 libglib2.0-dev
 
 # Copy the compiled binaries and libraries to the fresh image
 COPY --from=build-proxy /root/.local/bin/shadow .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/debug/buildernet-orderflow-proxy .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/debug/mockhub .
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/profiling/buildernet-orderflow-proxy .
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/release/mockhub .
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/target/release/submitter .
 # These shadow libraries have to be in /lib according to readelf
 COPY --from=build-proxy /root/.local/lib /lib
 
