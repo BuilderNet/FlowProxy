@@ -16,7 +16,7 @@ build:
 
 # Run a shadow simulation with the given scenario file, see list in scenarios/
 run scenario='buildernet.yaml': clean-container
-	docker run {{run-args}} --name {{container-name}} -it {{repo}}:{{image}} \
+	docker run {{run-args}} --name {{container-name}} -v scenarios:/root/scenarios -it {{repo}}:{{image}} \
 		/bin/bash -c './shadow --template-directory /root/testdata/ {{scenario}}'
 	@just get-results
 

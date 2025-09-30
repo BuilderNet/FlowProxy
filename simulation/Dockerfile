@@ -72,6 +72,3 @@ COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/targ
 COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/target/release/submitter .
 # These shadow libraries have to be in /lib according to readelf
 COPY --from=build-proxy /root/.local/lib /lib
-
-# Copy the pre-existing shadow scenarios for simulation
-COPY simulation/scenarios/* .
