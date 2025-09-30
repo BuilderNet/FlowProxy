@@ -1,6 +1,5 @@
-repo := 'flashbots'
-image := 'shadow-orderflow-proxy'
-container-name := 'shadow'
+image := 'shadow-buildernet'
+container-name := 'shadow-buildernet'
 
 # Extra shared memory for shadow + flag for determinism
 # Explanation: https://github.com/shadow/shadow/blob/main/ci/run.sh
@@ -12,11 +11,11 @@ help:
 
 # Build a docker image for running shadow simulations
 build:
-	docker build -t {{repo}}:{{image}} -f Dockerfile ..
+	docker build -t {{image}} -f Dockerfile ..
 
 # Run a shadow simulation with the given scenario file, see list in scenarios/
 run scenario='buildernet.yaml': clean-container
-	docker run {{run-args}} --name {{container-name}} -v ./scenarios:/root/scenarios:ro -it {{repo}}:{{image}} \
+	docker run {{run-args}} --name {{container-name}} -v ./scenarios:/root/scenarios:ro -it {{image}} \
 		/bin/bash -c './shadow --template-directory /root/testdata/ scenarios/{{scenario}}'
 	@just get-results
 
@@ -43,7 +42,7 @@ clean-container:
 
 # Delete the built image
 clean-image:
-	docker rmi -f {{repo}}:{{image}}
+	docker rmi -f {{image}}
 
 # DELETE EVERYTHING, HACK THE PLANET!!!
 clean-all: clean-results clean-container clean-image
