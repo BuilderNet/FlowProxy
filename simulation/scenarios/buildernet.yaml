@@ -8,7 +8,7 @@ network:
 #    type: 1_gbit_switch
     type: gml
     file:
-      path: network-graph-2-zones.yaml
+      path: /root/scenarios/network-graph-2-zones.yaml
 
 hosts:
   hub:
