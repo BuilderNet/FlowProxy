@@ -14,9 +14,14 @@ use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
+    let system_port: u16 = std::env::var("SYSTEM_PORT")
+        .expect("SYSTEM_PORT is not set")
+        .parse()
+        .expect("SYSTEM_PORT must be a valid port number");
+
     let _ = tracing_subscriber::fmt().try_init();
 
-    let registry = Registry::new();
+    let registry = Registry::new(system_port);
 
     let router = Router::new()
         .route(
@@ -46,7 +51,7 @@ async fn register_credentials(
 
     let builder = BuilderHubBuilder {
         name: format!("{:?}", signer),
-        ip: format!("http://{}", addr),
+        ip: format!("http://{}:{}", addr.ip(), registry.system_port),
         dns_name: addr.ip().to_string(),
         orderflow_proxy: creds,
         instance: BuilderHubInstanceData { tls_cert: "test".to_string() },
@@ -76,12 +81,13 @@ async fn get_builders(
 
 #[derive(Debug, Clone)]
 struct Registry {
+    system_port: u16,
     builders: Arc<DashMap<Address, BuilderHubBuilder>>,
 }
 
 impl Registry {
-    pub fn new() -> Self {
-        Self { builders: Arc::new(DashMap::new()) }
+    pub fn new(system_port: u16) -> Self {
+        Self { builders: Arc::new(DashMap::new()), system_port }
     }
 }
 

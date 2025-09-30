@@ -17,13 +17,16 @@ hosts:
     - path: /root/mockhub
       start_time: 0s
       expected_final_state: running
+      environment:
+        # System API ports of the proxies
+        SYSTEM_PORT: 9755
   submitter:
     network_node_id: 1
     processes:
     - path: /root/submitter
       args: --url http://proxy3:9754 --path ../../../testdata/testdata.parquet --scale 1
       start_time: 2s
-      expected_final_state: running
+      expected_final_state: exited
   proxy1: &proxy-virginia
     network_node_id: 0
     processes:
