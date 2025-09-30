@@ -136,7 +136,7 @@ impl BundleReplayer {
             offset: None,
             scale: args.scale,
             queue: VecDeque::with_capacity(1024),
-            ticker: tokio::time::interval(Duration::from_micros(1)),
+            ticker: tokio::time::interval(Duration::from_micros(5)),
             stats_ticker: tokio::time::interval_at(
                 tokio::time::Instant::now() + Duration::from_millis(1000),
                 Duration::from_millis(1000),
