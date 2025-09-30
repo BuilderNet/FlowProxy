@@ -1,10 +1,13 @@
 use std::{
     collections::VecDeque,
-    path::Path,
+    path::PathBuf,
     time::{Duration, SystemTime},
 };
 
+use alloy_signer::SignerSync;
+use alloy_signer_local::PrivateKeySigner;
 use arrow::array::*;
+use clap::Parser;
 use futures::TryStreamExt;
 use parquet::arrow::ParquetRecordBatchStreamBuilder;
 
@@ -12,13 +15,31 @@ mod models;
 
 use models::BundleRow;
 
+#[derive(Debug, Parser)]
+struct Args {
+    /// The URL to submit bundles to.
+    #[clap(long)]
+    url: Url,
+    /// The number of signers to use.
+    #[clap(long, default_value = "1024")]
+    num_signers: usize,
+    /// The number of requests per second per signer.
+    #[clap(long, default_value = "3")]
+    rps: usize,
+    /// The path to the Parquet bundle transcript.
+    #[clap(long)]
+    path: PathBuf,
+    #[clap(long, default_value = "1.0")]
+    scale: f64,
+}
+
 #[derive(Debug, Clone)]
-struct BundleWithTimestamp {
+struct BundleWithMetadata {
     bundle: RawBundle,
     timestamp: i64,
 }
 
-impl BundleWithTimestamp {
+impl BundleWithMetadata {
     /// Normalize the timestamp to the current time with scaling.
     fn normalized(&self, offset: i64, scale: f64) -> i64 {
         let scaled_timestamp = (self.timestamp as f64 / scale) as i64;
@@ -28,11 +49,11 @@ impl BundleWithTimestamp {
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    println!("Opening Parquet file...");
-    let path = Path::new("../testdata/testdata.parquet");
-    let file = File::open(path).await?;
+    let args = Args::parse();
 
-    println!("Creating Parquet reader for file {}", path.display());
+    println!("Opening Parquet file {}...", args.path.display());
+    let file = File::open(args.path.clone()).await?;
+
     let builder = ParquetRecordBatchStreamBuilder::new(file).await?;
 
     let num_rows = builder.metadata().file_metadata().num_rows();
@@ -40,12 +61,9 @@ async fn main() -> eyre::Result<()> {
 
     let mut stream = builder.with_batch_size(1024).build()?;
 
-    println!("\nReading batches and converting to BundleRow...");
-
     let (tx, rx) = mpsc::channel(12);
 
-    let scale = 2.0; // 2x speed replay
-    let replayer = BundleReplayer::new(rx, scale);
+    let replayer = BundleReplayer::new(rx, &args);
     let handle = replayer.spawn().await;
 
     while let Some(batch) = stream.try_next().await? {
@@ -55,8 +73,9 @@ async fn main() -> eyre::Result<()> {
             let bundle_row = convert_row_to_bundle(&batch, row_idx)?;
             let timestamp = bundle_row.time;
             let raw_bundle = RawBundle::from(bundle_row);
+
             // NOTE: We assume that the data is sorted by timestamp
-            bundles.push(BundleWithTimestamp { bundle: raw_bundle, timestamp });
+            bundles.push(BundleWithMetadata { bundle: raw_bundle, timestamp });
         }
 
         tx.send(bundles).await?;
@@ -73,10 +92,10 @@ async fn main() -> eyre::Result<()> {
 
 struct BundleReplayer {
     /// The inbox channel that receives batched bundles.
-    inbox: mpsc::Receiver<Vec<BundleWithTimestamp>>,
+    inbox: mpsc::Receiver<Vec<BundleWithMetadata>>,
 
     /// The queue of bundles to be processed.
-    queue: VecDeque<BundleWithTimestamp>,
+    queue: VecDeque<BundleWithMetadata>,
 
     /// The offset between the current timestamp and the first timestamp in the batch.
     offset: Option<i64>,
@@ -91,6 +110,8 @@ struct BundleReplayer {
     stats_ticker: tokio::time::Interval,
     /// Counter for the number of bundles processed in the last second.
     ctr: usize,
+
+    submitter: Submitter,
 }
 
 fn unix_micros() -> i64 {
@@ -98,11 +119,11 @@ fn unix_micros() -> i64 {
 }
 
 impl BundleReplayer {
-    pub fn new(inbox: mpsc::Receiver<Vec<BundleWithTimestamp>>, scale: f64) -> Self {
+    pub fn new(inbox: mpsc::Receiver<Vec<BundleWithMetadata>>, args: &Args) -> Self {
         Self {
             inbox,
             offset: None,
-            scale,
+            scale: args.scale,
             queue: VecDeque::with_capacity(1024),
             ticker: tokio::time::interval(Duration::from_micros(1)),
             stats_ticker: tokio::time::interval_at(
@@ -110,6 +131,7 @@ impl BundleReplayer {
                 Duration::from_millis(1000),
             ),
             ctr: 0,
+            submitter: Submitter::new(args.num_signers, args.rps, args.url.clone()),
         }
     }
 
@@ -118,6 +140,7 @@ impl BundleReplayer {
             let mut done = false;
             loop {
                 tokio::select! {
+                    // Check if the next bundle should be processed with scaling
                     _ = self.ticker.tick() => {
                         if let Some(next) = self.queue.front() {
                             // Check if the next bundle should be processed
@@ -131,6 +154,7 @@ impl BundleReplayer {
                             break;
                         }
                     }
+                    // Print stats
                     _ = self.stats_ticker.tick() => {
                         println!("Stats: (bundle rate: {}/sec  queue size: {})", self.ctr, self.queue.len());
                         self.ctr = 0;
@@ -159,9 +183,93 @@ impl BundleReplayer {
         })
     }
 
-    async fn on_bundle(&mut self, bundle: BundleWithTimestamp) {
-        _ = bundle;
+    async fn on_bundle(&mut self, bundle: BundleWithMetadata) {
+        self.submitter.submit(bundle.bundle);
         self.ctr += 1;
+    }
+}
+
+struct Submitter {
+    /// The signers to use.
+    signers: Vec<PrivateKeySigner>,
+    /// The index of the currently active signer.
+    idx: usize,
+    /// Requests per second per signer.
+    rps: usize,
+    /// The counter for the number of requests sent by the currently active signer.
+    ctr: usize,
+
+    sender: flume::Sender<Request>,
+    url: Url,
+}
+
+impl Submitter {
+    pub fn new(num_signers: usize, rps: usize, url: Url) -> Self {
+        let signers = (0..num_signers).map(|_| PrivateKeySigner::random()).collect();
+        // Use this as a work-stealing queue. Any item is received exactly once.
+        let (tx, queue) = flume::unbounded();
+
+        // Spawn the submitter HTTP clients
+        let client = Client::new();
+
+        for _ in 0..32 {
+            let client = client.clone();
+            let queue: flume::Receiver<Request> = queue.clone();
+            tokio::spawn(async move {
+                loop {
+                    let Ok(request) = queue.recv_async().await else {
+                        eprintln!("Worker shutting down");
+                        break;
+                    };
+
+                    let response = client.execute(request).await.unwrap();
+                    let status = response.status();
+                    if status.is_success() {
+                        eprintln!("Successfully submitted bundle");
+                    } else {
+                        eprintln!("Failed to submit bundle: {}", status);
+                    }
+                }
+            });
+        }
+
+        Self { signers, idx: 0, rps, ctr: 0, sender: tx, url }
+    }
+
+    pub fn submit(&mut self, bundle: RawBundle) {
+        let mut request = Request::new(Method::POST, self.url.clone());
+        let body = json!({
+            "id": 0,
+            "jsonrpc": "2.0",
+            "method": "eth_sendBundle",
+            "params": [bundle],
+        });
+
+        let body = serde_json::to_vec(&body).unwrap();
+        let sig_header = self.sign(&body).unwrap();
+
+        request.body_mut().replace(body.into());
+        let headers = request.headers_mut();
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert("x-flashbots-signature", sig_header);
+        self.sender.send(request).unwrap();
+    }
+
+    fn sign(&mut self, body: &[u8]) -> eyre::Result<HeaderValue> {
+        let sighash = format!("{:?}", keccak256(body));
+
+        if self.ctr >= self.rps {
+            self.idx = (self.idx + 1) % self.signers.len();
+            self.ctr = 0;
+        }
+
+        let signer = &self.signers[self.idx];
+
+        let signature = signer.sign_message_sync(sighash.as_bytes())?;
+        let header = format!("{:?}:{}", signer.address(), signature);
+        self.ctr += 1;
+
+        Ok(HeaderValue::from_str(&header)?)
     }
 }
 
@@ -273,8 +381,13 @@ fn convert_row_to_bundle(
 }
 
 // Helper functions to extract data from Arrow arrays
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, keccak256};
 use rbuilder_primitives::serialize::RawBundle;
+use reqwest::{
+    Client, Method, Request, Url,
+    header::{self, HeaderValue},
+};
+use serde_json::json;
 use tokio::{fs::File, sync::mpsc, task::JoinHandle};
 
 fn extract_hash_list(array: &dyn Array, row_idx: usize) -> eyre::Result<Vec<B256>> {
