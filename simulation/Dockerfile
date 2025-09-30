@@ -1,3 +1,6 @@
+#syntax=docker/dockerfile:1-labs
+# For COPY --exclude=
+
 #
 # Stage 1: Build shadow
 #
@@ -6,7 +9,7 @@ FROM rust:1.88.0-slim-trixie AS build-shadow
 # Parameters used in follow-up installation scripts
 ENV CONTAINER="debian:"
 ENV CC="gcc"
-ENV BUILDTYPE="debug"
+ENV BUILDTYPE="release"
 
 ENV CARGO_TERM_COLOR=always
 
@@ -40,15 +43,19 @@ FROM build-shadow AS build-proxy
 RUN apt-get install -y libssl-dev
 
 # Note: the docker context must be the root of the git project due to this COPY
-COPY . /root/buildernet-orderflow-proxy
+COPY --exclude=simulation/Dockerfile --exclude=simulation/justfile . /root/buildernet-orderflow-proxy
 
 # Build the orderflow proxy
 WORKDIR /root/buildernet-orderflow-proxy
-RUN cargo build
+RUN cargo build --profile profiling
 
 # Build the mock of the hub used in shadow
 WORKDIR /root/buildernet-orderflow-proxy/simulation/mockhub
-RUN cargo build
+RUN cargo build --release
+
+# Build the mock client that submits bundles to the network
+WORKDIR /root/buildernet-orderflow-proxy/simulation/submitter
+RUN cargo build --release
 
 
 #
@@ -62,11 +69,15 @@ RUN apt-get update
 RUN apt-get install -y libglib2.0-0 libglib2.0-dev
 
 # Copy the compiled binaries and libraries to the fresh image
-COPY --from=build-proxy /root/.local/bin/shadow .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/debug/buildernet-orderflow-proxy .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/debug/mockhub .
+COPY --from=build-shadow /root/.local/bin/shadow .
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/profiling/buildernet-orderflow-proxy .
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/release/mockhub .
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/target/release/submitter .
 # These shadow libraries have to be in /lib according to readelf
 COPY --from=build-proxy /root/.local/lib /lib
 
-# Copy the pre-existing shadow scenarios for simulation
+# Copy the shadow scenarios for simulation
 COPY simulation/scenarios/* .
+
+# Copy the bundle datasets
+COPY simulation/testdata/* .

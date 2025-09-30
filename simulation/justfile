@@ -1,6 +1,7 @@
 repo := 'flashbots'
 image := 'shadow-orderflow-proxy'
 container-name := 'shadow'
+dataset-dir := 'testdata'
 
 # Extra shared memory for shadow + flag for determinism
 # Explanation: https://github.com/shadow/shadow/blob/main/ci/run.sh
@@ -9,6 +10,10 @@ run-args := '--shm-size=1024g --security-opt=seccomp=unconfined'
 # Display available commands
 help:
   @just --list --unsorted
+
+# Download dataset files using git lfs
+prepare:
+	git lfs pull --include {{dataset-dir}}
 
 # Build a docker image for running shadow simulations
 build:
