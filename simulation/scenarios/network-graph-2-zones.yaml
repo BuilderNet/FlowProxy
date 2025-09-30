@@ -1,3 +1,6 @@
+# Intra-zone latencies: https://latency.azure.cloud63.fr
+# Inter-zone latencies: https://learn.microsoft.com/en-us/azure/networking/azure-network-latency
+
 graph [
   node [
     id 0

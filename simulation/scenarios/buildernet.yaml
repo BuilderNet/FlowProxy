@@ -1,11 +1,10 @@
 general:
-  stop_time: 1000s
+  stop_time: 10m
 
 # Intra-zone latencies: https://latency.azure.cloud63.fr
 # Inter-zone latencies: https://learn.microsoft.com/en-us/azure/networking/azure-network-latency
 network:
   graph:
-#    type: 1_gbit_switch
     type: gml
     file:
       path: /root/scenarios/network-graph-2-zones.yaml
@@ -25,9 +24,10 @@ hosts:
     processes:
     - path: /root/submitter
       args: --url http://proxy3:9754 --path ../../../testdata/testdata.parquet --scale 1
-      start_time: 2s
+      # Wait 35s for the proxies to connect to each other
+      start_time: 35s
       expected_final_state: running
-  proxy1: &proxy-virginia
+  proxy1:
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy
@@ -35,13 +35,13 @@ hosts:
       start_time: 1s
       expected_final_state: running
       environment:
-        RUST_LOG: debug
-  # proxy2: *proxy-virginia
-  proxy3: &proxy-frankfurt
+        RUST_LOG: info
+  proxy2:
     network_node_id: 1
     processes:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
       start_time: 1s
       expected_final_state: running
-  # proxy4: *proxy-frankfurt
+      environment:
+        RUST_LOG: info
