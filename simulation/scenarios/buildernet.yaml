@@ -19,7 +19,7 @@ hosts:
       expected_final_state: running
       environment:
         # System API ports of the proxies
-        SYSTEM_PORT: 9755
+        SYSTEM_PORT: "9755"
   submitter:
     network_node_id: 1
     processes:
