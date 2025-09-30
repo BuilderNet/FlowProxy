@@ -1,11 +1,12 @@
 use crate::{
     builderhub::BuilderHubBuilder,
     ingress::{
-        BUILDERNET_PRIORITY_HEADER, ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD,
-        FLASHBOTS_SIGNATURE_HEADER,
+        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
     },
     priority::{pchannel, Priority},
     types::{SystemBundle, SystemTransaction},
+    utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;
 use alloy_signer::SignerSync as _;
@@ -24,6 +25,7 @@ use std::{
     task::{Context, Poll},
     time::Instant,
 };
+use time::UtcDateTime;
 use tracing::*;
 
 #[derive(Debug)]
@@ -46,10 +48,13 @@ impl IngressForwarders {
         Self { local, peers, signer }
     }
 
+    /// Create a new builder request. The [`BUILDERNET_SENT_AT_HEADER`] is formatted as a UNIX
+    /// timestamp in nanoseconds.
     fn create_request(
         priority: Priority,
         body: Vec<u8>,
         signature_header: Option<String>,
+        sent_at_header: Option<UtcDateTime>,
     ) -> Arc<BuilderRequest> {
         let mut headers = HeaderMap::new();
         headers.insert(BUILDERNET_PRIORITY_HEADER, priority.to_string().parse().unwrap());
@@ -57,6 +62,10 @@ impl IngressForwarders {
 
         if let Some(signature_header) = signature_header {
             headers.insert(FLASHBOTS_SIGNATURE_HEADER, signature_header.parse().unwrap());
+        }
+
+        if let Some(sent_at) = sent_at_header {
+            headers.insert(BUILDERNET_SENT_AT_HEADER, sent_at.format_header());
         }
 
         Arc::new(BuilderRequest::new(body).with_headers(headers))
@@ -73,7 +82,7 @@ impl IngressForwarders {
     /// Broadcast bundle to all forwarders.
     pub fn broadcast_bundle(&self, priority: Priority, bundle: SystemBundle) {
         // Create local request first
-        let local = Self::create_request(priority, bundle.clone().encode_local(), None);
+        let local = Self::create_request(priority, bundle.clone().encode_local(), None, None);
         let _ = self.local.send(priority, local);
 
         let body = bundle.encode();
@@ -84,7 +93,7 @@ impl IngressForwarders {
 
         // Difference: we encode the whole bundle (including the signer), and we
         // add the signature header.
-        let forward = Self::create_request(priority, body, Some(header));
+        let forward = Self::create_request(priority, body, Some(header), Some(UtcDateTime::now()));
 
         debug!(target: "ingress::forwarder", name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
 
@@ -97,7 +106,7 @@ impl IngressForwarders {
     pub fn broadcast_transaction(&self, priority: Priority, transaction: SystemTransaction) {
         let body = transaction.encode();
 
-        let local = Self::create_request(priority, body.clone(), None);
+        let local = Self::create_request(priority, body.clone(), None, None);
         let _ = self.local.send(priority, local);
 
         let body_hash = keccak256(&body);
@@ -105,7 +114,7 @@ impl IngressForwarders {
         let header = format!("{:?}:{}", self.signer.address(), signature);
 
         // Difference: we add the signature header.
-        let forward = Self::create_request(priority, body, Some(header));
+        let forward = Self::create_request(priority, body, Some(header), Some(UtcDateTime::now()));
 
         debug!(target: "ingress::forwarder", name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
 
@@ -124,7 +133,7 @@ impl IngressForwarders {
         });
 
         let body = serde_json::to_vec(&json).unwrap();
-        let request = Self::create_request(priority, body, None);
+        let request = Self::create_request(priority, body, None, None);
         let _ = self.local.send(priority, request);
     }
 }
