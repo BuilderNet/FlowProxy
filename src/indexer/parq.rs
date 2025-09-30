@@ -270,10 +270,19 @@ mod tests {
 
     impl Random for BundleReceipt {
         fn random<R: rand::Rng>(rng: &mut R) -> Self {
+            // Ensure microsecond precision only.
+            let mut sent_at = UtcDateTime::now();
+            let micros = sent_at.microsecond();
+            sent_at = sent_at.replace_microsecond(micros).unwrap();
+
+            let mut received_at = UtcDateTime::now();
+            let micros = received_at.microsecond();
+            received_at = received_at.replace_microsecond(micros).unwrap();
+
             Self {
                 bundle_hash: B256::random_with(rng),
-                sent_at: Some(UtcDateTime::now()),
-                received_at: UtcDateTime::now(),
+                sent_at: Some(sent_at),
+                received_at,
                 src_builder_name: Address::random_with(rng).to_string(),
                 dst_builder_name: Some(Address::random_with(rng).to_string()),
                 payload_size: U32::random_with(rng).to(),
