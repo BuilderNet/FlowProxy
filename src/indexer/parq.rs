@@ -183,17 +183,15 @@ impl ParquetIndexer {
 
         let receipts_writer = BundleReceiptWriter::new(writer, builder_name.clone());
 
-        let bundle_indexer_task =
-            tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+        tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
         let bundle_receipt_indexer_task =
             tokio::spawn(run_indexer(bundle_receipt_rx, receipts_writer, token));
-        let transaction_indexer_task =
-            tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
+        tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
 
         let tasks = OrderIndexerTasks {
-            bundle_indexer_task,
-            bundle_receipt_indexer_task,
-            transaction_indexer_task,
+            bundle_indexer_task: None,
+            bundle_receipt_indexer_task: Some(bundle_receipt_indexer_task),
+            transaction_indexer_task: None,
         };
 
         Ok(tasks)

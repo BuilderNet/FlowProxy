@@ -119,10 +119,7 @@ impl ClickhouseIndexer {
             token.child_token(),
         ));
         // TODO: support bundle receipts in Clickhouse.
-        let bundle_receipt_indexer_task =
-            tokio::task::spawn(
-                async move { while let Some(_b) = bundle_receipt_rx.recv().await {} },
-            );
+        tokio::task::spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
         let transaction_indexer_task = tokio::spawn(run_indexer(
             transaction_rx,
             transaction_inserter,
@@ -131,9 +128,9 @@ impl ClickhouseIndexer {
         ));
 
         OrderIndexerTasks {
-            bundle_indexer_task,
-            bundle_receipt_indexer_task,
-            transaction_indexer_task,
+            bundle_indexer_task: Some(bundle_indexer_task),
+            bundle_receipt_indexer_task: None,
+            transaction_indexer_task: Some(transaction_indexer_task),
         }
     }
 }

@@ -1,7 +1,10 @@
 use std::{
+    future::Future,
     hash::{Hash as _, Hasher as _},
     ops::Deref,
+    pin::Pin,
     sync::Arc,
+    task::{Context, Poll},
 };
 
 use alloy_consensus::{
@@ -317,6 +320,35 @@ pub enum EthResponse {
     BundleHash(B256),
     #[serde(untagged)]
     TxHash(B256),
+}
+
+/// A long-lived task, with its name for logging purposes.
+#[derive(Debug)]
+pub struct LongLivedTask {
+    pub handle: tokio::task::JoinHandle<()>,
+    pub name: &'static str,
+}
+
+/// Error returned when a long-lived task fails.
+#[derive(Debug)]
+pub struct LongLivedTaskFailure {
+    pub err: tokio::task::JoinError,
+    pub name: &'static str,
+}
+
+impl Future for LongLivedTask {
+    type Output = Result<(), LongLivedTaskFailure>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let LongLivedTask { handle, name } = self.get_mut();
+        match Pin::new(handle).poll(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(err)) => {
+                std::task::Poll::Ready(Err(LongLivedTaskFailure { err, name }))
+            }
+            Poll::Pending => std::task::Poll::Pending,
+        }
+    }
 }
 
 #[cfg(test)]
