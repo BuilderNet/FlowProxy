@@ -4,7 +4,7 @@ general:
   # Show progress in the console
   progress: true
   # Add some latency to syscalls to avoid deadlocks
-  mocel_unblocked_syscall_latency: true
+  model_unblocked_syscall_latency: true
 
 
 experimental:
