@@ -137,7 +137,6 @@ impl OrderflowIngress {
     ) -> JsonRpcResponse<EthResponse> {
         let received_at = Instant::now();
         let received_at_utc = UtcDateTime::now();
-        let payload_size = body.len();
 
         ingress.metrics.user.requests_received.increment(1);
 
@@ -189,7 +188,7 @@ impl OrderflowIngress {
                 };
 
                 ingress
-                    .on_bundle(entity, bundle, received_at_utc, payload_size as u32)
+                    .on_bundle(entity, bundle, received_at_utc)
                     .await
                     .map(EthResponse::BundleHash)
             }
@@ -335,7 +334,7 @@ impl OrderflowIngress {
                     bundle_hash,
                     sent_at,
                     received_at: received_at_utc,
-                    src_builder_name: Some(peer),
+                    src_builder_name: peer,
                     dst_builder_name: None,
                     payload_size: payload_size as u32,
                     priority,
@@ -387,7 +386,6 @@ impl OrderflowIngress {
         entity: Entity,
         bundle: RawBundle,
         received_at: UtcDateTime,
-        payload_size: u32,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
         trace!(target: "ingress", ?entity, "Processing bundle");
@@ -427,16 +425,6 @@ impl OrderflowIngress {
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
         self.indexer_handle.index_bundle(bundle.clone());
-        self.indexer_handle.index_bundle_receipt(BundleReceipt {
-            bundle_hash: bundle.bundle_hash(),
-            sent_at: None,
-            received_at,
-            src_builder_name: None,
-            // Will be set by the indexer.
-            dst_builder_name: None,
-            payload_size: payload_size as u32,
-            priority,
-        });
 
         self.send_bundle(priority, bundle).await
     }

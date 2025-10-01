@@ -108,11 +108,7 @@ impl BundleReceiptWriter {
         }
         self.received_at.append_value((receipt.received_at.unix_timestamp_nanos() / 1_000) as i64);
         self.dst_builder_name.append_value(self.builder_name.clone());
-        if let Some(src_builder_name) = receipt.src_builder_name {
-            self.src_builder_name.append_value(src_builder_name);
-        } else {
-            self.src_builder_name.append_null();
-        }
+        self.src_builder_name.append_value(receipt.src_builder_name);
         self.payload_size.append_value(receipt.payload_size);
         self.priority.append_value(receipt.priority as u8);
     }
@@ -287,7 +283,7 @@ mod tests {
                 bundle_hash: B256::random_with(rng),
                 sent_at: Some(sent_at),
                 received_at,
-                src_builder_name: Some(Address::random_with(rng).to_string()),
+                src_builder_name: Address::random_with(rng).to_string(),
                 dst_builder_name: Some(Address::random_with(rng).to_string()),
                 payload_size: U32::random_with(rng).to(),
                 priority: Priority::Medium,
@@ -351,7 +347,7 @@ mod tests {
                 bundle_hash,
                 sent_at,
                 received_at,
-                src_builder_name: Some(src_builder_name),
+                src_builder_name,
                 dst_builder_name: Some(dst_builder_name),
                 payload_size,
                 priority,

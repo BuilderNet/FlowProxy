@@ -288,8 +288,7 @@ pub struct BundleReceipt {
     /// The time the bundle has been received.
     pub received_at: UtcDateTime,
     /// The name of the operator which sent us the bundle.
-    /// `None` if the bundle was sent on the user endpoint.
-    pub src_builder_name: Option<String>,
+    pub src_builder_name: String,
     /// The name of the local operator which received the bundle, for indexing
     /// purposes. Can be left unset and will be set by the indexer.
     pub dst_builder_name: Option<String>,
