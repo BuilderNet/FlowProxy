@@ -85,31 +85,34 @@ pub struct Indexer;
 
 impl Indexer {
     pub fn spawn(
-        args: Option<IndexerArgs>,
+        args: IndexerArgs,
         builder_name: BuilderName,
         token: CancellationToken,
     ) -> IndexerHandle {
         let (senders, receivers) = OrderSenders::new();
 
-        let Some(args) = args else {
-            let tasks = MockIndexer.spawn(receivers);
-            return IndexerHandle { senders, tasks };
-        };
-
-        if let Some(clickhouse_args) = args.clickhouse {
-            let tasks = ClickhouseIndexer::spawn(
-                clickhouse_args,
-                builder_name,
-                receivers,
-                token.child_token(),
-            );
-            IndexerHandle { senders, tasks }
-        } else if let Some(parquet_args) = args.parquet {
-            let tasks = ParquetIndexer::spawn(parquet_args, builder_name, receivers, token)
-                .expect("to spawn parquet indexer");
-            IndexerHandle { senders, tasks }
-        } else {
-            unreachable!("Either clickhouse or parquet args must be present");
+        match (args.clickhouse, args.parquet) {
+            (None, None) => {
+                let tasks = MockIndexer.spawn(receivers);
+                IndexerHandle { senders, tasks }
+            }
+            (Some(clickhouse), None) => {
+                let tasks = ClickhouseIndexer::spawn(
+                    clickhouse,
+                    builder_name,
+                    receivers,
+                    token.child_token(),
+                );
+                IndexerHandle { senders, tasks }
+            }
+            (None, Some(parquet)) => {
+                let tasks = ParquetIndexer::spawn(parquet, builder_name, receivers, token)
+                    .expect("to spawn parquet indexer");
+                IndexerHandle { senders, tasks }
+            }
+            (Some(_), Some(_)) => {
+                unreachable!("Cannot specify both clickhouse and parquet indexer");
+            }
         }
     }
 }

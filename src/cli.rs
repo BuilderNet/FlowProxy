@@ -32,7 +32,6 @@ pub struct ParquetArgs {
         long = "indexer.parquet.bundle-receipts-file-path",
         env = "PARQUET_BUNDLE_RECEIPTS_FILE_PATH",
         value_hint = ValueHint::FilePath,
-        default_value = "bundle_receipts.parquet"
     )]
     pub bundle_receipts_file_path: Option<PathBuf>,
 }
@@ -118,7 +117,7 @@ pub struct OrderflowIngressArgs {
     pub cache_size: u64,
 
     #[command(flatten)]
-    pub indexing: Option<IndexerArgs>,
+    pub indexing: IndexerArgs,
 }
 
 impl Default for OrderflowIngressArgs {
@@ -142,7 +141,7 @@ impl Default for OrderflowIngressArgs {
             cache_ttl: 60,
             cache_size: 4096,
 
-            indexing: None,
+            indexing: IndexerArgs { clickhouse: None, parquet: None },
         }
     }
 }
@@ -193,6 +192,8 @@ impl OrderflowIngressArgs {
 /// Test that optional indexing args are validated correctly and match expected usage.
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use clap::Parser;
 
     use crate::cli::OrderflowIngressArgs;
@@ -267,8 +268,17 @@ mod tests {
             "pronto",
         ];
 
-        OrderflowIngressArgs::try_parse_from(args)
+        let args = OrderflowIngressArgs::try_parse_from(args)
             .unwrap_or_else(|e| panic!("clickhouse indexing args are provided: {e}"));
+
+        let Some(clickhouse) = args.indexing.clickhouse else {
+            panic!("clickhouse args should be set");
+        };
+
+        assert_eq!(clickhouse.host, Some(String::from("http://127.0.0.1:12345")));
+        assert_eq!(clickhouse.database, Some(String::from("pronto")));
+        assert_eq!(clickhouse.password, Some(String::from("pronto")));
+        assert_eq!(clickhouse.username, Some(String::from("pronto")));
     }
 
     #[test]
@@ -289,8 +299,14 @@ mod tests {
             "pronto.parquet",
         ];
 
-        OrderflowIngressArgs::try_parse_from(args)
+        let args = OrderflowIngressArgs::try_parse_from(args)
             .unwrap_or_else(|e| panic!("parquet indexing args are provided: {e}"));
+
+        let Some(parquet) = args.indexing.parquet else {
+            panic!("parquet args should be set");
+        };
+
+        assert_eq!(parquet.bundle_receipts_file_path, Some(PathBuf::from("pronto.parquet")));
     }
 
     #[test]
