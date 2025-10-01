@@ -2101,6 +2101,7 @@ dependencies = [
  "eyre",
  "flate2",
  "futures",
+ "futures-util",
  "hyper",
  "metrics",
  "metrics-derive",

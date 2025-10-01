@@ -1,5 +1,6 @@
 //! Orderflow ingress for BuilderNet.
 
+use crate::statics::{LOCAL_PEER_STORE, SHUTDOWN_TOKEN};
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
@@ -16,7 +17,6 @@ use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
 use std::{net::SocketAddr, str::FromStr as _, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
 use tracing::{level_filters::LevelFilter, *};
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
 
@@ -28,6 +28,7 @@ use ingress::OrderflowIngress;
 
 use crate::{
     builderhub::PeerStore, cache::OrderCache, indexer::Indexer, ingress::OrderflowIngressMetrics,
+    statics::TASKS,
 };
 
 pub mod builderhub;
@@ -38,6 +39,7 @@ pub mod indexer;
 pub mod jsonrpc;
 pub mod priority;
 pub mod rate_limit;
+pub mod statics;
 pub mod types;
 pub mod utils;
 pub mod validation;
@@ -69,11 +71,9 @@ pub async fn run_with_listeners(
         spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
     }
 
-    // For now our cancellation token will be dropped in case our long-lived server tasks stop.
-    // We should also handle SIGINT/SIGTERM etc.
-    let cancellation_token = CancellationToken::new();
-    let indexer_handle =
-        Indexer::spawn(args.indexing, args.builder_name, cancellation_token.child_token());
+    let (indexer_handle, tasks) =
+        Indexer::spawn(args.indexing, args.builder_name, SHUTDOWN_TOKEN.child_token());
+    TASKS.write().expect("not poisoned").extend(tasks.into_iter());
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
@@ -98,7 +98,7 @@ pub async fn run_with_listeners(
         });
     } else {
         warn!("No BuilderHub URL provided, running with local peer store");
-        let local_peer_store = utils::LOCAL_PEER_STORE.clone();
+        let local_peer_store = LOCAL_PEER_STORE.clone();
 
         let peer_store =
             local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
@@ -182,8 +182,6 @@ pub async fn run_with_listeners(
         axum::serve(system_listener, system_router),
         axum::serve(builder_listener, builder_router)
     )?;
-
-    cancellation_token.cancel();
 
     Ok(())
 }
