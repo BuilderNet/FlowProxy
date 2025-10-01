@@ -283,12 +283,13 @@ pub struct BundleReceipt {
     /// The hash of the raw bundle.
     pub bundle_hash: B256,
     /// The time the bundle has been sent, according to the field provided in the JSON-RPC request
-    /// header.
+    /// header. `None` if the bundle was sent on the user endpoint.
     pub sent_at: Option<UtcDateTime>,
     /// The time the bundle has been received.
     pub received_at: UtcDateTime,
     /// The name of the operator which sent us the bundle.
-    pub src_builder_name: String,
+    /// `None` if the bundle was sent on the user endpoint.
+    pub src_builder_name: Option<String>,
     /// The name of the local operator which received the bundle, for indexing
     /// purposes. Can be left unset and will be set by the indexer.
     pub dst_builder_name: Option<String>,
