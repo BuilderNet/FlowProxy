@@ -1,8 +1,8 @@
 general:
-  # Stop after 12 minutes (simulated time)
+  # Stop after 13 minutes (simulated time)
   # This should be enough to submit all the bundles in the testdata.parquet file, so will depend on the
-  # time range defined there. IMPORTANT: Update this if the time range changes, and add a small buffer (2m).
-  stop_time: 12m
+  # time range defined there. IMPORTANT: Update this if the time range changes, and add a small buffer (3m).
+  stop_time: 13m
   # Show progress in the console
   progress: true
   # Add some latency to syscalls to avoid deadlocks
@@ -48,7 +48,8 @@ hosts:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet
       start_time: 1s
-      expected_final_state: running
+      shutdown_time: 12m
+      expected_final_state: { signaled: SIGTERM }
       environment:
         RUST_LOG: info
   proxy2:
@@ -56,7 +57,7 @@ hosts:
     processes:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
-      start_time: 1s
-      expected_final_state: running
+      shutdown_time: 12m
+      expected_final_state: { signaled: SIGTERM }
       environment:
         RUST_LOG: info
