@@ -1,5 +1,10 @@
 general:
   stop_time: 10m
+  progress: true
+
+experimental:
+  use_cpu_pinning: true
+  use_new_tcp: true
 
 # Intra-zone latencies: https://latency.azure.cloud63.fr
 # Inter-zone latencies: https://learn.microsoft.com/en-us/azure/networking/azure-network-latency
