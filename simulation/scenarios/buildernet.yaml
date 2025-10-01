@@ -49,7 +49,7 @@ hosts:
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet
       start_time: 1s
       shutdown_time: 12m
-      expected_final_state: { signaled: SIGTERM }
+      expected_final_state: { exited: 0 }
       environment:
         RUST_LOG: info
   proxy2:
@@ -58,6 +58,6 @@ hosts:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
       shutdown_time: 12m
-      expected_final_state: { signaled: SIGTERM }
+      expected_final_state: { exited: 0 }
       environment:
         RUST_LOG: info
