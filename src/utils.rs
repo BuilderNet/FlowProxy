@@ -2,16 +2,10 @@ use alloy_eips::eip2718::EIP4844_TX_TYPE_ID;
 use alloy_primitives::Bytes;
 use alloy_rlp::{Buf as _, Header};
 use axum::http::HeaderValue;
-use std::{
-    sync::LazyLock,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use time::UtcDateTime;
 
-use crate::{builderhub::LocalPeerStore, validation::MAINNET_CHAIN_ID};
-
-/// An artificial timestamp used for duration clamping.
-static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+use crate::{statics::START, validation::MAINNET_CHAIN_ID};
 
 /// Clamp the instant to duration bucket since the start time.
 pub fn clamp_to_duration_bucket(time: Instant, duration: Duration) -> Instant {
@@ -24,8 +18,6 @@ pub fn clamp_to_duration_bucket(time: Instant, duration: Duration) -> Instant {
     // Add that Duration to the start time to get the clamped time.
     *START + clamped_duration
 }
-
-pub static LOCAL_PEER_STORE: LazyLock<LocalPeerStore> = LazyLock::new(LocalPeerStore::new);
 
 pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
     // For full check we could call TransactionSigned::decode_enveloped and fully try to decode it
