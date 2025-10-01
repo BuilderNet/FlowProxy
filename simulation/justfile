@@ -11,38 +11,64 @@ help:
 
 # Build a docker image for running shadow simulations
 build:
-	docker build -t {{image}} -f Dockerfile ..
+        docker build -t {{image}} -f Dockerfile ..
 
 # Run a shadow simulation with the given scenario file, see list in scenarios/
 run scenario='buildernet.yaml': clean-container
-	docker run {{run-args}} --name {{container-name}} -v ./scenarios:/root/scenarios:ro -it {{image}} \
-		/bin/bash -c './shadow --template-directory /root/testdata/ scenarios/{{scenario}}'
-	@just get-results
+        docker run {{run-args}} --name {{container-name}} -v ./scenarios:/root/scenarios:ro -it {{image}} \
+                /bin/bash -c './shadow --template-directory /root/testdata/ scenarios/{{scenario}}'
+        # Simulation done, getting results from proxy2
+        @just get-results
 
 # Download the simulation results from the container
 get-results:
-	docker cp {{container-name}}:/root/shadow.data .
-	@echo 'Simulations results have been downloaded to shadow.data/'
+        mkdir -p results
+        @docker cp {{container-name}}:/root/shadow.data/hosts/proxy2/bundle_receipts_proxy2.parquet ./results/bundle_receipts_{{datetime_utc("%Y-%m-%d-%H-%M-%S")}}_runtime-`grep stop_time scenarios/buildernet.yaml | cut -d ":" -f 2 | xargs`_scale-`cat scenarios/buildernet.yaml | awk -v RS=' ' '/--scale/ { getline; print; exit }' | xargs`.parquet
 
 # View the logs of the given Shadow process
 logs process:
-	docker exec {{container-name}} bash -c 'cat shadow.data/hosts/{{process}}/*.1000.stdout' | less -R	
+        docker exec {{container-name}} bash -c 'cat shadow.data/hosts/{{process}}/*.1000.stdout' | less -R
 
 # Tail the logs of the given Shadow process
 tail process:
-	docker exec {{container-name}} bash -c 'tail -f shadow.data/hosts/{{process}}/*.1000.stdout'
-
-# Delete the copied directory containing the simulation results
-clean-results:
-	rm -rf shadow.data
+        docker exec {{container-name}} bash -c 'tail -f shadow.data/hosts/{{process}}/*.1000.stdout'
 
 # Delete the container used for simulation
 clean-container:
-	docker rm -f {{container-name}}
+        docker rm -f {{container-name}}
 
 # Delete the built image
 clean-image:
-	docker rmi -f {{image}}
+        docker rmi -f {{image}}
 
 # DELETE EVERYTHING, HACK THE PLANET!!!
 clean-all: clean-results clean-container clean-image
+
+latest_parquet := trim(shell('ls -t results/*.parquet 2>/dev/null | head -n1'))
+
+count_query := "SELECT count(bundle_hash) FROM file(" + quote(latest_parquet) + ", Parquet)"
+
+query := "WITH data AS (
+    SELECT toUnixTimestamp64Micro(received_at) - toUnixTimestamp64Micro(sent_at) AS diff_us, payload_size
+    FROM file(" + quote(latest_parquet) + ", Parquet)
+) SELECT
+    avg(diff_us) AS avg_us,
+    quantile(0.5)(diff_us) AS p50_us,
+    quantile(0.9)(diff_us) AS p90_us,
+    quantile(0.99)(diff_us) AS p99_us,
+    quantile(0.999)(diff_us) AS p999_us,
+    min(diff_us) AS min_us,
+    max(diff_us) AS max_us,
+    corr(diff_us, payload_size) AS corr_tp,
+    avg(payload_size) AS avg_size,
+    quantile(0.5)(payload_size) AS p50_size,
+    quantile(0.9)(payload_size) AS p90_size,
+    quantile(0.99)(payload_size) AS p99_size
+FROM data"
+
+# Process the latest results. Looks at the latest parquet file in the results directory.
+process:
+    # Number of rows:
+    @./clickhouse local --no-system-tables --output-format=PrettyCompact -q "{{count_query}}"
+    # Aggregated statistics:
+    @./clickhouse local --no-system-tables --output-format=PrettyCompact -q "{{query}}"

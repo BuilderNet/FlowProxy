@@ -2,7 +2,7 @@ general:
   # Stop after 13 minutes (simulated time)
   # This should be enough to submit all the bundles in the testdata.parquet file, so will depend on the
   # time range defined there. IMPORTANT: Update this if the time range changes, and add a small buffer (3m).
-  stop_time: 13m
+  stop_time: 5m
   # Show progress in the console
   progress: true
   # Add some latency to syscalls to avoid deadlocks
@@ -38,7 +38,7 @@ hosts:
     network_node_id: 0
     processes:
     - path: /root/submitter
-      args: --url http://proxy1:9754 --path ../../../testdata/testdata.parquet --scale 1
+      args: --url http://proxy1:9754 --path ../../../testdata/testdata.parquet --scale 5
       # Wait 35s for the proxies to connect to each other
       start_time: 35s
       expected_final_state: { exited: 0 }
@@ -48,7 +48,7 @@ hosts:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet
       start_time: 1s
-      shutdown_time: 12m
+      shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
         RUST_LOG: info
@@ -57,7 +57,7 @@ hosts:
     processes:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
-      shutdown_time: 12m
+      shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
         RUST_LOG: info
