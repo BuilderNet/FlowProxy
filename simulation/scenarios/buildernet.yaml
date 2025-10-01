@@ -1,9 +1,16 @@
 general:
+  # Stop after 10 minutes (simulated time)
   stop_time: 10m
+  # Show progress in the console
   progress: true
+  # Add some latency to syscalls to avoid deadlocks
+  mocel_unblocked_syscall_latency: true
+
 
 experimental:
+  # Pin the CPU to the same core for better performance
   use_cpu_pinning: true
+  # Use the new Rust TCP implementation for better performance
   use_new_tcp: true
 
 # Intra-zone latencies: https://latency.azure.cloud63.fr
@@ -25,7 +32,8 @@ hosts:
         # System API ports of the proxies
         SYSTEM_PORT: "9755"
   submitter:
-    network_node_id: 1
+    # Run the submitter in zone 0
+    network_node_id: 0
     processes:
     - path: /root/submitter
       args: --url http://proxy2:9754 --path ../../../testdata/testdata.parquet --scale 1

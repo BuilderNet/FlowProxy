@@ -24,6 +24,7 @@ use reqwest::{
     header::{self, HeaderValue},
 };
 use serde_json::json;
+use time::OffsetDateTime;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 #[derive(Debug, Parser)]
@@ -167,7 +168,7 @@ impl BundleReplayer {
                     }
                     // Print stats
                     _ = self.stats_ticker.tick() => {
-                        println!("Stats: (bundle rate: {}/sec  queue size: {})", self.ctr, self.queue.len());
+                        println!("[{:?}] Stats: (bundle rate: {}/sec  queue size: {})", OffsetDateTime::now_utc().time(), self.ctr, self.queue.len());
                         self.ctr = 0;
                     }
                     // Read buffered
