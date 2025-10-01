@@ -53,17 +53,17 @@ query := "WITH data AS (
     FROM file(" + quote(latest_parquet) + ", Parquet)
 ) SELECT
     avg(diff_us) AS avg_us,
-    quantile(0.5)(diff_us) AS p50_us,
-    quantile(0.9)(diff_us) AS p90_us,
-    quantile(0.99)(diff_us) AS p99_us,
-    quantile(0.999)(diff_us) AS p999_us,
+    quantileExact(0.5)(diff_us) AS p50_us,
+    quantileExact(0.9)(diff_us) AS p90_us,
+    quantileExact(0.99)(diff_us) AS p99_us,
+    quantileExact(0.999)(diff_us) AS p999_us,
     min(diff_us) AS min_us,
     max(diff_us) AS max_us,
     corr(diff_us, payload_size) AS corr_tp,
     avg(payload_size) AS avg_size,
-    quantile(0.5)(payload_size) AS p50_size,
-    quantile(0.9)(payload_size) AS p90_size,
-    quantile(0.99)(payload_size) AS p99_size
+    quantileExact(0.5)(payload_size) AS p50_size,
+    quantileExact(0.9)(payload_size) AS p90_size,
+    quantileExact(0.99)(payload_size) AS p99_size
 FROM data"
 
 # Process the latest results. Looks at the latest parquet file in the results directory.
