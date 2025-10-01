@@ -42,7 +42,7 @@ clean-image:
         docker rmi -f {{image}}
 
 # DELETE EVERYTHING, HACK THE PLANET!!!
-clean-all: clean-results clean-container clean-image
+clean-all: clean-container clean-image
 
 latest_parquet := trim(shell('ls -t results/*.parquet 2>/dev/null | head -n1'))
 
