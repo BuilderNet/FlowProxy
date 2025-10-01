@@ -16,6 +16,7 @@ use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
 use std::{net::SocketAddr, str::FromStr as _, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 use tracing::{level_filters::LevelFilter, *};
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
 
@@ -26,8 +27,7 @@ pub mod ingress;
 use ingress::OrderflowIngress;
 
 use crate::{
-    builderhub::PeerStore, cache::OrderCache, indexer::ClickhouseIndexer,
-    ingress::OrderflowIngressMetrics,
+    builderhub::PeerStore, cache::OrderCache, indexer::Indexer, ingress::OrderflowIngressMetrics,
 };
 
 pub mod builderhub;
@@ -69,7 +69,11 @@ pub async fn run_with_listeners(
         spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
     }
 
-    let indexer_handle = ClickhouseIndexer::spawn(args.clickhouse, args.builder_name);
+    // For now our cancellation token will be dropped in case our long-lived server tasks stop.
+    // We should also handle SIGINT/SIGTERM etc.
+    let cancellation_token = CancellationToken::new();
+    let indexer_handle =
+        Indexer::spawn(args.indexing, args.builder_name, cancellation_token.child_token());
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
@@ -178,6 +182,8 @@ pub async fn run_with_listeners(
         axum::serve(system_listener, system_router),
         axum::serve(builder_listener, builder_router)
     )?;
+
+    cancellation_token.cancel();
 
     Ok(())
 }

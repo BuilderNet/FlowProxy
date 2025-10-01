@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
 
@@ -8,17 +10,40 @@ const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
 #[group(id = "clickhouse", requires_all = ["host", "username", "password", "database"])]
 pub struct ClickhouseArgs {
-    #[clap(long = "clickhouse.host", env = "CLICKHOUSE_HOST")]
+    #[arg(long = "indexer.clickhouse.host", env = "CLICKHOUSE_HOST")]
     pub host: Option<String>,
 
-    #[clap(long = "clickhouse.user", env = "CLICKHOUSE_USER")]
+    #[arg(long = "indexer.clickhouse.username", env = "CLICKHOUSE_USERNAME")]
     pub username: Option<String>,
 
-    #[clap(long = "clickhouse.password", env = "CLICKHOUSE_PASSWORD")]
+    #[arg(long = "indexer.clickhouse.password", env = "CLICKHOUSE_PASSWORD")]
     pub password: Option<String>,
 
-    #[clap(long = "clickhouse.database", env = "CLICKHOUSE_DATABASE")]
+    #[arg(long = "indexer.clickhouse.database", env = "CLICKHOUSE_DATABASE")]
     pub database: Option<String>,
+}
+
+/// Arguments required to setup file-based parquet indexing.
+#[derive(PartialEq, Eq, Clone, Debug, Args)]
+#[group(id = "parquet", conflicts_with = "clickhouse")]
+pub struct ParquetArgs {
+    /// The file path to store bundle receipts data.
+    #[arg(
+        long = "indexer.parquet.bundle-receipts-file-path",
+        env = "PARQUET_BUNDLE_RECEIPTS_FILE_PATH",
+        value_hint = ValueHint::FilePath,
+        default_value = "bundle_receipts.parquet"
+    )]
+    pub bundle_receipts_file_path: Option<PathBuf>,
+}
+
+/// Arguments required to setup indexing.
+#[derive(PartialEq, Eq, Clone, Debug, Args)]
+pub struct IndexerArgs {
+    #[command(flatten)]
+    pub clickhouse: Option<ClickhouseArgs>,
+    #[command(flatten)]
+    pub parquet: Option<ParquetArgs>,
 }
 
 #[derive(Parser, Debug)]
@@ -92,8 +117,8 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "cache.size", default_value_t = 4096)]
     pub cache_size: u64,
 
-    #[clap(flatten)]
-    pub clickhouse: Option<ClickhouseArgs>,
+    #[command(flatten)]
+    pub indexing: Option<IndexerArgs>,
 }
 
 impl Default for OrderflowIngressArgs {
@@ -117,7 +142,7 @@ impl Default for OrderflowIngressArgs {
             cache_ttl: 60,
             cache_size: 4096,
 
-            clickhouse: None,
+            indexing: None,
         }
     }
 }
@@ -188,7 +213,8 @@ mod tests {
             "http://localhost:3000",
         ];
 
-        let _ = OrderflowIngressArgs::try_parse_from(args).expect("optional indexing args");
+        OrderflowIngressArgs::try_parse_from(args)
+            .unwrap_or_else(|e| panic!("optional indexing arg: {e}"));
     }
 
     #[test]
@@ -205,17 +231,20 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
-            "--clickhouse.host",
+            "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
         ];
 
         let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
-        assert!(err.to_string().to_lowercase().contains("arguments were not provided"));
-        assert!(err.to_string().to_lowercase().contains("clickhouse"));
+        assert!(
+            err.to_string().to_lowercase().contains("arguments were not provided"),
+            "Unexpected error: {err}"
+        );
+        assert!(err.to_string().to_lowercase().contains("clickhouse"), "Unexpected error: {err}");
     }
 
     #[test]
-    fn indexing_args_provided_succeds() {
+    fn indexing_args_clickhouse_provided_succeds() {
         let args = vec![
             "test", // binary name
             "--user-listen-url",
@@ -228,16 +257,71 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
-            "--clickhouse.host",
+            "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
-            "--clickhouse.database",
+            "--indexer.clickhouse.database",
             "pronto",
-            "--clickhouse.password",
+            "--indexer.clickhouse.password",
             "pronto",
-            "--clickhouse.user",
+            "--indexer.clickhouse.username",
             "pronto",
         ];
 
-        let _ = OrderflowIngressArgs::try_parse_from(args).expect("indexing args are provided");
+        OrderflowIngressArgs::try_parse_from(args)
+            .unwrap_or_else(|e| panic!("clickhouse indexing args are provided: {e}"));
+    }
+
+    #[test]
+    fn indexing_args_parquet_provided_succeds() {
+        let args = vec![
+            "test", // binary name
+            "--user-listen-url",
+            "0.0.0.0:9754",
+            "--system-listen-url",
+            "0.0.0.0:9755",
+            "--builder-listen-url",
+            "0.0.0.0:8756",
+            "--builder-url",
+            "http://0.0.0.0:2020",
+            "--builder-hub-url",
+            "http://localhost:3000",
+            "--indexer.parquet.bundle-receipts-file-path",
+            "pronto.parquet",
+        ];
+
+        OrderflowIngressArgs::try_parse_from(args)
+            .unwrap_or_else(|e| panic!("parquet indexing args are provided: {e}"));
+    }
+
+    #[test]
+    fn indexing_args_provided_both_clickhouse_parquet_fails() {
+        let args = vec![
+            "test", // binary name
+            "--user-listen-url",
+            "0.0.0.0:9754",
+            "--system-listen-url",
+            "0.0.0.0:9755",
+            "--builder-listen-url",
+            "0.0.0.0:8756",
+            "--builder-url",
+            "http://0.0.0.0:2020",
+            "--builder-hub-url",
+            "http://localhost:3000",
+            "--indexer.parquet.bundle-receipts-file-path",
+            "pronto.parquet",
+            "--indexer.clickhouse.host",
+            "http://127.0.0.1:12345",
+            "--indexer.clickhouse.database",
+            "pronto",
+            "--indexer.clickhouse.password",
+            "pronto",
+            "--indexer.clickhouse.username",
+            "pronto",
+        ];
+
+        let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("the argument '--indexer.parquet.bundle-receipts-file-path <BUNDLE_RECEIPTS_FILE_PATH>' cannot be used with"), "Unexpected error: {err}");
     }
 }
