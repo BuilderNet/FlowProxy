@@ -23,6 +23,8 @@ use serde_json::json;
 use time::UtcDateTime;
 use uuid::Uuid;
 
+use crate::priority::Priority;
+
 /// Bundle type that is used for the system API. It contains the verified signer with the original
 /// bundle.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize)]
@@ -270,6 +272,27 @@ impl SystemTransaction {
     pub fn tx_hash(&self) -> B256 {
         *self.transaction.tx_hash()
     }
+}
+
+/// The receipt of a bundle received from the system endpoint, to be indexed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleReceipt {
+    /// The hash of the raw bundle.
+    pub bundle_hash: B256,
+    /// The time the bundle has been sent, according to the field provided in the JSON-RPC request
+    /// header.
+    pub sent_at: Option<UtcDateTime>,
+    /// The time the bundle has been received.
+    pub received_at: UtcDateTime,
+    /// The name of the operator which sent us the bundle.
+    pub src_builder_name: String,
+    /// The name of the local operator which received the bundle, for indexing
+    /// purposes. Can be left unset and will be set by the indexer.
+    pub dst_builder_name: Option<String>,
+    /// The size in bytes of the payload.
+    pub payload_size: u32,
+    /// The priority of the bundle.
+    pub priority: Priority,
 }
 
 /// Decode pooled Ethereum transaction from raw bytes.
