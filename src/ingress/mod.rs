@@ -7,8 +7,8 @@ use crate::{
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
-        decode_transaction, BundleHash as _, DecodedBundle, EthResponse, SystemBundle,
-        SystemTransaction,
+        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
+        SystemBundle, SystemTransaction,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -265,6 +265,9 @@ impl OrderflowIngress {
             .get(BUILDERNET_SENT_AT_HEADER)
             .map(|h| UtcDateTime::parse_header(h).expect("Failed to parse sent at header"));
         let received_at = Instant::now();
+        let received_at_utc = UtcDateTime::now();
+        let payload_size = body.len();
+
         ingress.metrics.system.requests_received.increment(1);
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
@@ -327,8 +330,16 @@ impl OrderflowIngress {
 
                 ingress.order_cache.insert(bundle_hash);
 
-                // TODO: Index bundle receipt
-                _ = sent_at;
+                let receipt = BundleReceipt {
+                    bundle_hash,
+                    sent_at,
+                    received_at: received_at_utc,
+                    src_builder_name: peer,
+                    dst_builder_name: None,
+                    payload_size: payload_size as u32,
+                    priority,
+                };
+                ingress.indexer_handle.index_bundle_receipt(receipt);
 
                 (raw, EthResponse::BundleHash(bundle_hash))
             }

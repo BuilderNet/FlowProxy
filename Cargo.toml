@@ -27,6 +27,7 @@ tokio = { version = "1", default-features = false, features = [
   "rt-multi-thread",
   "macros"
 ] }
+tokio-util = { version = "0.7.16" }
 futures = "0.3"
 
 # tracing
@@ -42,8 +43,10 @@ metrics-exporter-prometheus = { version = "0.17.2", default-features = false, fe
   "http-listener"
 ] }
 
-# clickhouse
-clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", branch = "main", features = [
+# indexing
+arrow = { version = "56.2.0" }
+parquet = { version = "56.2.0" }
+clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", rev = "8cf3d2e138dd121367fa10e875d3f91374b075b2", features = [
   "inserter",
   "time",
   "uuid",
@@ -81,9 +84,10 @@ rand = "0.9.2"
 cc = "=1.2.15"
 
 [dev-dependencies]
+tempfile = { version = "3.23.0" }
 testcontainers = { version = "0.25.0" }
 testcontainers-modules = { version = "0.13.0", features = ["clickhouse"] }
-clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", branch = "main", features = [
+clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", rev = "8cf3d2e138dd121367fa10e875d3f91374b075b2", features = [
   "inserter",
   "time",
   "test-util",

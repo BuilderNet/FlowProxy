@@ -1,29 +1,26 @@
 //! Crate which contains structures and logic for indexing bundles and other types of data in to
 //! Clickhouse.
 
-use std::{fmt::Debug, time::Duration};
+use std::fmt::Debug;
 
-use clickhouse::{
-    inserter::{Inserter, Quantities},
-    Client as ClickhouseClient, Row, RowWrite,
-};
-use serde::Serialize;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing::info;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
-    cli::ClickhouseArgs,
-    indexer::models::{BundleRow, PrivateTxRow},
-    types::{SystemBundle, SystemTransaction},
+    cli::IndexerArgs,
+    indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
+    types::{BundleReceipt, SystemBundle, SystemTransaction},
 };
 
-use alloy_primitives::B256;
-
+mod click;
 mod models;
+mod parq;
 mod ser;
 
 /// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 4096;
+/// The size of the channel buffer for the bundle receipt indexer.
+pub const BUNDLE_RECEIPT_INDEXER_BUFFER_SIZE: usize = 8192;
 /// The size of the channel buffer for the bundle indexer.
 pub const TRANSACTION_INDEXER_BUFFER_SIZE: usize = 4096;
 /// The name of the Clickhouse table to store bundles in.
@@ -39,193 +36,136 @@ pub(crate) type BuilderName = String;
 /// Trait for adding order indexing functionality.
 pub trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
+    fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt);
     fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
-/// An high-level order type that can be indexed in clickhouse.
-trait ClickhouseIndexableOrder: Sized {
-    /// The associated inner row type that can be serialized into Clickhouse data.
-    type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
-
-    /// The type of such order, e.g. "bundles" or "transactions". For informational purposes.
-    const ORDER_TYPE: &'static str;
-
-    /// An identifier of such order.
-    fn hash(&self) -> B256;
-
-    /// Internal function that takes the inner row types and extracts the reference needed for
-    /// Clickhouse inserter functions like `Inserter::write`. While a default implementation is not
-    /// provided, it should suffice to simply return `row`.
-    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_>;
+/// The collection of channel senders to send data to be indexed.
+#[derive(Debug, Clone)]
+pub(crate) struct OrderSenders {
+    bundle_tx: mpsc::Sender<SystemBundle>,
+    bundle_receipt_tx: mpsc::Sender<BundleReceipt>,
+    transaction_tx: mpsc::Sender<SystemTransaction>,
 }
 
-impl ClickhouseIndexableOrder for SystemBundle {
-    type ClickhouseRowType = BundleRow;
+/// The collection of channel receivers to receive data to be indexed.
+#[derive(Debug)]
+pub(crate) struct OrderReceivers {
+    bundle_rx: mpsc::Receiver<SystemBundle>,
+    bundle_receipt_rx: mpsc::Receiver<BundleReceipt>,
+    transaction_rx: mpsc::Receiver<SystemTransaction>,
+}
 
-    const ORDER_TYPE: &'static str = "bundle";
+/// The collection of long-running indexing tasks.
+#[derive(Debug)]
+pub(crate) struct OrderIndexerTasks {
+    #[allow(dead_code)] // Not awaited as of now.
+    bundle_indexer_task: JoinHandle<()>,
+    #[allow(dead_code)] // Not awaited as of now.
+    bundle_receipt_indexer_task: JoinHandle<()>,
+    #[allow(dead_code)] // Not awaited as of now.
+    transaction_indexer_task: JoinHandle<()>,
+}
 
-    fn hash(&self) -> B256 {
-        self.bundle_hash
-    }
-
-    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
-        row
+impl OrderSenders {
+    /// Creates a new set of order indexer channel senders and receivers.
+    pub(crate) fn new() -> (Self, OrderReceivers) {
+        let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let (bundle_receipt_tx, bundle_receipt_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
+        let (transaction_tx, transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
+        let senders = Self { bundle_tx, bundle_receipt_tx, transaction_tx };
+        let receivers = OrderReceivers { bundle_rx, bundle_receipt_rx, transaction_rx };
+        (senders, receivers)
     }
 }
 
-impl ClickhouseIndexableOrder for SystemTransaction {
-    type ClickhouseRowType = PrivateTxRow;
+/// A namespace struct for spawning an indexer.
+#[derive(Debug, Clone)]
+pub struct Indexer;
 
-    const ORDER_TYPE: &'static str = "transaction";
+impl Indexer {
+    pub fn spawn(
+        args: Option<IndexerArgs>,
+        builder_name: BuilderName,
+        token: CancellationToken,
+    ) -> IndexerHandle {
+        let (senders, receivers) = OrderSenders::new();
 
-    fn hash(&self) -> B256 {
-        self.tx_hash()
-    }
+        let Some(args) = args else {
+            let tasks = MockIndexer.spawn(receivers);
+            return IndexerHandle { senders, tasks };
+        };
 
-    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
-        row
+        if let Some(clickhouse_args) = args.clickhouse {
+            let tasks = ClickhouseIndexer::spawn(
+                clickhouse_args,
+                builder_name,
+                receivers,
+                token.child_token(),
+            );
+            IndexerHandle { senders, tasks }
+        } else if let Some(parquet_args) = args.parquet {
+            let tasks = ParquetIndexer::spawn(parquet_args, builder_name, receivers, token)
+                .expect("to spawn parquet indexer");
+            IndexerHandle { senders, tasks }
+        } else {
+            unreachable!("Either clickhouse or parquet args must be present");
+        }
     }
 }
 
 /// An handle to the indexer, which mainly consists of channel senders to send data to be indexed.
 #[derive(Debug)]
 pub struct IndexerHandle {
-    bundle_tx: mpsc::Sender<SystemBundle>,
-    transaction_tx: mpsc::Sender<SystemTransaction>,
+    senders: OrderSenders,
 
     #[allow(dead_code)] // Not awaited as of now.
-    bundle_indexer_task: JoinHandle<()>,
-    #[allow(dead_code)] // Not awaited as of now.
-    transaction_indexer_task: JoinHandle<()>,
-}
-
-/// A namespace struct to spawn a Clickhouse indexer.
-#[derive(Debug, Clone)]
-pub struct ClickhouseIndexer;
-
-impl ClickhouseIndexer {
-    /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
-    pub fn spawn(args: Option<ClickhouseArgs>, builder_name: BuilderName) -> IndexerHandle {
-        let (bundle_tx, mut bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let (transaction_tx, mut transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
-
-        let Some(args) = args else {
-            info!("Running with mocked indexer");
-            let _bundle_indexer_task =
-                tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
-            let _transaction_indexer_task =
-                tokio::task::spawn(
-                    async move { while let Some(_t) = transaction_rx.recv().await {} },
-                );
-            return IndexerHandle {
-                bundle_tx,
-                transaction_tx,
-                bundle_indexer_task: _bundle_indexer_task,
-                transaction_indexer_task: _transaction_indexer_task,
-            };
-        };
-
-        let (host, database, username, password) = (
-            args.host.expect("host is set"),
-            args.database.expect("database is set"),
-            args.username.expect("username is set"),
-            args.password.expect("password is set"),
-        );
-
-        info!(%host, "Running with clickhouse indexer");
-
-        let client = ClickhouseClient::default()
-            .with_url(host)
-            .with_database(database)
-            .with_user(username)
-            .with_password(password)
-            // NOTE: Validation is disabled for performance reasons, and because validation doesn't
-            // support Uint256 data types.
-            .with_validation(false);
-
-        let bundle_inserter = client
-            .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
-            .with_period(Some(Duration::from_secs(4))) // Dump every 4s
-            .with_period_bias(0.1) // 4±(0.1*4)
-            .with_max_bytes(128 * 1024 * 1024) // 128MiB
-            .with_max_rows(65_536);
-
-        let transaction_inserter = client
-            .inserter::<PrivateTxRow>(BUNDLE_TABLE_NAME)
-            .with_period(Some(Duration::from_secs(3))) // Dump every 3s
-            .with_period_bias(0.1)
-            .with_max_bytes(128 * 1024 * 1024) // 128MiB
-            .with_max_rows(65_536);
-
-        let bundle_indexer_task =
-            tokio::spawn(run_indexer(bundle_rx, bundle_inserter, builder_name.clone()));
-        let transaction_indexer_task =
-            tokio::spawn(run_indexer(transaction_rx, transaction_inserter, builder_name.clone()));
-
-        IndexerHandle { bundle_tx, transaction_tx, bundle_indexer_task, transaction_indexer_task }
-    }
-}
-
-/// Run the indexer of the specified type until the receiving channel is closed.
-async fn run_indexer<T: ClickhouseIndexableOrder>(
-    mut rx: mpsc::Receiver<T>,
-    mut inserter: Inserter<T::ClickhouseRowType>,
-    builder_name: BuilderName,
-) {
-    while let Some(order) = rx.recv().await {
-        tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
-
-        let hash = order.hash();
-        let order_row: T::ClickhouseRowType = (order, builder_name.clone()).into();
-        let value_ref = T::to_row_ref(&order_row);
-
-        if let Err(e) = inserter.write(value_ref).await {
-            tracing::error!(target: TRACING_TARGET,
-                ?e,
-                %hash,
-                "failed to write {} to clickhouse inserter", T::ORDER_TYPE
-            )
-        }
-
-        // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
-        // `force_commit` or not. It kinda sucks. I should fork it and make a PR
-        // eventually.
-        //
-        // TODO(thedevbirb): implement a file-based backup in case this call fails due to
-        // connection timeouts or whatever.
-        match inserter.commit().await {
-            Ok(quantities) => {
-                if quantities == Quantities::ZERO {
-                    tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
-                } else {
-                    tracing::info!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
-                }
-            }
-            Err(e) => {
-                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
-            }
-        }
-    }
-
-    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
-    if let Err(e) = inserter.end().await {
-        tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of {}s to indexer", T::ORDER_TYPE);
-    }
+    tasks: OrderIndexerTasks,
 }
 
 impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
-        if let Err(e) = self.bundle_tx.try_send(system_bundle) {
+        if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
             tracing::error!(?e, "failed to send bundle to index");
         }
     }
+    fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt) {
+        if let Err(e) = self.senders.bundle_receipt_tx.try_send(bundle_receipt) {
+            tracing::error!(?e, "failed to send bundle receipt to index");
+        }
+    }
     fn index_transaction(&self, system_transaction: SystemTransaction) {
-        if let Err(e) = self.transaction_tx.try_send(system_transaction) {
+        if let Err(e) = self.senders.transaction_tx.try_send(system_transaction) {
             tracing::error!(?e, "failed to send transaction to index");
         }
     }
 }
 
+/// A mock indexer that simply drains the channels.
+struct MockIndexer;
+
+impl MockIndexer {
+    fn spawn(self, receivers: OrderReceivers) -> OrderIndexerTasks {
+        tracing::info!(target: TRACING_TARGET, "Running with mocked indexer");
+
+        let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx, mut transaction_rx } = receivers;
+
+        let bundle_indexer_task =
+            tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+        let bundle_receipt_indexer_task =
+            tokio::task::spawn(
+                async move { while let Some(_b) = bundle_receipt_rx.recv().await {} },
+            );
+        let transaction_indexer_task =
+            tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
+
+        OrderIndexerTasks {
+            bundle_indexer_task,
+            bundle_receipt_indexer_task,
+            transaction_indexer_task,
+        }
+    }
+}
 #[cfg(test)]
 pub(crate) mod tests {
     use std::{borrow::Cow, collections::BTreeMap, fs, sync::Arc};
