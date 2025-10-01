@@ -20,8 +20,8 @@ use parq::*;
 use models::BundleRow;
 use rbuilder_primitives::serialize::RawBundle;
 use reqwest::{
-    Client, Method, Request, Url,
     header::{self, HeaderValue},
+    Client, Method, Request, Url,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -163,6 +163,7 @@ impl BundleReplayer {
                                 }
                             }
                         } else if done {
+                            println!("Done");
                             break;
                         }
                     }
@@ -224,13 +225,13 @@ impl Submitter {
         // Spawn the submitter HTTP clients
         let client = Client::new();
 
-        for _ in 0..32 {
+        for i in 0..32 {
             let client = client.clone();
             let queue: flume::Receiver<Request> = queue.clone();
             tokio::spawn(async move {
                 loop {
                     let Ok(request) = queue.recv_async().await else {
-                        eprintln!("Worker shutting down");
+                        println!("Worker {i} shutting down");
                         break;
                     };
 
