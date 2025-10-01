@@ -41,12 +41,12 @@ hosts:
       args: --url http://proxy2:9754 --path ../../../testdata/testdata.parquet --scale 1
       # Wait 35s for the proxies to connect to each other
       start_time: 35s
-      expected_final_state: running
+      expected_final_state: { exited: 0 }
   proxy1:
     network_node_id: 0
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet
       start_time: 1s
       expected_final_state: running
       environment:
@@ -55,7 +55,7 @@ hosts:
     network_node_id: 1
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
       start_time: 1s
       expected_final_state: running
       environment:
