@@ -1,11 +1,13 @@
 name: Claude PR Review
 
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+  issue_comment:
+    types: [created]
 
 jobs:
   review-with-tracking:
+    # Only run if comment contains @claude and is on a PR
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,7 +29,7 @@ jobs:
 
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number }}
+            PR NUMBER: ${{ github.event.issue.number }}
 
             Perform a comprehensive code review with the following focus areas:
 
