@@ -40,6 +40,7 @@ pub mod jsonrpc;
 pub mod priority;
 pub mod rate_limit;
 pub mod statics;
+pub mod tasks;
 pub mod types;
 pub mod utils;
 pub mod validation;
