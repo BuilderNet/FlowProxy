@@ -222,10 +222,10 @@ process-results() {
   SELECT
     src,
     dst,
-    (sum(bytes) * 8) / 1000000. AS total_Mbits,
+    sum(bytes) / 1e6 AS total_MB,
     greatest(1, dateDiff('second', min(ts), max(ts)) + 1) AS seconds_span,
-    ((sum(bytes) * 8) / 1000000.) / seconds_span AS avg_Mbps,
-    (max(bytes) * 8) / 1000000. AS peak_Mbps
+    ((sum(bytes) * 8) / 1e6) / seconds_span AS avg_Mbps,
+    (max(bytes) * 8) / 1e6 AS peak_Mbps
   FROM per_sec
   GROUP BY
     src,
