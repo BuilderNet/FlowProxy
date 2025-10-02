@@ -9,15 +9,15 @@ use clickhouse::{
 };
 use serde::Serialize;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 use crate::{
     cli::ClickhouseArgs,
     indexer::{
         models::{BundleRow, PrivateTxRow},
-        BuilderName, OrderIndexerTasks, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET,
+        BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET,
     },
+    tasks::TaskExecutor,
     types::{SystemBundle, SystemTransaction},
 };
 
@@ -72,12 +72,12 @@ pub(crate) struct ClickhouseIndexer;
 
 impl ClickhouseIndexer {
     /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
-    pub(crate) fn spawn(
+    pub(crate) fn run(
         args: ClickhouseArgs,
         builder_name: BuilderName,
         receivers: OrderReceivers,
-        token: CancellationToken,
-    ) -> OrderIndexerTasks {
+        task_executor: TaskExecutor,
+    ) {
         let (host, database, username, password) = (
             args.host.expect("host is set"),
             args.database.expect("database is set"),
@@ -104,6 +104,8 @@ impl ClickhouseIndexer {
             .with_period_bias(0.1) // 4±(0.1*4)
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
             .with_max_rows(65_536);
+        let mut bundle_inserter_runner =
+            InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
 
         let transaction_inserter = client
             .inserter::<PrivateTxRow>(BUNDLE_TABLE_NAME)
@@ -111,85 +113,120 @@ impl ClickhouseIndexer {
             .with_period_bias(0.1)
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
             .with_max_rows(65_536);
+        let mut transaction_inserter_runner =
+            InserterRunner::new(transaction_rx, transaction_inserter, builder_name);
 
-        let bundle_indexer_task = tokio::spawn(run_indexer(
-            bundle_rx,
-            bundle_inserter,
-            builder_name.clone(),
-            token.child_token(),
-        ));
+        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+            let mut shutdown_guard = None;
+            tokio::select! {
+                _ = bundle_inserter_runner.run_loop() => {
+                    info!(target: TRACING_TARGET, "clickhouse bundle indexer channel closed");
+                }
+                guard = shutdown => {
+                    info!(target: TRACING_TARGET, "Received shutdown, performing cleanup");
+                    shutdown_guard = Some(guard);
+                },
+            }
+            if let Err(e) = bundle_inserter_runner.inserter.end().await {
+                tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of bundles to indexer");
+            }
+            drop(shutdown_guard);
+        });
+
+        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+            let mut shutdown_guard = None;
+            tokio::select! {
+                _ = transaction_inserter_runner.run_loop() => {
+                    info!(target: TRACING_TARGET, "clickhouse transaction indexer channel closed");
+                }
+                guard = shutdown => {
+                    info!(target: TRACING_TARGET, "Received shutdown, performing cleanup");
+                    shutdown_guard = Some(guard);
+                },
+            }
+            if let Err(e) = transaction_inserter_runner.inserter.end().await {
+                tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of transactions to indexer");
+            }
+            drop(shutdown_guard);
+        });
+
         // TODO: support bundle receipts in Clickhouse.
-        tokio::task::spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
-        let transaction_indexer_task = tokio::spawn(run_indexer(
-            transaction_rx,
-            transaction_inserter,
-            builder_name.clone(),
-            token,
-        ));
-
-        OrderIndexerTasks {
-            bundle_indexer_task: Some(bundle_indexer_task),
-            bundle_receipt_indexer_task: None,
-            transaction_indexer_task: Some(transaction_indexer_task),
-        }
+        task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
     }
 }
 
-/// Run the indexer of the specified type until the receiving channel is closed.
-async fn run_indexer<T: ClickhouseIndexableOrder>(
-    mut rx: mpsc::Receiver<T>,
-    mut inserter: Inserter<T::ClickhouseRowType>,
-    builder_name: BuilderName,
-    token: CancellationToken,
-) {
-    loop {
-        tokio::select! {
-            maybe_order = rx.recv() => {
-                let Some(order) = maybe_order else {
-                    tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
-                    break;
-                };
-                tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
+// fn spawn_indexer_task<T: ClickhouseIndexableOrder>(
+//     mut inserter_runner: InserterRunner<T>,
+//     task_executor: &TaskExecutor,
+// ) {
+//     task_executor.spawn_with_graceful_shutdown_signal(move |shutdown| async move {
+//             let mut shutdown_guard = None;
+//             tokio::select! {
+//                 _ = inserter_runner.run_loop() => {
+//                     info!(target: TRACING_TARGET, "clickhouse bundle indexer channel closed");
+//                 }
+//                 guard = shutdown => {
+//                     info!(target: TRACING_TARGET, "Received shutdown, performing cleanup");
+//                     shutdown_guard = Some(guard);
+//                 },
+//             }
+//             if let Err(e) = inserter_runner.inserter.end().await {
+//                 tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of bundles to indexer");
+//             }
+//             drop(shutdown_guard);
+//     });
+// }
 
-                let hash = order.hash();
-                let order_row: T::ClickhouseRowType = (order, builder_name.clone()).into();
-                let value_ref = T::to_row_ref(&order_row);
+struct InserterRunner<T: ClickhouseIndexableOrder> {
+    rx: mpsc::Receiver<T>,
+    inserter: Inserter<T::ClickhouseRowType>,
+    builder_name: String,
+}
 
-                if let Err(e) = inserter.write(value_ref).await {
-                    tracing::error!(target: TRACING_TARGET,
-                        ?e,
-                        %hash,
-                        "failed to write {} to clickhouse inserter", T::ORDER_TYPE
-                    )
-                }
-
-                // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
-                // `force_commit` or not. It kinda sucks. I should fork it and make a PR
-                // eventually.
-                //
-                // TODO(thedevbirb): implement a file-based backup in case this call fails due to
-                // connection timeouts or whatever.
-                match inserter.commit().await {
-                    Ok(quantities) => {
-                        if quantities == Quantities::ZERO {
-                            tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
-                        } else {
-                            tracing::debug!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
-                    }
-                }
-            },
-            _ = token.cancelled() => {
-                tracing::info!(target: TRACING_TARGET, "Received shutdown message");
-                break;
-            }
-        }
+impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
+    fn new(
+        rx: mpsc::Receiver<T>,
+        inserter: Inserter<T::ClickhouseRowType>,
+        builder_name: BuilderName,
+    ) -> Self {
+        Self { rx, inserter, builder_name }
     }
 
-    if let Err(e) = inserter.end().await {
-        tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of {}s to indexer", T::ORDER_TYPE);
+    async fn run_loop(&mut self) {
+        while let Some(order) = self.rx.recv().await {
+            tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
+
+            let hash = order.hash();
+            let order_row: T::ClickhouseRowType = (order, self.builder_name.clone()).into();
+            let value_ref = T::to_row_ref(&order_row);
+
+            if let Err(e) = self.inserter.write(value_ref).await {
+                tracing::error!(target: TRACING_TARGET,
+                    ?e,
+                    %hash,
+                    "failed to write {} to clickhouse inserter", T::ORDER_TYPE
+                )
+            }
+
+            // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
+            // `force_commit` or not. It kinda sucks. I should fork it and make a PR
+            // eventually.
+            //
+            // TODO(thedevbirb): implement a file-based backup in case this call fails due to
+            // connection timeouts or whatever.
+            match self.inserter.commit().await {
+                Ok(quantities) => {
+                    if quantities == Quantities::ZERO {
+                        tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
+                    } else {
+                        tracing::debug!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
+                }
+            }
+        }
+        tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
     }
 }

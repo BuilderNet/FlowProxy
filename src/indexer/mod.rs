@@ -3,13 +3,13 @@
 
 use std::fmt::Debug;
 
-use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc;
 
 use crate::{
     cli::IndexerArgs,
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
-    types::{BundleReceipt, LongLivedTask, SystemBundle, SystemTransaction},
+    tasks::TaskExecutor,
+    types::{BundleReceipt, SystemBundle, SystemTransaction},
 };
 
 mod click;
@@ -56,41 +56,6 @@ pub(crate) struct OrderReceivers {
     transaction_rx: mpsc::Receiver<SystemTransaction>,
 }
 
-/// The collection of long-running indexing tasks. Marked with `Some` are tasks that can be
-/// cancelled via a `CancellationToken`, while `None` are tasks that are not cancellable.
-#[derive(Debug)]
-pub struct OrderIndexerTasks {
-    pub bundle_indexer_task: Option<JoinHandle<()>>,
-    pub bundle_receipt_indexer_task: Option<JoinHandle<()>>,
-    pub transaction_indexer_task: Option<JoinHandle<()>>,
-}
-
-impl From<OrderIndexerTasks> for Vec<LongLivedTask> {
-    fn from(tasks: OrderIndexerTasks) -> Self {
-        let mut long_lived = Vec::new();
-
-        if let Some(handle) = tasks.bundle_indexer_task {
-            long_lived.push(LongLivedTask { handle, name: "bundle_indexer_task" });
-        }
-        if let Some(handle) = tasks.bundle_receipt_indexer_task {
-            long_lived.push(LongLivedTask { handle, name: "bundle_receipt_indexer_task" });
-        }
-        if let Some(handle) = tasks.transaction_indexer_task {
-            long_lived.push(LongLivedTask { handle, name: "transaction_indexer_task" });
-        }
-        long_lived
-    }
-}
-
-impl IntoIterator for OrderIndexerTasks {
-    type Item = LongLivedTask;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        Vec::from(self).into_iter()
-    }
-}
-
 impl OrderSenders {
     /// Creates a new set of order indexer channel senders and receivers.
     pub(crate) fn new() -> (Self, OrderReceivers) {
@@ -108,31 +73,26 @@ impl OrderSenders {
 pub struct Indexer;
 
 impl Indexer {
-    pub fn spawn(
+    pub fn run(
         args: IndexerArgs,
         builder_name: BuilderName,
-        token: CancellationToken,
-    ) -> (IndexerHandle, OrderIndexerTasks) {
+        task_executor: TaskExecutor,
+    ) -> IndexerHandle {
         let (senders, receivers) = OrderSenders::new();
 
         match (args.clickhouse, args.parquet) {
             (None, None) => {
-                let tasks = MockIndexer.spawn(receivers);
-                (IndexerHandle { senders }, tasks)
+                MockIndexer.run(receivers, task_executor);
+                IndexerHandle { senders }
             }
             (Some(clickhouse), None) => {
-                let tasks = ClickhouseIndexer::spawn(
-                    clickhouse,
-                    builder_name,
-                    receivers,
-                    token.child_token(),
-                );
-                (IndexerHandle { senders }, tasks)
+                ClickhouseIndexer::run(clickhouse, builder_name, receivers, task_executor);
+                IndexerHandle { senders }
             }
             (None, Some(parquet)) => {
-                let tasks = ParquetIndexer::spawn(parquet, builder_name, receivers, token)
-                    .expect("to spawn parquet indexer");
-                (IndexerHandle { senders }, tasks)
+                ParquetIndexer::run(parquet, builder_name, receivers, task_executor)
+                    .expect("failed to start parquet indexer");
+                IndexerHandle { senders }
             }
             (Some(_), Some(_)) => {
                 unreachable!("Cannot specify both clickhouse and parquet indexer");
@@ -169,20 +129,14 @@ impl OrderIndexer for IndexerHandle {
 struct MockIndexer;
 
 impl MockIndexer {
-    fn spawn(self, receivers: OrderReceivers) -> OrderIndexerTasks {
+    fn run(self, receivers: OrderReceivers, task_executor: TaskExecutor) {
         tracing::info!(target: TRACING_TARGET, "Running with mocked indexer");
 
         let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx, mut transaction_rx } = receivers;
 
-        tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
-        tokio::task::spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
-        tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
-
-        OrderIndexerTasks {
-            bundle_indexer_task: None,
-            bundle_receipt_indexer_task: None,
-            transaction_indexer_task: None,
-        }
+        task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+        task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
+        task_executor.spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
     }
 }
 #[cfg(test)]

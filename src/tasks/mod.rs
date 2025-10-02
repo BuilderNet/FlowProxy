@@ -24,7 +24,6 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
-use tracing::{debug, error};
 use tracing_futures::Instrument;
 
 pub mod shutdown;
@@ -218,13 +217,13 @@ impl TaskManager {
         let when = timeout.map(|t| std::time::Instant::now() + t);
         while self.graceful_tasks.load(Ordering::Relaxed) > 0 {
             if when.map(|when| std::time::Instant::now() > when).unwrap_or(false) {
-                debug!("graceful shutdown timed out");
+                tracing::debug!("graceful shutdown timed out");
                 return false;
             }
             std::hint::spin_loop();
         }
 
-        debug!("gracefully shut down");
+        tracing::debug!("gracefully shut down");
         true
     }
 }
@@ -406,7 +405,7 @@ impl TaskExecutor {
             .catch_unwind()
             .map_err(move |error| {
                 let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
+                tracing::error!("{task_error}");
                 let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
             })
             .in_current_span();
@@ -461,7 +460,7 @@ impl TaskExecutor {
             .catch_unwind()
             .map_err(move |error| {
                 let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
+                tracing::error!("{task_error}");
                 let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
             })
             .map(drop)
@@ -510,7 +509,7 @@ impl TaskExecutor {
             .catch_unwind()
             .map_err(move |error| {
                 let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
+                tracing::error!("{task_error}");
                 let _ = panicked_tasks_tx.send(TaskEvent::Panic(task_error));
             })
             .map(drop)

@@ -12,7 +12,6 @@ use arrow::{
 };
 use parquet::{arrow::ArrowWriter, file::properties::WriterPropertiesBuilder};
 use tokio::{sync::mpsc, time::Instant};
-use tokio_util::sync::CancellationToken;
 
 use std::{
     fs::{File, OpenOptions},
@@ -23,7 +22,8 @@ use std::{
 
 use crate::{
     cli::ParquetArgs,
-    indexer::{BuilderName, OrderIndexerTasks, OrderReceivers, TRACING_TARGET},
+    indexer::{BuilderName, OrderReceivers, TRACING_TARGET},
+    tasks::TaskExecutor,
     types::BundleReceipt,
 };
 
@@ -157,12 +157,12 @@ impl BundleReceiptWriter {
 pub(crate) struct ParquetIndexer;
 
 impl ParquetIndexer {
-    pub(crate) fn spawn(
+    pub(crate) fn run(
         parquet_args: ParquetArgs,
         builder_name: BuilderName,
         receivers: OrderReceivers,
-        token: CancellationToken,
-    ) -> io::Result<OrderIndexerTasks> {
+        task_executor: TaskExecutor,
+    ) -> io::Result<()> {
         let OrderReceivers { mut bundle_rx, bundle_receipt_rx, mut transaction_rx } = receivers;
 
         let parquet_file = OpenOptions::new().create(true).append(true).open(
@@ -182,77 +182,80 @@ impl ParquetIndexer {
         )?;
 
         let receipts_writer = BundleReceiptWriter::new(writer, builder_name.clone());
+        let mut runner = ParquetRunner { rx: bundle_receipt_rx, receipt_writer: receipts_writer };
 
-        tokio::task::spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
-        let bundle_receipt_indexer_task =
-            tokio::spawn(run_indexer(bundle_receipt_rx, receipts_writer, token));
-        tokio::task::spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
+        task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+            tokio::select! {
+                _ = runner.run_loop() => { },
+                guard = shutdown => {
+                    println!("shutdown ready");
+                    tracing::info!(target: TRACING_TARGET, "Shutting down Parquet indexer");
+                    drop(runner);
+                    drop(guard);
+                }
+            }
+        });
 
-        let tasks = OrderIndexerTasks {
-            bundle_indexer_task: None,
-            bundle_receipt_indexer_task: Some(bundle_receipt_indexer_task),
-            transaction_indexer_task: None,
-        };
+        task_executor.spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
 
-        Ok(tasks)
+        Ok(())
     }
 }
 
-/// Run the indexer of the specified type until the receiving channel is closed.
-async fn run_indexer(
-    mut rx: mpsc::Receiver<BundleReceipt>,
-    mut receipt_writer: BundleReceiptWriter,
-    token: CancellationToken,
-) {
-    let start = Instant::now();
-    let mut interval = tokio::time::interval_at(start, Duration::from_secs(4));
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+struct ParquetRunner {
+    rx: mpsc::Receiver<BundleReceipt>,
+    receipt_writer: BundleReceiptWriter,
+}
 
-    // Either append or flush if the interval ticks.
-    loop {
-        tokio::select! {
-            maybe_receipt = rx.recv() => {
-                let Some(receipt) = maybe_receipt else {
-                    tracing::error!(target: TRACING_TARGET, "Bundle receipt channel closed, shutting down Parquet indexer");
-                    break;
-                };
+impl ParquetRunner {
+    async fn run_loop(&mut self) {
+        let start = Instant::now();
+        let mut interval = tokio::time::interval_at(start, Duration::from_secs(4));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
-                tracing::trace!(target: TRACING_TARGET, hash = %receipt.bundle_hash, "Received bundle receipt to index");
-                receipt_writer.append(receipt);
-            },
+        // Either append or flush if the interval ticks.
+        loop {
+            tokio::select! {
+                maybe_receipt = self.rx.recv() => {
+                    let Some(receipt) = maybe_receipt else {
+                        tracing::error!(target: TRACING_TARGET, "Bundle receipt channel closed, shutting down Parquet indexer");
+                        break;
+                    };
 
-            _ = interval.tick() => {
-                tracing::debug!(target: TRACING_TARGET, "Flushing Parquet writer");
+                    tracing::trace!(target: TRACING_TARGET, hash = %receipt.bundle_hash, "Received bundle receipt to index");
+                    self.receipt_writer.append(receipt);
+                },
 
-                if let Err(e) = receipt_writer.flush() {
-                    tracing::error!(target: TRACING_TARGET, ?e, "Failed to flush Parquet writer");
-                }
-            },
+                _ = interval.tick() => {
+                    tracing::debug!(target: TRACING_TARGET, "Flushing Parquet writer");
 
-            _ = token.cancelled() => {
-                tracing::info!(target: TRACING_TARGET, "Received shutdown message");
-                break;
+                    if let Err(e) = self.receipt_writer.flush() {
+                        tracing::error!(target: TRACING_TARGET, ?e, "Failed to flush Parquet writer");
+                    }
+                },
+
             }
         }
-    }
 
-    drop(receipt_writer);
+        // drop(receipt_writer);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, B256, U32};
     use time::UtcDateTime;
-    use tokio_util::sync::CancellationToken;
 
     // Uncomment to enable logging during tests.
-    // use tracing::level_filters::LevelFilter;
-    // use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+    use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     use crate::{
         cli::ParquetArgs,
         indexer::{self, parq::ParquetIndexer},
         priority::Priority,
+        tasks::TaskManager,
         types::BundleReceipt,
         utils::testutils::Random,
     };
@@ -362,10 +365,10 @@ mod tests {
     #[tokio::test]
     async fn indexer_parquet_file_works() {
         // Uncomment to toggle logs.
-        // let registry = tracing_subscriber::registry().with(
-        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
-        // from_env_lossy(), );
-        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        let registry = tracing_subscriber::registry().with(
+            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+        );
+        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. --- Setup.
 
@@ -378,19 +381,14 @@ mod tests {
 
         let (senders, receivers) = indexer::OrderSenders::new();
 
-        let token = CancellationToken::new();
-        let _ = ParquetIndexer::spawn(
-            args,
-            "buildernet_dst".to_string(),
-            receivers,
-            token.child_token(),
-        )
-        .unwrap();
+        let task_manager = TaskManager::current();
+        ParquetIndexer::run(args, "buildernet_dst".to_string(), receivers, task_manager.executor())
+            .unwrap();
 
         // 2. --- Spam.
 
         let mut rng = rand::rng();
-        let example_bundle_receipts = (0..8192)
+        let example_bundle_receipts = (0..128)
             .map(|_| {
                 let mut r = BundleReceipt::random(&mut rng);
                 r.dst_builder_name = Some("buildernet_dst".to_string());
@@ -403,8 +401,10 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
         // Cancel the indexer task.
-        token.cancel();
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        assert!(
+            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5)),
+            "shutdown hit timeout"
+        );
 
         // 3. --- Check.
 

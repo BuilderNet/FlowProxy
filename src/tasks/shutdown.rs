@@ -12,7 +12,10 @@ use std::{
 };
 use tokio::sync::oneshot;
 
-/// A Future that resolves when the shutdown event has been fired.
+/// A [`Future`] that resolves when the shutdown event has been fired.
+///
+/// Compared to [`Shutdown`] it is "graceful", meaning that when it resolves it returns a
+/// [`GracefulShutdownGuard`].
 #[derive(Debug)]
 pub struct GracefulShutdown {
     shutdown: Shutdown,
@@ -20,15 +23,11 @@ pub struct GracefulShutdown {
 }
 
 impl GracefulShutdown {
+    /// Creates a new instance of `Self`. To do so, it requires a [`Shutdown`] future, that will
+    /// drive `Self` to resolution, and the [`GracefulShutdownGuard`] used to notify the completion
+    /// of the graceful shutdown produre.
     pub(crate) const fn new(shutdown: Shutdown, guard: GracefulShutdownGuard) -> Self {
         Self { shutdown, guard: Some(guard) }
-    }
-
-    /// Returns a new shutdown future that is ignores the returned [`GracefulShutdownGuard`].
-    ///
-    /// This just maps the return value of the future to `()`, it does not drop the guard.
-    pub fn ignore_guard(self) -> impl Future<Output = ()> + Send + Sync + Unpin + 'static {
-        self.map(drop)
     }
 }
 
@@ -69,12 +68,13 @@ impl Drop for GracefulShutdownGuard {
     }
 }
 
-/// A `Shutdown` is a `Future` that resolves when a shutdown event is fired.
-///
-/// Internally, it is implemented using a [`oneshot`] channel receiver, wrapped in a
-/// [`futures_util::FutureExt::shared`] so that it can be cloned and polled from multiple tasks.
+/// A [`Future`] that resolves when a shutdown event is fired.
 #[derive(Debug, Clone)]
-pub struct Shutdown(Shared<oneshot::Receiver<()>>);
+pub struct Shutdown(
+    /// The internal [`oneshot`] channel receiver, wrapped in a
+    /// [`futures_util::FutureExt::shared`] so that it can be cloned and polled from multiple tasks.
+    Shared<oneshot::Receiver<()>>,
+);
 
 impl Future for Shutdown {
     type Output = ();

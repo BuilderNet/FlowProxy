@@ -1,6 +1,6 @@
 //! Orderflow ingress for BuilderNet.
 
-use crate::statics::{LOCAL_PEER_STORE, SHUTDOWN_TOKEN};
+use crate::{statics::LOCAL_PEER_STORE, tasks::TaskExecutor};
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
@@ -28,7 +28,6 @@ use ingress::OrderflowIngress;
 
 use crate::{
     builderhub::PeerStore, cache::OrderCache, indexer::Indexer, ingress::OrderflowIngressMetrics,
-    statics::TASKS,
 };
 
 pub mod builderhub;
@@ -45,11 +44,16 @@ pub mod types;
 pub mod utils;
 pub mod validation;
 
-pub async fn run(args: OrderflowIngressArgs) -> eyre::Result<()> {
+#[derive(Debug, Clone)]
+pub struct RunnerContext {
+    pub executor: TaskExecutor,
+}
+
+pub async fn run(args: OrderflowIngressArgs, ctx: RunnerContext) -> eyre::Result<()> {
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
     let system_listener = TcpListener::bind(&args.system_listen_url).await?;
     let builder_listener = TcpListener::bind(&args.builder_listen_url).await?;
-    run_with_listeners(args, user_listener, system_listener, builder_listener).await
+    run_with_listeners(args, user_listener, system_listener, builder_listener, ctx).await
 }
 
 pub async fn run_with_listeners(
@@ -57,6 +61,7 @@ pub async fn run_with_listeners(
     user_listener: TcpListener,
     system_listener: TcpListener,
     builder_listener: TcpListener,
+    ctx: RunnerContext,
 ) -> eyre::Result<()> {
     // Initialize tracing.
     let registry = tracing_subscriber::registry().with(
@@ -72,9 +77,7 @@ pub async fn run_with_listeners(
         spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
     }
 
-    let (indexer_handle, tasks) =
-        Indexer::spawn(args.indexing, args.builder_name, SHUTDOWN_TOKEN.child_token());
-    TASKS.write().expect("not poisoned").extend(tasks.into_iter());
+    let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.executor);
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
