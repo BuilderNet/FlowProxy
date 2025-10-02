@@ -128,7 +128,7 @@ get-results() {
   # Copy flamegraph SVGs with timestamped names
   docker cp "$CONTAINER_NAME:/root/svg/" ./tmp 2>/dev/null || true
 
-  for svg in ./tmp/*.svg 2>/dev/null; do
+  for svg in ./tmp/*.svg; do
     [ -f "$svg" ] || continue
     svg_basename=$(basename "$svg")
     svg_name="${svg_basename%.svg}"
