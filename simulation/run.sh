@@ -87,7 +87,7 @@ run() {
           if [[ -n \"\$proxyName\" ]]; then
             echo -n
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
-            (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
+            (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/svg/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
           fi
         done
 
@@ -130,6 +130,18 @@ get-results() {
     svg_name="${svg_basename%.svg}"
     docker cp "$CONTAINER_NAME:$svg" \
       "./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
+
+  docker cp "$CONTAINER_NAME:/root/svg/" ./tmp
+
+  for svg in ./tmp/*.svg; do
+    svg_basename=$(basename "$svg")
+    svg_name="${svg_basename%.svg}"
+    docker cp "$svg" \
+      "./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
+  done
+
+  rm -rf ./tmp
+  
   done
 }
 
