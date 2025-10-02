@@ -53,6 +53,8 @@ RUN cargo build --release
 WORKDIR /root/buildernet-orderflow-proxy/simulation/submitter
 RUN cargo build --release
 
+RUN cargo install --locked flamegraph
+
 #
 # Stage 3: Slim image for runtime
 #
@@ -61,14 +63,16 @@ WORKDIR /root
 
 # Packages for shadow runtime
 RUN apt-get update
-RUN apt-get install -y libglib2.0-0 libglib2.0-dev
+RUN apt-get install -y libglib2.0-0 libglib2.0-dev linux-perf
 
 COPY simulation/testdata/ /root/testdata/
 
 # Copy the compiled binaries and libraries to the fresh image
-COPY --from=build-proxy /root/.local/bin/shadow .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/profiling/buildernet-orderflow-proxy .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/release/mockhub .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/target/release/submitter .
+COPY --from=build-proxy /root/.local/bin/shadow /usr/local/bin/
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/profiling/buildernet-orderflow-proxy /usr/local/bin/
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/release/mockhub /usr/local/bin/
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/target/release/submitter /usr/local/bin/
 # These shadow libraries have to be in /lib according to readelf
 COPY --from=build-proxy /root/.local/lib /lib
+
+COPY --from=build-proxy /usr/local/cargo/bin/flamegraph .

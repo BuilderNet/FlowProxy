@@ -3,7 +3,7 @@ set -euo pipefail
 
 IMAGE="shadow-buildernet"
 CONTAINER_NAME="shadow-buildernet"
-RUN_ARGS="--shm-size=1024g --security-opt=seccomp=unconfined --cpuset-cpus=0-7"
+RUN_ARGS="--shm-size=1024g --security-opt=seccomp=unconfined --cpuset-cpus=0-7 --cap-add=PERFMON"
 
 # Helper: UTC datetime
 datetime_utc() {
@@ -33,6 +33,28 @@ build() {
 
 run() {
   local scenario="${1:-buildernet.yaml}"
+  local profile=false
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --profile)
+        profile=true
+        shift
+        ;;
+      *)
+        scenario="$1"
+        shift
+        ;;
+    esac
+  done
+
+  if [[ "$profile" == true ]]; then
+    echo "Profiling enabled"
+  else
+    echo "Profiling disabled"
+  fi
+
   ./$(basename "$0") clean-container || true
   docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
     /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario}"
