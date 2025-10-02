@@ -85,7 +85,7 @@ run() {
         for pid in \$(pgrep -f buildernet-orderflow-proxy); do
           proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy\d+' || true)
           if [[ -n \"\$proxyName\" ]]; then
-            echo -e "\n\n"
+            echo -e "\\n\\n"
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
             ./flamegraph -o \${proxyName}.svg --pid \$pid --no-inline -F 99
           fi
@@ -120,6 +120,14 @@ get-results() {
     -T fields -E header=y -E separator=\; \
     -e frame.time -e ip.src -e ip.dst -e frame.len \
     >"./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}_summary.csv"
+
+  # Copy flamegraph SVGs with timestamped names
+  for svg in $(docker exec "$CONTAINER_NAME" ls /root/*.svg 2>/dev/null || true); do
+    svg_basename=$(basename "$svg")
+    svg_name="${svg_basename%.svg}"
+    docker cp "$CONTAINER_NAME:$svg" \
+      "./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
+  done
 }
 
 logs() {
