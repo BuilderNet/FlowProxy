@@ -15,6 +15,13 @@ experimental:
   # Use the new Rust TCP implementation for better performance
   use_new_tcp: true
 
+# Packet Capture (PCAP) files for bandwidth usage
+host_option_defaults:
+  pcap_enabled: true
+  # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,
+  # we mainly care about metadata. 20 bytes represents minimum IPv4 header size.
+  pcap_capture_size: 20
+
 # Intra-zone latencies: https://latency.azure.cloud63.fr
 # Inter-zone latencies: https://learn.microsoft.com/en-us/azure/networking/azure-network-latency
 network:

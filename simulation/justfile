@@ -24,6 +24,7 @@ run scenario='buildernet.yaml': clean-container
 get-results:
         mkdir -p results
         @docker cp {{container-name}}:/root/shadow.data/hosts/proxy2/bundle_receipts_proxy2.parquet ./results/bundle_receipts_{{datetime_utc("%Y-%m-%d-%H-%M-%S")}}_runtime-`grep stop_time scenarios/buildernet.yaml | cut -d ":" -f 2 | xargs`_scale-`cat scenarios/buildernet.yaml | awk -v RS=' ' '/--scale/ { getline; print; exit }' | xargs`.parquet
+        @docker cp {{container-name}}:/root/shadow.data/hosts/proxy2/eth0.pcap ./results/proxy2_eth0_{{datetime_utc("%Y-%m-%d-%H-%M-%S")}}_runtime-`grep stop_time scenarios/buildernet.yaml | cut -d ":" -f 2 | xargs`_scale-`cat scenarios/buildernet.yaml | awk -v RS=' ' '/--scale/ { getline; print; exit }' | xargs`.pcap
 
 # View the logs of the given Shadow process
 logs process:
