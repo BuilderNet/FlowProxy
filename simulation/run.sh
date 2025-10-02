@@ -82,7 +82,7 @@ run() {
         sleep 5
 
         echo 'Generating flamegraphs for running processes...'
-        for pid in \$(pgrep -f buildernet-orderflow-proxy); do
+        for pid in \$(pgrep -f '/root/buildernet-orderflow-proxy'); do
           echo \"Processing PID: \$pid\"
           args=\$(ps -p \$pid -o args=)
           echo \"Args: \$args\"
