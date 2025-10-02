@@ -45,6 +45,26 @@ pub struct IndexerArgs {
     pub parquet: Option<ParquetArgs>,
 }
 
+/// Arguments required to setup caching.
+#[derive(PartialEq, Eq, Clone, Debug, Args)]
+pub struct CacheArgs {
+    /// The order cache TTL in seconds.
+    #[clap(long = "order-cache.ttl", default_value_t = 12)]
+    pub order_cache_ttl: u64,
+
+    /// The order cache size.
+    #[clap(long = "order-cache.size", default_value_t = 4096)]
+    pub order_cache_size: u64,
+
+    /// The signer cache TTL in seconds.
+    #[clap(long = "signer-cache.ttl", default_value_t = 12)]
+    pub signer_cache_ttl: u64,
+
+    /// The signer cache size.
+    #[clap(long = "signer-cache.size", default_value_t = 4096)]
+    pub signer_cache_size: u64,
+}
+
 #[derive(Parser, Debug)]
 pub struct OrderflowIngressArgs {
     /// Listen URL for receiving user flow.
@@ -108,13 +128,8 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip")]
     pub gzip_enabled: bool,
 
-    /// The order cache TTL in seconds.
-    #[clap(long = "cache.ttl", default_value_t = 12)]
-    pub cache_ttl: u64,
-
-    /// The order cache size.
-    #[clap(long = "cache.size", default_value_t = 4096)]
-    pub cache_size: u64,
+    #[command(flatten)]
+    pub cache: CacheArgs,
 
     #[command(flatten)]
     pub indexing: IndexerArgs,
@@ -138,9 +153,12 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            cache_ttl: 60,
-            cache_size: 4096,
-
+            cache: CacheArgs {
+                order_cache_ttl: 12,
+                order_cache_size: 4096,
+                signer_cache_ttl: 12,
+                signer_cache_size: 4096,
+            },
             indexing: IndexerArgs { clickhouse: None, parquet: None },
         }
     }

@@ -1,5 +1,5 @@
 use crate::{
-    cache::OrderCache,
+    cache::{OrderCache, SignerCache},
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
@@ -74,6 +74,7 @@ pub struct OrderflowIngress {
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
     pub order_cache: OrderCache,
+    pub signer_cache: SignerCache,
     pub forwarders: IngressForwarders,
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.

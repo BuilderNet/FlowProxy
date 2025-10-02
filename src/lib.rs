@@ -1,6 +1,9 @@
 //! Orderflow ingress for BuilderNet.
 
-use crate::statics::{LOCAL_PEER_STORE, SHUTDOWN_TOKEN};
+use crate::{
+    cache::SignerCache,
+    statics::{LOCAL_PEER_STORE, SHUTDOWN_TOKEN},
+};
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
@@ -125,7 +128,8 @@ pub async fn run_with_listeners(
         IngressForwarders::new(local_sender, peers, orderflow_signer)
     };
 
-    let order_cache = OrderCache::new(args.cache_ttl, args.cache_size);
+    let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
+    let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
@@ -137,6 +141,7 @@ pub async fn run_with_listeners(
         pqueues: Default::default(),
         entities: DashMap::default(),
         order_cache,
+        signer_cache,
         forwarders,
         local_builder_url: builder_url,
         metrics: OrderflowIngressMetrics::default(),
