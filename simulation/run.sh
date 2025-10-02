@@ -51,13 +51,52 @@ run() {
 
   if [[ "$profile" == true ]]; then
     echo "Profiling enabled"
+
+    # Check sysctl values for profiling
+    kptr_restrict=$(sysctl -n kernel.kptr_restrict 2>/dev/null || echo "unknown")
+    perf_paranoid=$(sysctl -n kernel.perf_event_paranoid 2>/dev/null || echo "unknown")
+
+    if [[ "$kptr_restrict" != "0" ]] || [[ "$perf_paranoid" != "1" ]]; then
+      echo "WARNING: Profiling requires specific sysctl settings."
+      echo "Current values: kernel.kptr_restrict=$kptr_restrict, kernel.perf_event_paranoid=$perf_paranoid"
+      echo "Required values: kernel.kptr_restrict=0, kernel.perf_event_paranoid=1"
+      echo ""
+      echo "Please run the following commands:"
+      echo "  sudo sysctl kernel.kptr_restrict=0"
+      echo "  sudo sysctl kernel.perf_event_paranoid=1"
+      exit 1
+    fi
   else
     echo "Profiling disabled"
   fi
 
   ./$(basename "$0") clean-container || true
-  docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
-    /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario}"
+
+  if [[ "$profile" == true ]]; then
+    docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
+      /bin/bash -c "
+        ./shadow --template-directory /root/testdata/ scenarios/${scenario} &
+        SHADOW_PID=\$!
+
+        # Wait a bit for processes to start
+        sleep 5
+
+        echo 'Generating flamegraphs for running processes...'
+        for pid in \$(pgrep buildernet-orderflow-proxy); do
+          proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy\d+' || true)
+          if [[ -n \"\$proxyName\" ]]; then
+            echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
+            ./flamegraph -o \${proxyName}.svg --pid \$pid
+          fi
+        done
+
+        wait \$SHADOW_PID
+      "
+  else
+    docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
+      /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario}"
+  fi
+
   ./$(basename "$0") get-results
 }
 

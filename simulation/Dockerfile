@@ -63,7 +63,7 @@ WORKDIR /root
 
 # Packages for shadow runtime
 RUN apt-get update
-RUN apt-get install -y libglib2.0-0 libglib2.0-dev linux-perf
+RUN apt-get install -y libglib2.0-0 libglib2.0-dev linux-perf procps
 
 COPY simulation/testdata/ /root/testdata/
 
