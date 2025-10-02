@@ -92,6 +92,9 @@ run() {
         done
 
         wait \$SHADOW_PID
+
+        echo \"Waiting for flamegraph generation to complete...\"
+        wait
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
