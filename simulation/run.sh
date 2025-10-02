@@ -169,6 +169,8 @@ process-results() {
     exit 1
   fi
 
+  echo "Processing $latest_parquet..."
+
   local count_query="SELECT count(bundle_hash) FROM file('$latest_parquet', Parquet)"
 
   local query="WITH data AS (
