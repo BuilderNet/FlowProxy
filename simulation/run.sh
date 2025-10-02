@@ -82,7 +82,7 @@ run() {
         sleep 5
 
         echo 'Generating flamegraphs for running processes...'
-        for pid in \$(pgrep buildernet-orderflow-proxy); do
+        for pid in \$(pgrep -f buildernet-orderflow-proxy); do
           proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy\d+' || true)
           if [[ -n \"\$proxyName\" ]]; then
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
