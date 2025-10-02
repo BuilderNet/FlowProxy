@@ -2,8 +2,10 @@
 
 This directory contains a discrete-event network simulation for testing the Buildernet orderflow proxy at scale using [Shadow](https://shadow.github.io/).
 
-## Requirements
+> [!IMPORTANT]
+> This only works on Linux x86_64 machines.
 
+## Requirements
 - Docker
 - Clickhouse local: install with `curl https://clickhouse.com/ | sh`
 
@@ -14,12 +16,12 @@ This directory contains a discrete-event network simulation for testing the Buil
 ./run.sh build
 
 # Run the simulation
-./run.sh run
+./run.sh run buildernet.yaml
 
-# Run with profiling (generates flamegraphs)
-./run.sh run --profile
+# Run with profiling (generates flamegraphs of the proxy processes)
+./run.sh run buildernet.yaml --profile
 
-# Process results with ClickHouse
+# Process latest results with ClickHouse
 ./run.sh process
 ```
 
