@@ -38,14 +38,14 @@ run() {
   # Parse flags
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --profile)
-        profile=true
-        shift
-        ;;
-      *)
-        scenario="$1"
-        shift
-        ;;
+    --profile)
+      profile=true
+      shift
+      ;;
+    *)
+      scenario="$1"
+      shift
+      ;;
     esac
   done
 
@@ -117,8 +117,16 @@ get-results() {
   docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy2/bundle_receipts_proxy2.parquet \
     "./results/bundle_receipts_${timestamp}_runtime-${runtime}_scale-${scale}.parquet"
 
+  docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy1/eth0.pcap \
+    "./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap"
+
   docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy2/eth0.pcap \
     "./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap"
+
+  tshark -r "./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap" \
+    -T fields -E header=y -E separator=\; \
+    -e frame.time -e ip.src -e ip.dst -e frame.len \
+    >"./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}_summary.csv"
 
   tshark -r "./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap" \
     -T fields -E header=y -E separator=\; \
