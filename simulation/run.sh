@@ -87,7 +87,7 @@ run() {
           if [[ -n \"\$proxyName\" ]]; then
             echo -n
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
-            ./flamegraph -o \${proxyName}.svg --pid \$pid --no-inline -F 99 &
+            (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
           fi
         done
 
