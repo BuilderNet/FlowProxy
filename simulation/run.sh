@@ -169,7 +169,14 @@ process-results() {
     exit 1
   fi
 
-  echo "Processing $latest_parquet..."
+  local latest_csv
+  latest_csv=$(ls -t results/*.csv 2>/dev/null | head -n1 || true)
+  if [[ -z "$latest_csv" ]]; then
+    echo "No CSV results found in results/"
+    exit 1
+  fi
+
+  echo "Processing $latest_parquet and $latest_csv..."
 
   local count_query="SELECT count(bundle_hash) FROM file('$latest_parquet', Parquet)"
 
@@ -197,6 +204,38 @@ process-results() {
   echo
   echo "Aggregated statistics:"
   ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$query"
+
+  local csv_query="SET format_csv_delimiter=';';
+  WITH per_sec AS
+    (
+        SELECT
+            ip.src AS src,
+            ip.dst AS dst,
+            toStartOfSecond(parseDateTime64BestEffortOrNull(replaceRegexpAll(frame.time, '\\sCET$', ''), 9, 'Europe/Brussels')) AS ts,
+            sum(frame.len) AS bytes
+        FROM file('$latest_csv', CSVWithNames)
+        GROUP BY
+            src,
+            dst,
+            ts
+    )
+  SELECT
+    src,
+    dst,
+    (sum(bytes) * 8) / 1000000. AS total_Mbits,
+    greatest(1, dateDiff('second', min(ts), max(ts)) + 1) AS seconds_span,
+    ((sum(bytes) * 8) / 1000000.) / seconds_span AS avg_Mbps,
+    (max(bytes) * 8) / 1000000. AS peak_Mbps
+  FROM per_sec
+  GROUP BY
+    src,
+    dst
+  ORDER BY total_Mbits DESC
+  "
+
+  echo
+  echo "Bandwidth usage data:"
+  ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$csv_query"
 }
 
 # Dispatch
