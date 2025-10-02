@@ -82,21 +82,12 @@ run() {
         sleep 5
 
         echo 'Generating flamegraphs for running processes...'
-        for pid in \$(pgrep -f '/root/buildernet-orderflow-proxy'); do
-          echo \"Processing PID: \$pid\"
-          args=\$(ps -p \$pid -o args= 2>/dev/null || echo \"\")
-          if [[ -z \"\$args\" ]]; then
-            echo \"Skipping PID \$pid (process terminated or no args)\"
-            continue
-          fi
-          echo \"Args: \$args\"
-          proxyName=\$(echo \"\$args\" | grep -oP 'proxy[0-9]+')
-          echo \"Extracted proxyName: '\$proxyName'\"
+        for pid in \$(pgrep -f buildernet-orderflow-proxy); do
+          proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy[0-9]+' || true)
           if [[ -n \"\$proxyName\" ]]; then
+            echo -n
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
-            ./flamegraph -o \${proxyName}_\${pid}.svg --pid \$pid --no-inline -F 99
-          else
-            echo \"No proxyName found for PID \$pid\"
+            ./flamegraph -o \${proxyName}.svg --pid \$pid --no-inline -F 99 &
           fi
         done
 
