@@ -405,7 +405,11 @@ impl OrderflowIngress {
 
         self.order_cache.insert(bundle_hash);
         let sig_cache_clone = self.signer_cache.clone();
-        let lookup = move |hash: B256| sig_cache_clone.get(&hash);
+        let lookup = move |hash: B256| {
+            sig_cache_clone
+                .get(&hash)
+                .inspect(|a| debug!(target: "signer-cache", "cache hit for hash: {hash} -- {a}"))
+        };
 
         // Decode and validate the bundle.
         let bundle = self
@@ -425,6 +429,7 @@ impl OrderflowIngress {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
                 for tx in &bundle.txs {
+                    debug!(target: "signer-cache", "adding to signer cache: {} -- {}", tx.hash(), tx.signer());
                     self.signer_cache.insert(tx.hash(), tx.signer());
                 }
             }
