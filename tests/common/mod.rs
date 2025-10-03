@@ -11,7 +11,7 @@ use buildernet_orderflow_proxy::{
     cli::OrderflowIngressArgs,
     ingress::{maybe_decompress, FLASHBOTS_SIGNATURE_HEADER},
     jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
-    RunnerContext,
+    runner::CliContext,
 };
 use hyper::{header, HeaderMap};
 use rbuilder_primitives::serialize::RawBundle;
@@ -44,7 +44,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
                 user_listener,
                 system_listener,
                 builder_listener,
-                RunnerContext { executor: task_manager.executor() },
+                CliContext { task_executor: task_manager.executor() },
             )
             .await
             .unwrap();

@@ -185,16 +185,23 @@ impl ParquetIndexer {
         let mut runner = ParquetRunner { rx: bundle_receipt_rx, receipt_writer: receipts_writer };
 
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+        task_executor.spawn_with_graceful_shutdown_signal(|mut shutdown| async move {
             tokio::select! {
-                _ = runner.run_loop() => { },
-                guard = shutdown => {
-                    println!("shutdown ready");
-                    tracing::info!(target: TRACING_TARGET, "Shutting down Parquet indexer");
+                _ = runner.run_loop() => {
+                    // runner finished (channel closed, etc.)
+                    tracing::info!(target: TRACING_TARGET, "Runner exited");
+                }
+                guard = &mut shutdown => {
+                    tracing::info!(target: TRACING_TARGET, "Received shutdown, performing cleanup");
                     drop(runner);
                     drop(guard);
+                    return;
                 }
             }
+
+            // If we exit the loop (runner finished first), still wait for shutdown
+            let guard = shutdown.await;
+            drop(guard);
         });
 
         task_executor.spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
@@ -237,8 +244,6 @@ impl ParquetRunner {
 
             }
         }
-
-        // drop(receipt_writer);
     }
 }
 
@@ -248,8 +253,8 @@ mod tests {
     use time::UtcDateTime;
 
     // Uncomment to enable logging during tests.
-    use tracing::level_filters::LevelFilter;
-    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+    // use tracing::level_filters::LevelFilter;
+    // use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     use crate::{
         cli::ParquetArgs,
@@ -362,13 +367,15 @@ mod tests {
 
     /// An E2E of the parquet indexer, which spins up the indexer, sends it some bundle receipts,
     /// and then reads back the parquet file to ensure the data is correct.
-    #[tokio::test]
-    async fn indexer_parquet_file_works() {
+    #[test]
+    fn indexer_parquet_file_works() {
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+
         // Uncomment to toggle logs.
-        let registry = tracing_subscriber::registry().with(
-            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-        );
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. --- Setup.
 
@@ -381,14 +388,14 @@ mod tests {
 
         let (senders, receivers) = indexer::OrderSenders::new();
 
-        let task_manager = TaskManager::current();
-        ParquetIndexer::run(args, "buildernet_dst".to_string(), receivers, task_manager.executor())
-            .unwrap();
+        let task_manager = TaskManager::new(rt.handle().clone());
+        let task_executor = task_manager.executor();
+        ParquetIndexer::run(args, "buildernet_dst".to_string(), receivers, task_executor).unwrap();
 
         // 2. --- Spam.
 
         let mut rng = rand::rng();
-        let example_bundle_receipts = (0..128)
+        let example_bundle_receipts = (0..8192)
             .map(|_| {
                 let mut r = BundleReceipt::random(&mut rng);
                 r.dst_builder_name = Some("buildernet_dst".to_string());
@@ -396,10 +403,13 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        for r in &example_bundle_receipts {
-            senders.bundle_receipt_tx.try_send(r.clone()).unwrap();
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
+        rt.block_on(async {
+            for r in &example_bundle_receipts {
+                senders.bundle_receipt_tx.try_send(r.clone()).unwrap();
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        });
+
         // Cancel the indexer task.
         assert!(
             task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5)),

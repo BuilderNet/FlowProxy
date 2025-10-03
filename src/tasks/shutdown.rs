@@ -72,7 +72,8 @@ impl Drop for GracefulShutdownGuard {
 #[derive(Debug, Clone)]
 pub struct Shutdown(
     /// The internal [`oneshot`] channel receiver, wrapped in a
-    /// [`futures_util::FutureExt::shared`] so that it can be cloned and polled from multiple tasks.
+    /// [`futures_util::FutureExt::shared`] so that it can be cloned and polled from multiple
+    /// tasks.
     Shared<oneshot::Receiver<()>>,
 );
 

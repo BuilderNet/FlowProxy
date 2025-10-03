@@ -1,6 +1,6 @@
 //! Task management utilities.
 //!
-//! Taken from `reth_tasks` crate
+//! Taken from `tasks` crate
 //! (https://github.com/paradigmxyz/reth/blob/main/crates/tasks/src/lib.rs) and adapted.
 
 use dyn_clone::DynClone;
@@ -40,7 +40,7 @@ pub mod shutdown;
 ///
 /// ```
 /// # async fn t() {
-/// use reth_tasks::{TaskSpawner, TokioTaskExecutor};
+/// use buildernet_orderflow_proxy::tasks::{TaskSpawner, TokioTaskExecutor};
 /// let executor = TokioTaskExecutor::default();
 ///
 /// let task = executor.spawn(Box::pin(async {
@@ -53,9 +53,9 @@ pub mod shutdown;
 /// Use the [`TaskExecutor`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
-/// # use reth_tasks::TaskManager;
+/// # use buildernet_orderflow_proxy::tasks::TaskManager;
 /// fn t() {
-///  use reth_tasks::TaskSpawner;
+///  use buildernet_orderflow_proxy::tasks::TaskSpawner;
 /// let rt = tokio::runtime::Runtime::new().unwrap();
 /// let manager = TaskManager::new(rt.handle().clone());
 /// let executor = manager.executor();
@@ -477,7 +477,7 @@ impl TaskExecutor {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn t(executor: reth_tasks::TaskExecutor) {
+    /// # async fn t(executor: buildernet_orderflow_proxy::tasks::TaskExecutor) {
     ///
     /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
     ///     // await the shutdown signal
@@ -525,7 +525,7 @@ impl TaskExecutor {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn t(executor: reth_tasks::TaskExecutor) {
+    /// # async fn t(executor: buildernet_orderflow_proxy::tasks::TaskExecutor) {
     ///
     /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
     ///     // await the shutdown signal
