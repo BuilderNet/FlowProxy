@@ -1,5 +1,6 @@
 use crate::{jsonrpc::JsonRpcError, validation::ValidationError};
 use alloy_consensus::crypto::RecoveryError;
+use alloy_eips::eip2718::Eip2718Error;
 use rbuilder_primitives::serialize::RawBundleConvertError;
 
 #[derive(Debug, thiserror::Error)]
@@ -12,7 +13,10 @@ pub enum IngressError {
     Validation(#[from] ValidationError),
     /// Error decoding EIP-2718 encoded transaction.
     #[error(transparent)]
-    Decode(#[from] RawBundleConvertError),
+    Decode2718(#[from] Eip2718Error),
+    /// Bundle decoding error.
+    #[error(transparent)]
+    BundleDecode(#[from] RawBundleConvertError),
     /// ECDSA signature recovery error.
     #[error(transparent)]
     Recovery(#[from] RecoveryError),
@@ -27,7 +31,8 @@ impl IngressError {
         match self {
             Self::EmptyRawTransaction |
             Self::Validation(_) |
-            Self::Decode(_) |
+            Self::Decode2718(_) |
+            Self::BundleDecode(_) |
             Self::Recovery(_) => JsonRpcError::InvalidParams,
             Self::Serde(_) => JsonRpcError::ParseError,
         }
