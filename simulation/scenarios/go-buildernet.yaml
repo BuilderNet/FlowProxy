@@ -55,7 +55,7 @@ hosts:
       pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
+      args: --user-listen-addr 0.0.0.0:9754 --system-listen-addr 0.0.0.0:9755 --builder-confighub-endpoint http://hub:3000 --log-debug
       start_time: 1s
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
@@ -71,7 +71,7 @@ hosts:
       pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000
+      args: --user-listen-addr 0.0.0.0:9754 --system-listen-addr 0.0.0.0:9755 --builder-confighub-endpoint http://hub:3000 --log-debug
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
