@@ -122,7 +122,7 @@ get-results() {
   scale=$(awk -v RS=' ' '/--scale/ { getline; print; exit }' scenarios/buildernet.yaml | xargs)
 
   docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy2/bundle_receipts_proxy2.parquet \
-    "./results/bundle_receipts_${timestamp}_runtime-${runtime}_scale-${scale}.parquet"
+    "./results/bundle_receipts_${timestamp}_runtime-${runtime}_scale-${scale}.parquet" || echo "No bundle receipts found, skipping..."
 
   docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy1/eth0.pcap \
     "./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap"
