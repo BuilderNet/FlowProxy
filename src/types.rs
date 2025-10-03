@@ -234,6 +234,10 @@ impl SystemBundle {
 /// Internally processed transaction.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct SystemTransaction {
+    // TODO:
+    // /// Original raw transaction bytes.
+    // pub raw: Bytes,
+    /// Decoded pooled transaction.
     pub transaction: Arc<PooledTransaction>,
     /// The original transaction signer.
     pub signer: Address,
