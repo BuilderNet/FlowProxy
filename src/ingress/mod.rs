@@ -193,9 +193,12 @@ impl OrderflowIngress {
                     .map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
-                let Some(Ok(tx)) = request.take_single_param().map(|value| {
-                    decode_transaction(&serde_json::from_value::<Bytes>(value).unwrap())
-                }) else {
+                let Some(Ok(tx)) =
+                    request.take_single_param().map(|value| -> Result<_, IngressError> {
+                        let bytes = serde_json::from_value::<Bytes>(value)?;
+                        Ok(decode_transaction(&bytes)?)
+                    })
+                else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
