@@ -48,28 +48,30 @@ hosts:
       expected_final_state: { exited: 0 }
   proxy1:
     network_node_id: 0
+    host_options:
+      pcap_enabled: true
+      # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,
+      # we mainly care about metadata. 20 bytes represents minimum IPv4 header size.
+      pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet
       start_time: 1s
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
-      pcap_enabled: true
-      # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,
-      # we mainly care about metadata. 20 bytes represents minimum IPv4 header size.
-      pcap_capture_size: 20
       environment:
         RUST_LOG: info
   proxy2:
     network_node_id: 1
+    host_options:
+      pcap_enabled: true
+      # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,
+      # we mainly care about metadata. 20 bytes represents minimum IPv4 header size.
+      pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
       args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
-      pcap_enabled: true
-      # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,
-      # we mainly care about metadata. 20 bytes represents minimum IPv4 header size.
-      pcap_capture_size: 20
       environment:
         RUST_LOG: info
