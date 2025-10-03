@@ -76,3 +76,5 @@ COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/ta
 COPY --from=build-proxy /root/.local/lib /lib
 
 COPY --from=build-proxy /usr/local/cargo/bin/flamegraph .
+
+COPY receiver-proxy /root/buildernet-orderflow-proxy
