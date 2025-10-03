@@ -75,8 +75,13 @@ run() {
   if [[ "$profile" == true ]]; then
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
       /bin/bash -c "
-        ./shadow --template-directory /root/testdata/ scenarios/${scenario} &
-        SHADOW_PID=\$!
+        ./shadow --template-directory /root/testdata/ scenarios/${scenario} 2>&1 | while IFS= read -r line; do
+          echo \"\$line\"
+          if [[ \$line =~ ru_utime=([0-9.]+)\ minutes.*ru_stime=([0-9.]+)\ minutes ]]; then
+            echo \"Real user time: \${BASH_REMATCH[1]} minutes\"
+            echo \"Simulated time: \${BASH_REMATCH[2]} minutes\"
+          fi
+        done &
 
         # Wait a bit for processes to start
         sleep 5
@@ -92,14 +97,18 @@ run() {
           fi
         done
 
-        wait \$SHADOW_PID
-
         echo \"Waiting for flamegraph generation to complete...\"
         wait
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
-      /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario}"
+      /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario} 2>&1 | while IFS= read -r line; do
+        echo \"\$line\"
+        if [[ \$line =~ ru_utime=([0-9.]+)\ minutes.*ru_stime=([0-9.]+)\ minutes ]]; then
+          echo \"Real user time: \${BASH_REMATCH[1]} minutes\"
+          echo \"Simulated time: \${BASH_REMATCH[2]} minutes\"
+        fi
+      done"
   fi
 
   ./$(basename "$0") get-results
@@ -247,7 +256,7 @@ process-results() {
   GROUP BY
     src,
     dst
-  ORDER BY total_Mbits DESC
+  ORDER BY total_MB DESC
   "
 
   echo
