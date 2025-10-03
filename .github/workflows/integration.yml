@@ -16,7 +16,7 @@ env:
 jobs:
   integration-test:
     name: integration tests
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-16x
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
