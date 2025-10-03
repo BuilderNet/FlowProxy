@@ -420,7 +420,7 @@ pub(crate) mod tests {
             self,
             models::{BundleRow, PrivateTxRow},
         },
-        types::{SystemBundle, SystemTransaction},
+        types::{EthereumTransaction, SystemBundle, SystemTransaction},
     };
 
     impl From<BundleRow> for RawBundle {
@@ -740,11 +740,9 @@ pub(crate) mod tests {
                 _ => panic!("Unsupported transaction type: {}", tx_row.tx_type),
             };
 
-            SystemTransaction {
-                transaction: Arc::new(tx_envelope),
-                signer: tx_row.from,
-                received_at: tx_row.time.into(),
-            }
+            let raw = tx_envelope.encoded_2718().into();
+            let transaction = Arc::new(EthereumTransaction::new(tx_envelope, raw));
+            SystemTransaction { transaction, signer: tx_row.from, received_at: tx_row.time.into() }
         }
     }
 
