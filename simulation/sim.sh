@@ -32,7 +32,7 @@ build() {
 }
 
 run() {
-  local scenario="${1:-buildernet.yaml}"
+  local scenario="buildernet.yaml"
   local profile=false
 
   # Parse flags
