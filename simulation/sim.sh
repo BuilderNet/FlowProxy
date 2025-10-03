@@ -101,7 +101,7 @@ run() {
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
-      /bin/bash -c "shadow --template-directory /root/testdata/ scenarios/${scenario} | while IFS= read -r line; do
+      /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario} | while IFS= read -r line; do
         if [[ \$line =~ ru_utime=([0-9.]+)\ minutes.*ru_stime=([0-9.]+)\ minutes ]]; then
           echo \"Real user time: \${BASH_REMATCH[1]} minutes\"
           echo \"Simulated time: \${BASH_REMATCH[2]} minutes\"
