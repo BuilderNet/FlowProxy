@@ -27,6 +27,7 @@ network:
 hosts:
   hub:
     network_node_id: 0
+    ip_addr: 10.0.0.1
     processes:
     - path: /root/mockhub
       start_time: 0s
@@ -37,6 +38,7 @@ hosts:
   submitter:
     # Run the submitter in zone 0
     network_node_id: 0
+    ip_addr: 10.0.0.2
     processes:
     - path: /root/submitter
       args: --url http://proxy1:9754 --path ../../../testdata/testdata.parquet --scale 5
@@ -45,6 +47,7 @@ hosts:
       expected_final_state: { exited: 0 }
   proxy1:
     network_node_id: 0
+    ip_addr: 10.0.0.3
     host_options:
       pcap_enabled: true
       # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,
@@ -60,6 +63,7 @@ hosts:
         RUST_LOG: info
   proxy2:
     network_node_id: 1
+    ip_addr: 10.0.0.4
     host_options:
       pcap_enabled: true
       # Shadow by default writes to disk the whole content of an IP packet to the PCAP. We clearly don't want that bloat,

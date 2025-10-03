@@ -230,31 +230,46 @@ process-results() {
         UNION ALL
         SELECT * FROM file('$proxy2_csv', CSVWithNames)
     ),
-    per_sec AS
+    filtered_data AS
     (
         SELECT
             ip.src AS src,
             ip.dst AS dst,
             toStartOfSecond(parseDateTime64BestEffortOrNull(replaceRegexpAll(frame.time, '\\sCET$', ''), 9, 'Europe/Brussels')) AS ts,
-            sum(frame.len) AS bytes
+            frame.len AS bytes
         FROM combined_data
-        GROUP BY
-            src,
-            dst,
-            ts
+        WHERE src NOT IN ('10.0.0.1', '10.0.0.2') AND dst NOT IN ('10.0.0.1', '10.0.0.2')
+    ),
+    per_host_direction AS
+    (
+        SELECT
+            src AS host,
+            'upload' AS direction,
+            ts,
+            sum(bytes) AS bytes
+        FROM filtered_data
+        GROUP BY host, ts
+        UNION ALL
+        SELECT
+            dst AS host,
+            'download' AS direction,
+            ts,
+            sum(bytes) AS bytes
+        FROM filtered_data
+        GROUP BY host, ts
     )
   SELECT
-    src,
-    dst,
+    host,
+    direction,
     sum(bytes) / 1e6 AS total_MB,
     greatest(1, dateDiff('second', min(ts), max(ts)) + 1) AS seconds_span,
     ((sum(bytes) * 8) / 1e6) / seconds_span AS avg_Mbps,
     (max(bytes) * 8) / 1e6 AS peak_Mbps
-  FROM per_sec
+  FROM per_host_direction
   GROUP BY
-    src,
-    dst
-  ORDER BY total_MB DESC
+    host,
+    direction
+  ORDER BY host, direction
   "
 
   echo
