@@ -17,10 +17,10 @@ This directory contains a discrete-event network simulation for testing the Buil
 ./sim.sh build
 
 # Run the simulation
-./sim.sh run buildernet.yaml
+./sim.sh run
 
 # Run with profiling (generates flamegraphs of the proxy processes)
-./sim.sh run buildernet.yaml --profile
+./sim.sh run --profile
 
 # Process latest results with ClickHouse
 ./sim.sh process
@@ -85,10 +85,6 @@ general:
 experimental:
   use_cpu_pinning: true  # Pin to CPU core for performance
   use_new_tcp: true      # Use Rust TCP implementation
-
-host_option_defaults:
-  pcap_enabled: true     # Capture network packets
-  pcap_capture_size: 20  # Only capture headers
 ```
 
 ### Scaling Traffic
@@ -143,6 +139,7 @@ Use the `process` command to analyze parquet data with ClickHouse:
 
 Example output:
 ```
+Processing results/bundle_receipts_2025-10-03-08-57-50_runtime-5m_scale-5.parquet, results/proxy1_eth0_2025-10-03-08-57-50_runtime-5m_scale-5_summary.csv and results/proxy2_eth0_2025-10-03-08-57-50_runtime-5m_scale-5_summary.csv...
 Number of rows:
    ┌─count(bundle_hash)─┐
 1. │             177985 │
@@ -152,6 +149,12 @@ Aggregated statistics:
    ┌─────────────avg_us─┬─p50_us─┬─p90_us─┬─p99_us─┬─p999_us─┬─min_us─┬─max_us─┬────────────corr_tp─┬─────────avg_size─┬─p50_size─┬─p90_size─┬─p99_size─┐
 1. │ 44447.021855774365 │  44004 │  44008 │  48994 │  132006 │  44003 │ 220050 │ 0.1461330024788131 │ 6894.85476304183 │     2966 │    19376 │    40390 │
    └────────────────────┴────────┴────────┴────────┴─────────┴────────┴────────┴────────────────────┴──────────────────┴──────────┴──────────┴──────────┘
+
+Bandwidth usage data:
+   ┌─host─────┬─upload_total_MB─┬────upload_avg_Mbps─┬─upload_peak_Mbps─┬─download_total_MB─┬──download_avg_Mbps─┬─download_peak_Mbps─┐
+1. │ 10.0.0.3 │     2692.634864 │ 104.56834423300971 │       930.272048 │          127.1639 │  4.938403883495146 │          23.797824 │
+2. │ 10.0.0.4 │        127.1639 │  4.938403883495146 │        23.797824 │       2692.634864 │ 104.56834423300971 │         930.272048 │
+   └──────────┴─────────────────┴────────────────────┴──────────────────┴───────────────────┴────────────────────┴────────────────────┘
 ```
 
 ## Available Commands
@@ -178,8 +181,6 @@ Aggregated statistics:
 
 **No results generated**: Check that simulation duration (`stop_time`) is sufficient for your test data
 
-**PCAP files too large**: Reduce `pcap_capture_size` or disable pcap for some hosts
-
 ## Development
 
 ### Adding More Proxies
@@ -188,7 +189,7 @@ Edit `scenarios/buildernet.yaml` to add more proxy hosts and adjust network topo
 
 ### Custom Test Data
 
-Replace `simulation/testdata/testdata.parquet` with your own bundle data. Update `stop_time` to accommodate the data's time range.
+Replace `simulation/testdata/testdata.parquet` with your own bundle data. Update `stop_time` to accommodate the data's time range (also in accordance with the submitter's `--scale` parameter).
 
 ### Modifying Network Conditions
 
