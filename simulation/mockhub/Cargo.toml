@@ -1,0 +1,33 @@
+[package]
+name = "mockhub"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# alloy
+alloy-primitives = { version = "1.3.1", features = ["serde"] }
+
+# rt
+tokio = { version = "1", default-features = false, features = [
+  "sync",
+  "time",
+  "rt-multi-thread",
+  "macros"
+] }
+futures = "0.3"
+
+# tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+
+# misc
+dashmap = "6"
+serde = { version = "1", features = ["derive"] }
+axum = { version = "0.8", default-features = false, features = [
+  "http1",
+  "json",
+  "tokio",
+  "tracing"
+] }

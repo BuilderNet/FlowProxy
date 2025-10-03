@@ -98,6 +98,7 @@ impl BundleHash for RawBundle {
                 min_timestamp: _,
                 max_timestamp: _,
                 replacement_nonce: _,
+                delayed_refund: _,
             } = bundle;
 
             block_number.hash(state);
@@ -294,7 +295,7 @@ pub struct BundleReceipt {
     /// The hash of the raw bundle.
     pub bundle_hash: B256,
     /// The time the bundle has been sent, according to the field provided in the JSON-RPC request
-    /// header.
+    /// header. `None` if the bundle was sent on the user endpoint.
     pub sent_at: Option<UtcDateTime>,
     /// The time the bundle has been received.
     pub received_at: UtcDateTime,
