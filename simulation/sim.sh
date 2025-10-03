@@ -177,14 +177,17 @@ process-results() {
     exit 1
   fi
 
-  local latest_csv
-  latest_csv=$(ls -t results/*.csv 2>/dev/null | head -n1 || true)
-  if [[ -z "$latest_csv" ]]; then
-    echo "No CSV results found in results/"
+  local proxy1_csv
+  proxy1_csv=$(ls -t results/*proxy1*.csv 2>/dev/null | head -n1 || true)
+  local proxy2_csv
+  proxy2_csv=$(ls -t results/*proxy2*.csv 2>/dev/null | head -n1 || true)
+
+  if [[ -z "$proxy1_csv" ]] || [[ -z "$proxy2_csv" ]]; then
+    echo "Missing CSV results (need both proxy1 and proxy2 in results/)"
     exit 1
   fi
 
-  echo "Processing $latest_parquet and $latest_csv..."
+  echo "Processing $latest_parquet, $proxy1_csv and $proxy2_csv..."
 
   local count_query="SELECT count(bundle_hash) FROM file('$latest_parquet', Parquet)"
 
@@ -214,14 +217,20 @@ process-results() {
   ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$query"
 
   local csv_query="SET format_csv_delimiter=';';
-  WITH per_sec AS
+  WITH combined_data AS
+    (
+        SELECT * FROM file('$proxy1_csv', CSVWithNames)
+        UNION ALL
+        SELECT * FROM file('$proxy2_csv', CSVWithNames)
+    ),
+    per_sec AS
     (
         SELECT
             ip.src AS src,
             ip.dst AS dst,
             toStartOfSecond(parseDateTime64BestEffortOrNull(replaceRegexpAll(frame.time, '\\sCET$', ''), 9, 'Europe/Brussels')) AS ts,
             sum(frame.len) AS bytes
-        FROM file('$latest_csv', CSVWithNames)
+        FROM combined_data
         GROUP BY
             src,
             dst,

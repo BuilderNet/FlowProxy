@@ -8,21 +8,22 @@ This directory contains a discrete-event network simulation for testing the Buil
 ## Requirements
 - Docker
 - Clickhouse local: install with `curl https://clickhouse.com/ | sh`
+- tshark: install with `apt-get install tshark`
 
 ## Quick Start
 
 ```bash
 # Build the Docker image (includes Shadow, proxy, and test tools)
-./run.sh build
+./sim.sh build
 
 # Run the simulation
-./run.sh run buildernet.yaml
+./sim.sh run buildernet.yaml
 
 # Run with profiling (generates flamegraphs of the proxy processes)
-./run.sh run buildernet.yaml --profile
+./sim.sh run buildernet.yaml --profile
 
 # Process latest results with ClickHouse
-./run.sh process
+./sim.sh process
 ```
 
 ## What is Shadow?
@@ -125,7 +126,9 @@ Example output of flamegraphs:
 Results are saved to `results/` with timestamps:
 
 - `bundle_receipts_<timestamp>_runtime-<time>_scale-<scale>.parquet` - Bundle receipt data
+- `proxy1_eth0_<timestamp>_runtime-<time>_scale-<scale>.pcap` - Network packet capture
 - `proxy2_eth0_<timestamp>_runtime-<time>_scale-<scale>.pcap` - Network packet capture
+- `proxy1_eth0_<timestamp>_runtime-<time>_scale-<scale>_summary.csv` - PCAP summary (via tshark)
 - `proxy2_eth0_<timestamp>_runtime-<time>_scale-<scale>_summary.csv` - PCAP summary (via tshark)
 - `proxy1_<timestamp>_runtime-<time>_scale-<scale>.svg` - Flamegraph (if profiling)
 - `proxy2_<timestamp>_runtime-<time>_scale-<scale>.svg` - Flamegraph (if profiling)
@@ -135,7 +138,7 @@ Results are saved to `results/` with timestamps:
 Use the `process` command to analyze parquet data with ClickHouse:
 
 ```bash
-./run.sh process
+./sim.sh process
 ```
 
 Example output:
@@ -154,17 +157,17 @@ Aggregated statistics:
 ## Available Commands
 
 ```bash
-./run.sh help                # Show help
-./run.sh build               # Build Docker image
-./run.sh run [scenario]      # Run simulation (default: buildernet.yaml)
-./run.sh run --profile       # Run with CPU profiling
-./run.sh get-results         # Extract results from container
-./run.sh logs <process>      # View process logs (e.g., proxy1, proxy2)
-./run.sh tail <process>      # Tail process logs
-./run.sh clean-container     # Remove simulation container
-./run.sh clean-image         # Remove Docker image
-./run.sh clean-all           # Remove both
-./run.sh process             # Analyze latest results with ClickHouse
+./sim.sh help                # Show help
+./sim.sh build               # Build Docker image
+./sim.sh run [scenario]      # Run simulation (default: buildernet.yaml)
+./sim.sh run --profile       # Run with CPU profiling
+./sim.sh get-results         # Extract results from container
+./sim.sh logs <process>      # View process logs (e.g., proxy1, proxy2)
+./sim.sh tail <process>      # Tail process logs
+./sim.sh clean-container     # Remove simulation container
+./sim.sh clean-image         # Remove Docker image
+./sim.sh clean-all           # Remove both
+./sim.sh process             # Analyze latest results with ClickHouse
 ```
 
 ## Troubleshooting
