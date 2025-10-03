@@ -16,9 +16,6 @@ experimental:
   # Use the new Rust TCP implementation for better performance
   use_new_tcp: true
 
-# Packet Capture (PCAP) files for bandwidth usage
-host_option_defaults:
-
 # Intra-zone latencies: https://latency.azure.cloud63.fr
 # Inter-zone latencies: https://learn.microsoft.com/en-us/azure/networking/azure-network-latency
 network:
