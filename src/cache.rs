@@ -53,6 +53,7 @@ impl SignerCache {
 
     /// Insert a transaction hash and its recovered signer into the cache.
     pub fn insert(&self, tx_hash: B256, signer: Address) {
+        // TODO: perhaps we should make a "no-op"-like hasher?
         self.cache.insert(tx_hash, signer);
     }
 

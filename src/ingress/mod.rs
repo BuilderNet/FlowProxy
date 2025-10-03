@@ -74,7 +74,7 @@ pub struct OrderflowIngress {
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
     pub order_cache: OrderCache,
-    pub signer_cache: SignerCache,
+    pub signer_cache: Arc<SignerCache>,
     pub forwarders: IngressForwarders,
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
@@ -404,12 +404,19 @@ impl OrderflowIngress {
         }
 
         self.order_cache.insert(bundle_hash);
+        let sig_cache_clone = self.signer_cache.clone();
+        let lookup = move |hash: B256| sig_cache_clone.get(&hash);
 
         // Decode and validate the bundle.
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
-                SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at)
+                SystemBundle::try_from_bundle_and_signer_with_lookup(
+                    bundle,
+                    signer,
+                    received_at,
+                    &lookup,
+                )
             })
             .await
             .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
@@ -417,6 +424,9 @@ impl OrderflowIngress {
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
+                for tx in &bundle.txs {
+                    self.signer_cache.insert(tx.hash(), tx.signer());
+                }
             }
             DecodedBundle::Replacement(replacement_data) => {
                 debug!(target: "ingress", replacement_data = ?replacement_data, "Replacement bundle decoded");

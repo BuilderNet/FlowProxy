@@ -173,6 +173,32 @@ impl SystemBundle {
         })
     }
 
+    pub fn try_from_bundle_and_signer_with_lookup(
+        mut bundle: RawBundle,
+        signer: Address,
+        received_at: UtcDateTime,
+        lookup: &impl Fn(B256) -> Option<Address>,
+    ) -> Result<Self, RawBundleConvertError> {
+        bundle.signing_address = Some(signer);
+
+        let bundle_hash = bundle.bundle_hash();
+
+        let mut decoded =
+            bundle.clone().decode_with_lookup(TxEncoding::WithBlobData, lookup)?.into();
+
+        if let DecodedBundle::Bundle(bundle) = &mut decoded {
+            bundle.signer = Some(signer);
+        }
+
+        Ok(Self {
+            signer,
+            raw_bundle: Arc::new(bundle),
+            decoded_bundle: Arc::new(decoded),
+            bundle_hash,
+            received_at,
+        })
+    }
+
     /// Returns `true` if the bundle is a replacement.
     pub fn is_replacement(&self) -> bool {
         matches!(self.decoded_bundle.as_ref(), DecodedBundle::Replacement(_))
