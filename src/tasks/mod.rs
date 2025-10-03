@@ -1,7 +1,30 @@
 //! Task management utilities.
 //!
-//! Taken from `tasks` crate
-//! (https://github.com/paradigmxyz/reth/blob/main/crates/tasks/src/lib.rs) and adapted.
+//! Taken from `reth_tasks` crate (https://github.com/paradigmxyz/reth/blob/main/crates/tasks/src/lib.rs) and adapted.
+//!
+//! This crate exposes two main abstractions: a [`TaskManager`] and a [`TaskExecutor`]. The
+//! [`TaskManager`] is a centralized entity responsible, as the name suggests, for managing tasks,
+//! while the [`TaskExecutor`] is used to spawn tasks onto a Tokio runtime.
+//!
+//! ## Architecture
+//!
+//! The [`TaskManager`] holds a [`tokio`] runtime handle that is needed to create child executor
+//! that actually spawn tasks. Other than that, it contains:
+//! - a receiver for task events (like packing of critical tasks);
+//! - a sender for task events, used by the executors to let spawned task report events;
+//! - a counter which tracks how many tasks that need graceful shutdown are currently running.
+//!
+//! Tasks can be also spawned as "critical" and/or with "graceful shutdown" support.
+//! Critical tasks when they terminate they send a message to the [`TaskManager`] which in turn
+//! will terminate itself after sending a shutdown signal to all long-running tasks. It is up to
+//! the application to wait enough time before closing the process to allow graceful shutdown tasks
+//! to complete.
+//! Graceful shutdown tasks are spawned with a [`GracefulShutdown`] signal that can be awaited, and
+//! resolves when a shutdown is explicitely requested by the executor or manager. That can be
+//! before a SIGINT/SIGTERM signal is received or when a critical task panics. The
+//! [`GracefulShutdown`] signal resolves to a [`GracefulShutdownGuard`]. This guard is simply a
+//! shared counter that when dropped, decrements. This used by tasks to notify the manager that the
+//! graceful shutdown has completed.
 
 use dyn_clone::DynClone;
 use futures_util::{
