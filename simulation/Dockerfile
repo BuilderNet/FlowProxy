@@ -77,4 +77,5 @@ COPY --from=build-proxy /root/.local/lib /lib
 
 COPY --from=build-proxy /usr/local/cargo/bin/flamegraph .
 
-COPY receiver-proxy /root/buildernet-orderflow-proxy
+# Copy the receiver proxy, rename to buildernet-orderflow-proxy so our scripts work
+COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/receiver-proxy /root/buildernet-orderflow-proxy
