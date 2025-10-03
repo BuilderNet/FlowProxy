@@ -40,7 +40,7 @@ static BUNDLE_RECEIPTS_PARQUET_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
         // This local operator.
         Field::new("dst_builder_name", DataType::Utf8, !NULLABLE),
         // The name of the operator which sent us the payload.
-        Field::new("src_builder_name", DataType::Utf8, !NULLABLE),
+        Field::new("src_builder_name", DataType::Utf8, NULLABLE),
         // The payload size. `UInt32` allows max 4GB size.
         Field::new("payload_size", DataType::UInt32, !NULLABLE),
         // The priority of the bundle.
@@ -108,7 +108,7 @@ impl BundleReceiptWriter {
         }
         self.received_at.append_value((receipt.received_at.unix_timestamp_nanos() / 1_000) as i64);
         self.dst_builder_name.append_value(self.builder_name.clone());
-        self.src_builder_name.append_value(receipt.src_builder_name.clone());
+        self.src_builder_name.append_value(receipt.src_builder_name);
         self.payload_size.append_value(receipt.payload_size);
         self.priority.append_value(receipt.priority as u8);
     }

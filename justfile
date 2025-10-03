@@ -31,10 +31,12 @@ reset-db:
 
 query := "SELECT * REPLACE(toString(internal_uuid) AS internal_uuid, toString(replacement_uuid) AS replacement_uuid) \
 FROM bundles \
-WHERE (timestamp >= '2025-09-26 12:32:00.000000') AND (timestamp <= '2025-09-26 12:42:00.000000') \
+WHERE (timestamp >= '2025-09-29 12:26:48.000000') AND (timestamp <= '2025-09-29 12:36:48.000000') \
+ORDER BY timestamp ASC \
 INTO OUTFILE 'filename' \
-FORMAT Parquet"
+FORMAT Parquet
+SETTINGS output_format_parquet_string_as_string = 0"
 
-[confirm("Do you want to extract data into a parquet file?")]
+#[confirm("Do you want to extract data into a parquet file?")]
 extract-data FILE:
   ./clickhouse client --host $CLICKHOUSE_HOST --user $CLICKHOUSE_USER --secure --password $CLICKHOUSE_PASSWORD -d buildernet_orderflow_proxy --query "{{replace(query, "filename", FILE)}}"
