@@ -8,15 +8,12 @@ use crate::{
     rate_limit::CounterOverTime,
     types::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
-        SystemBundle, SystemTransaction,
+        EthereumTransaction, SystemBundle, SystemTransaction,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
 };
-use alloy_consensus::{
-    crypto::secp256k1::recover_signer,
-    transaction::{PooledTransaction, SignerRecoverable},
-};
+use alloy_consensus::{crypto::secp256k1::recover_signer, transaction::SignerRecoverable};
 use alloy_primitives::{eip191_hash_message, keccak256, Address, Bytes, B256};
 use alloy_signer::Signature;
 use axum::{
@@ -195,8 +192,9 @@ impl OrderflowIngress {
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(Ok(tx)) =
                     request.take_single_param().map(|value| -> Result<_, IngressError> {
-                        let bytes = serde_json::from_value::<Bytes>(value)?;
-                        Ok(decode_transaction(&bytes)?)
+                        let raw = serde_json::from_value::<Bytes>(value)?;
+                        let decoded = decode_transaction(&raw)?;
+                        Ok(EthereumTransaction::new(decoded, raw))
                     })
                 else {
                     ingress.metrics.user.json_rpc_parse_errors.increment(1);
@@ -450,7 +448,7 @@ impl OrderflowIngress {
     async fn send_raw_transaction(
         &self,
         entity: Entity,
-        transaction: PooledTransaction,
+        transaction: EthereumTransaction,
         received_at: UtcDateTime,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
@@ -476,7 +474,7 @@ impl OrderflowIngress {
         // Spawn expensive operations like ECDSA recovery and consensus validation.
         self.pqueues
             .spawn_with_priority(priority, move || {
-                validate_transaction(tx.as_ref())?;
+                validate_transaction(&tx.decoded)?;
                 tx.recover_signer()?;
                 Ok::<(), IngressError>(())
             })
