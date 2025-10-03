@@ -206,7 +206,7 @@ pub(crate) mod tests {
             models::{BundleRow, PrivateTxRow},
             BUNDLE_TABLE_NAME, TRANSACTIONS_TABLE_NAME,
         },
-        types::{decode_transaction, SystemBundle, SystemTransaction},
+        types::{decode_transaction, EthereumTransaction, SystemBundle, SystemTransaction},
     };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
@@ -319,9 +319,9 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn system_transaction_example() -> SystemTransaction {
-        let bytes = alloy_primitives::hex!("02f89201820132850826299e00850826299e0082a1d694f82300c34f0d11b0420ac3ce85f0ebe4e3e0544280a40d2959800000000000000000000000000000000000000000000000000000000000000001c001a0030c9637d6d442bd2f9a43f69ec09dbaedb12e08ef1fe38ae5ce855bbcfc36ada064101cb4c00d6c21e792a2959c896992c9bbf8e2d84ce7647d561bfbcf59365a");
-        let transaction =
-            Arc::new(decode_transaction(&alloy_primitives::Bytes::from(bytes)).unwrap());
+        let bytes = alloy_primitives::Bytes::from(alloy_primitives::hex!("02f89201820132850826299e00850826299e0082a1d694f82300c34f0d11b0420ac3ce85f0ebe4e3e0544280a40d2959800000000000000000000000000000000000000000000000000000000000000001c001a0030c9637d6d442bd2f9a43f69ec09dbaedb12e08ef1fe38ae5ce855bbcfc36ada064101cb4c00d6c21e792a2959c896992c9bbf8e2d84ce7647d561bfbcf59365a"));
+        let decoded = decode_transaction(&bytes).unwrap();
+        let transaction = Arc::new(EthereumTransaction::new(decoded, bytes));
         let signer = transaction.recover_signer().unwrap();
         let received_at = UtcDateTime::now();
         SystemTransaction { transaction, signer, received_at }

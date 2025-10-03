@@ -1,7 +1,6 @@
 use std::{
     future::Future,
     hash::{Hash as _, Hasher as _},
-    ops::Deref,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -13,9 +12,10 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result},
-    Decodable2718 as _, Encodable2718,
+    Decodable2718 as _,
 };
 use alloy_primitives::{Address, Bytes};
+use derive_more::Deref;
 use rbuilder_primitives::{
     serialize::{RawBundle, RawBundleConvertError, RawBundleDecodeResult, TxEncoding},
     Bundle, BundleReplacementData,
@@ -232,29 +232,40 @@ impl SystemBundle {
     }
 }
 
-/// Internally processed transaction.
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct SystemTransaction {
+/// A wrapper around ethereum transaction containing decoded information as well as original raw
+/// bytes.
+#[derive(PartialEq, Eq, Debug, Deref)]
+pub struct EthereumTransaction {
     /// Decoded pooled transaction.
-    pub transaction: Arc<PooledTransaction>,
+    #[deref]
+    pub decoded: PooledTransaction,
+    /// Original raw transaction bytes.
+    pub raw: Bytes,
+}
+
+impl EthereumTransaction {
+    /// Create new ethereum transaction.
+    pub fn new(decoded: PooledTransaction, raw: Bytes) -> Self {
+        Self { decoded, raw }
+    }
+}
+
+/// Internally processed transaction.
+#[derive(PartialEq, Eq, Clone, Debug, Deref)]
+pub struct SystemTransaction {
+    /// Ethereum transaction.
+    #[deref]
+    pub transaction: Arc<EthereumTransaction>,
     /// The original transaction signer.
     pub signer: Address,
     /// The timestamp at which the bundle has first been seen from the local operator.
     pub received_at: UtcDateTime,
 }
 
-impl Deref for SystemTransaction {
-    type Target = PooledTransaction;
-
-    fn deref(&self) -> &Self::Target {
-        &self.transaction
-    }
-}
-
 impl SystemTransaction {
     /// Create a new system transaction from a transaction and a signer.
     pub fn from_transaction_and_signer(
-        transaction: PooledTransaction,
+        transaction: EthereumTransaction,
         signer: Address,
         received_at: UtcDateTime,
     ) -> Self {
@@ -267,7 +278,7 @@ impl SystemTransaction {
             "id": 1,
             "jsonrpc": "2.0",
             "method": "eth_sendRawTransaction",
-            "params": [self.transaction.encoded_2718()]
+            "params": [&self.transaction.raw]
         });
 
         serde_json::to_vec(&json).unwrap()
