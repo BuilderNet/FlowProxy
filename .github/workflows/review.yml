@@ -8,7 +8,7 @@ jobs:
   review-with-tracking:
     # Only run if comment contains @claude and is on a PR
     if: github.event.issue.pull_request && contains(github.event.comment.body, '@claude')
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-16x
     permissions:
       contents: read
       pull-requests: write
@@ -61,6 +61,6 @@ jobs:
             Provide detailed feedback using inline comments for specific issues.
             Use top-level comments for general observations or praise.
 
-        
+
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
