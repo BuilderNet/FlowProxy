@@ -240,36 +240,45 @@ process-results() {
         FROM combined_data
         WHERE src NOT IN ('10.0.0.1', '10.0.0.2') AND dst NOT IN ('10.0.0.1', '10.0.0.2')
     ),
-    per_host_direction AS
+    upload_stats AS
     (
         SELECT
             src AS host,
-            'upload' AS direction,
-            ts,
-            sum(bytes) AS bytes
-        FROM filtered_data
-        GROUP BY host, ts
-        UNION ALL
+            sum(bytes) / 1e6 AS upload_total_MB,
+            ((sum(bytes) * 8) / 1e6) / greatest(1, dateDiff('second', min(ts), max(ts)) + 1) AS upload_avg_Mbps,
+            (max(bytes) * 8) / 1e6 AS upload_peak_Mbps
+        FROM (
+            SELECT src, ts, sum(bytes) AS bytes
+            FROM filtered_data
+            GROUP BY src, ts
+        )
+        GROUP BY src
+    ),
+    download_stats AS
+    (
         SELECT
             dst AS host,
-            'download' AS direction,
-            ts,
-            sum(bytes) AS bytes
-        FROM filtered_data
-        GROUP BY host, ts
+            sum(bytes) / 1e6 AS download_total_MB,
+            ((sum(bytes) * 8) / 1e6) / greatest(1, dateDiff('second', min(ts), max(ts)) + 1) AS download_avg_Mbps,
+            (max(bytes) * 8) / 1e6 AS download_peak_Mbps
+        FROM (
+            SELECT dst, ts, sum(bytes) AS bytes
+            FROM filtered_data
+            GROUP BY dst, ts
+        )
+        GROUP BY dst
     )
   SELECT
-    host,
-    direction,
-    sum(bytes) / 1e6 AS total_MB,
-    greatest(1, dateDiff('second', min(ts), max(ts)) + 1) AS seconds_span,
-    ((sum(bytes) * 8) / 1e6) / seconds_span AS avg_Mbps,
-    (max(bytes) * 8) / 1e6 AS peak_Mbps
-  FROM per_host_direction
-  GROUP BY
-    host,
-    direction
-  ORDER BY host, direction
+    COALESCE(u.host, d.host) AS host,
+    COALESCE(u.upload_total_MB, 0) AS upload_total_MB,
+    COALESCE(u.upload_avg_Mbps, 0) AS upload_avg_Mbps,
+    COALESCE(u.upload_peak_Mbps, 0) AS upload_peak_Mbps,
+    COALESCE(d.download_total_MB, 0) AS download_total_MB,
+    COALESCE(d.download_avg_Mbps, 0) AS download_avg_Mbps,
+    COALESCE(d.download_peak_Mbps, 0) AS download_peak_Mbps
+  FROM upload_stats u
+  FULL OUTER JOIN download_stats d ON u.host = d.host
+  ORDER BY host
   "
 
   echo
