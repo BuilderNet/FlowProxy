@@ -179,48 +179,52 @@ clean-all() {
 process-results() {
   local latest_parquet
   latest_parquet=$(ls -t results/*.parquet 2>/dev/null | head -n1 || true)
-  if [[ -z "$latest_parquet" ]]; then
-    echo "No parquet results found in results/"
-  fi
 
   local proxy1_csv
   proxy1_csv=$(ls -t results/*proxy1*.csv 2>/dev/null | head -n1 || true)
   local proxy2_csv
   proxy2_csv=$(ls -t results/*proxy2*.csv 2>/dev/null | head -n1 || true)
 
+  if [[ -z "$latest_parquet" ]]; then
+    echo "No parquet results found in results/ (skipping parquet analysis)"
+  else
+    echo "Processing $latest_parquet..."
+
+    local count_query="SELECT count(bundle_hash) FROM file('$latest_parquet', Parquet)"
+
+    local query="WITH data AS (
+          SELECT toUnixTimestamp64Micro(received_at) - toUnixTimestamp64Micro(sent_at) AS diff_us, payload_size
+          FROM file('$latest_parquet', Parquet)
+      ) SELECT
+          avg(diff_us) AS avg_us,
+          quantileExact(0.5)(diff_us) AS p50_us,
+          quantileExact(0.9)(diff_us) AS p90_us,
+          quantileExact(0.99)(diff_us) AS p99_us,
+          quantileExact(0.999)(diff_us) AS p999_us,
+          min(diff_us) AS min_us,
+          max(diff_us) AS max_us,
+          corr(diff_us, payload_size) AS corr_tp,
+          avg(payload_size) AS avg_size,
+          quantileExact(0.5)(payload_size) AS p50_size,
+          quantileExact(0.9)(payload_size) AS p90_size,
+          quantileExact(0.99)(payload_size) AS p99_size
+      FROM data"
+
+    echo "Number of rows:"
+    ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$count_query"
+
+    echo
+    echo "Aggregated statistics:"
+    ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$query"
+  fi
+
   if [[ -z "$proxy1_csv" ]] || [[ -z "$proxy2_csv" ]]; then
     echo "Missing CSV results (need both proxy1 and proxy2 in results/)"
     exit 1
   fi
 
-  echo "Processing $latest_parquet, $proxy1_csv and $proxy2_csv..."
-
-  local count_query="SELECT count(bundle_hash) FROM file('$latest_parquet', Parquet)"
-
-  local query="WITH data AS (
-        SELECT toUnixTimestamp64Micro(received_at) - toUnixTimestamp64Micro(sent_at) AS diff_us, payload_size
-        FROM file('$latest_parquet', Parquet)
-    ) SELECT
-        avg(diff_us) AS avg_us,
-        quantileExact(0.5)(diff_us) AS p50_us,
-        quantileExact(0.9)(diff_us) AS p90_us,
-        quantileExact(0.99)(diff_us) AS p99_us,
-        quantileExact(0.999)(diff_us) AS p999_us,
-        min(diff_us) AS min_us,
-        max(diff_us) AS max_us,
-        corr(diff_us, payload_size) AS corr_tp,
-        avg(payload_size) AS avg_size,
-        quantileExact(0.5)(payload_size) AS p50_size,
-        quantileExact(0.9)(payload_size) AS p90_size,
-        quantileExact(0.99)(payload_size) AS p99_size
-    FROM data"
-
-  echo "Number of rows:"
-  ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$count_query"
-
   echo
-  echo "Aggregated statistics:"
-  ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$query"
+  echo "Processing $proxy1_csv and $proxy2_csv..."
 
   local csv_query="SET format_csv_delimiter=';';
   WITH combined_data AS
@@ -280,7 +284,6 @@ process-results() {
   ORDER BY host
   "
 
-  echo
   echo "Bandwidth usage data:"
   ./clickhouse local --no-system-tables --output-format=PrettyCompact -q "$csv_query"
 }
