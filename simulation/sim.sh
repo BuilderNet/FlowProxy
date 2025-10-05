@@ -181,7 +181,6 @@ process-results() {
   latest_parquet=$(ls -t results/*.parquet 2>/dev/null | head -n1 || true)
   if [[ -z "$latest_parquet" ]]; then
     echo "No parquet results found in results/"
-    exit 1
   fi
 
   local proxy1_csv

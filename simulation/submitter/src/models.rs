@@ -141,7 +141,7 @@ impl From<BundleRow> for RawBundle {
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs() as f64,
             ),
             version: None,
-            signing_address: value.signer_address,
+            signing_address: None,
             delayed_refund: None,
         }
     }
