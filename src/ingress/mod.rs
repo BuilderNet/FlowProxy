@@ -46,10 +46,10 @@ use error::IngressError;
 pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
 
 /// Header name for flashbots priority.
-pub const BUILDERNET_PRIORITY_HEADER: &str = "X-Buildernet-Priority";
+pub const BUILDERNET_PRIORITY_HEADER: &str = "X-BuilderNet-Priority";
 
-/// Header name for BuilderNet sent at timestamp.
-pub const BUILDERNET_SENT_AT_HEADER: &str = "X-Buildernet-Sent-At";
+/// Header name for BuilderNet sent at timestamp (in Unix microseconds).
+pub const BUILDERNET_SENT_AT_HEADER: &str = "X-BuilderNet-SentAtUs";
 
 /// Header name for XFF header.
 pub const XFF_HEADER: &str = "X-Forwarded-For";

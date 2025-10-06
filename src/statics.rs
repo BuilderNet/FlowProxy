@@ -1,19 +1,8 @@
 //! Module containing static variables used throughout the application.
 
-use std::{
-    sync::{LazyLock, RwLock},
-    time::Instant,
-};
+use std::{sync::LazyLock, time::Instant};
 
-use tokio_util::sync::CancellationToken;
-
-use crate::{builderhub::LocalPeerStore, types::LongLivedTask};
-
-/// A global shutdown token that can be used to signal shutdown to long-lived tasks.
-pub static SHUTDOWN_TOKEN: LazyLock<CancellationToken> = LazyLock::new(CancellationToken::new);
-
-/// The collection of long-lived tasks that need graceful shutdown and cleanup of resources.
-pub static TASKS: LazyLock<RwLock<Vec<LongLivedTask>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+use crate::builderhub::LocalPeerStore;
 
 /// An artificial timestamp used for duration clamping.
 pub static START: LazyLock<Instant> = LazyLock::new(Instant::now);
