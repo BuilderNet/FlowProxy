@@ -58,9 +58,9 @@ impl BuilderHubBuilder {
         };
 
         if self.orderflow_proxy.tls_certificate().is_some() {
-            format!("https://{}", host)
+            format!("https://{host}")
         } else {
-            format!("http://{}", host)
+            format!("http://{host}")
         }
     }
 }
