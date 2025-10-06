@@ -243,11 +243,12 @@ async fn run_update_peers(
                         .https_only(true)
                         .add_root_certificate(tls_cert.clone())
                         .build()
-                        .unwrap();
+                        .expect("Valid root certificate");
                 }
 
-                let sender = spawn_forwarder(builder.name.clone(), builder.url(), client.clone())
-                    .expect("malformed url");
+                let sender =
+                    spawn_forwarder(builder.name.clone(), builder.system_api(), client.clone())
+                        .expect("malformed url");
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Inserting peer configuration");
                 entry.insert(PeerHandle { info: builder, sender });

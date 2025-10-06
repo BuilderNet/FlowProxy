@@ -32,8 +32,9 @@ pub struct BuilderHubBuilder {
 }
 
 impl BuilderHubBuilder {
-    /// Get the URL for the builder.
-    pub fn url(&self) -> String {
+    /// Get the system API URL for the builder.
+    /// Mirrors Go proxy behavior: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
+    pub fn system_api(&self) -> String {
         let host = if self.dns_name.is_empty() {
             if self.ip.contains(":") {
                 self.ip.clone()
@@ -59,14 +60,17 @@ impl BuilderHubBuilder {
         } else {
             // SAFETY: We expect the certificate to be valid. It's added as a root
             // certificate.
-            Some(Certificate::from_pem(self.instance.tls_cert.as_bytes()).unwrap())
+            Some(
+                Certificate::from_pem(self.instance.tls_cert.as_bytes())
+                    .expect("Valid certificate"),
+            )
         }
     }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubInstanceData {
-    /// TLS certificate.
+    /// TLS certificate of the instance in UTF-8 encoded PEM format.
     pub tls_cert: String,
 }
 
