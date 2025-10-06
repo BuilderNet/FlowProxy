@@ -11,6 +11,7 @@ use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
+use rbuilder_primitives::BundleVersion;
 use serde_bytes;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -74,6 +75,8 @@ pub(crate) struct BundleRow {
     /// Collection of authorization lists for transactions in the bundle.
     #[serde(rename = "transactions.authorizationList")]
     pub transactions_authorization_list: Vec<Option<Vec<u8>>>,
+    #[serde(rename = "transactions.raw")]
+    pub transactions_raw: Vec<Vec<u8>>,
 
     /// Bundle block number.
     pub block_number: Option<u64>,
@@ -92,12 +95,6 @@ pub(crate) struct BundleRow {
     #[serde(with = "hashes")]
     pub refund_tx_hashes: Vec<B256>,
 
-    /// The hash of the bundle (unique identifier)
-    #[serde(with = "hash")]
-    pub hash: B256,
-    /// Bundle uuid.
-    #[serde(with = "clickhouse::serde::uuid::option")]
-    pub internal_uuid: Option<Uuid>,
     /// Replacement bundle uuid.
     #[serde(with = "clickhouse::serde::uuid::option")]
     pub replacement_uuid: Option<Uuid>,
@@ -107,15 +104,25 @@ pub(crate) struct BundleRow {
     /// Bundle refund recipient.
     #[serde(with = "address::option")]
     pub refund_recipient: Option<Address>,
-    /// The signer of the bundle,
-    #[serde(with = "address::option")]
-    pub signer_address: Option<Address>,
     /// For 2nd price refunds done by buildernet
     #[serde(with = "address::option")]
     pub refund_identity: Option<Address>,
 
+    /// The signer of the bundle,
+    #[serde(with = "address::option")]
+    pub signer_address: Option<Address>,
+
+    /// The hash of the bundle (unique identifier)
+    #[serde(with = "hash")]
+    pub hash: B256,
+    /// Bundle uuid.
+    #[serde(with = "clickhouse::serde::uuid")]
+    pub internal_uuid: Uuid,
+
     /// Builder name.
     pub builder_name: String,
+    /// The bundle version, or `None` in case of a replacement bundle with no transactions.
+    pub version: u8,
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
@@ -218,6 +225,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                             Some(buf)
                         })
                         .collect(),
+                    transactions_raw: bundle.raw_bundle.txs.iter().map(|tx| tx.to_vec()).collect(),
                     block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
                     min_timestamp: bundle.raw_bundle.min_timestamp,
                     max_timestamp: bundle.raw_bundle.max_timestamp,
@@ -229,7 +237,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                         .clone()
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
-                    internal_uuid: Some(decoded.uuid),
+                    internal_uuid: decoded.uuid,
                     replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
                     signer_address: Some(bundle.signer),
@@ -238,6 +246,10 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     refund_recipient: bundle.raw_bundle.refund_recipient,
                     refund_identity: None,
                     hash: decoded.hash,
+                    version: match decoded.version {
+                        BundleVersion::V1 => 1,
+                        BundleVersion::V2 => 2,
+                    },
                 }
             }
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
@@ -268,14 +280,16 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_max_priority_fee_per_gas: Vec::new(),
                     transactions_access_list: Vec::new(),
                     transactions_authorization_list: Vec::new(),
+                    transactions_raw: Vec::new(),
                     block_number: None,
                     min_timestamp: None,
                     max_timestamp: None,
                     reverting_tx_hashes: Vec::new(),
                     dropping_tx_hashes: Vec::new(),
                     refund_tx_hashes: Vec::new(),
-                    // Cancellation bundles don't have the uuid set.
-                    internal_uuid: None,
+                    // NOTE: For now, replacement bundles don't have a uuid, so we set the
+                    // user-provided replacement-uuid instead.
+                    internal_uuid: replacement.key.key().id,
                     replacement_uuid: Some(replacement.key.key().id),
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
                     signer_address: Some(bundle.signer),
@@ -284,6 +298,8 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     refund_recipient: bundle.raw_bundle.refund_recipient,
                     refund_identity: None,
                     hash: bundle.bundle_hash,
+                    // NOTE: For now, replacement bundles don't have a version, so we set v2.
+                    version: 2,
                 }
             }
         };
@@ -408,10 +424,10 @@ pub(crate) mod tests {
 
     use alloy_consensus::{
         BlobTransactionSidecar, EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844,
-        TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
+        TxEip4844WithSidecar, TxEip7702, TxLegacy,
     };
     use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Encodable2718};
-    use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, U256, U64};
+    use alloy_primitives::{Bytes, Signature, TxKind, U64};
     use alloy_rlp::Decodable;
     use rbuilder_primitives::serialize::RawBundle;
 
@@ -425,29 +441,11 @@ pub(crate) mod tests {
 
     impl From<BundleRow> for RawBundle {
         fn from(value: BundleRow) -> Self {
-            let tx_envelopes = convert_clickhouse_data_to_tx_envelopes(
-                value.transactions_hash.clone(),
-                value.transactions_nonce.clone(),
-                value.transactions_r.clone(),
-                value.transactions_s.clone(),
-                value.transactions_v.clone(),
-                value.transactions_to.clone(),
-                value.transactions_gas.clone(),
-                value.transactions_type.clone(),
-                value.transactions_input.clone(),
-                value.transactions_value.clone(),
-                value.transactions_gas_price.clone(),
-                value.transactions_max_fee_per_gas.clone(),
-                value.transactions_max_priority_fee_per_gas.clone(),
-                value.transactions_access_list.clone(),
-                value.transactions_authorization_list.clone(),
-            );
-
             RawBundle {
                 block_number: value.block_number.map(|b| U64::from(b)),
                 min_timestamp: value.min_timestamp,
                 max_timestamp: value.max_timestamp,
-                txs: tx_envelopes.into_iter().map(|tx| Bytes::from(tx.encoded_2718())).collect(),
+                txs: value.transactions_raw.into_iter().map(Bytes::from).collect(),
                 reverting_tx_hashes: value.reverting_tx_hashes.clone(),
                 dropping_tx_hashes: value.dropping_tx_hashes.clone(),
                 // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it was
@@ -465,160 +463,6 @@ pub(crate) mod tests {
                 delayed_refund: None,
             }
         }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn convert_clickhouse_data_to_tx_envelopes(
-        transactions_hash: Vec<B256>,
-        transactions_nonce: Vec<u64>,
-        transactions_r: Vec<U256>,
-        transactions_s: Vec<U256>,
-        transactions_v: Vec<u8>,
-        transactions_to: Vec<Option<Address>>,
-        transactions_gas: Vec<u64>,
-        transactions_type: Vec<u8>,
-        transactions_input: Vec<Vec<u8>>,
-        transactions_value: Vec<U256>,
-        transactions_gas_price: Vec<Option<u128>>,
-        transactions_max_fee_per_gas: Vec<Option<u128>>,
-        transactions_max_priority_fee_per_gas: Vec<Option<u128>>,
-        transactions_access_list: Vec<Option<Vec<u8>>>,
-        transactions_authorization_list: Vec<Option<Vec<u8>>>,
-    ) -> Vec<TxEnvelope> {
-        let tx_count = transactions_hash.len();
-        let mut envelopes = Vec::with_capacity(tx_count);
-
-        for i in 0..tx_count {
-            // Parse signature
-            let signature =
-                Signature::new(transactions_r[i], transactions_s[i], transactions_v[i] != 0);
-
-            // Parse destination address
-            let to = match &transactions_to[i] {
-                Some(addr) => TxKind::Call(*addr),
-                None => TxKind::Create,
-            };
-
-            // Parse input data
-            let input = Bytes::from(transactions_input[i].clone());
-
-            // Parse access list if present
-            let access_list = match &transactions_access_list[i] {
-                Some(al_bytes) => AccessList::decode(&mut al_bytes.as_slice()).unwrap(),
-                None => AccessList::default(),
-            };
-
-            // Parse authorization list if present
-            let authorization_list = match &transactions_authorization_list[i] {
-                Some(auth_bytes) => {
-                    Vec::<SignedAuthorization>::decode(&mut auth_bytes.as_slice()).unwrap()
-                }
-                None => Vec::new(),
-            };
-
-            // Create transaction based on type
-            let tx_envelope = match transactions_type[i] {
-                0 => {
-                    // Legacy transaction
-                    let tx = TxLegacy {
-                        chain_id: Some(1),
-                        nonce: transactions_nonce[i],
-                        gas_price: transactions_gas_price[i].unwrap_or(0),
-                        gas_limit: transactions_gas[i],
-                        to,
-                        value: transactions_value[i],
-                        input,
-                    };
-                    TxEnvelope::Legacy(Signed::new_unchecked(tx, signature, transactions_hash[i]))
-                }
-                1 => {
-                    // EIP-2930 transaction
-                    let tx = TxEip2930 {
-                        chain_id: 1,
-                        nonce: transactions_nonce[i],
-                        gas_price: transactions_gas_price[i].unwrap_or(0),
-                        gas_limit: transactions_gas[i],
-                        to,
-                        value: transactions_value[i],
-                        input,
-                        access_list,
-                    };
-                    TxEnvelope::Eip2930(Signed::new_unchecked(tx, signature, transactions_hash[i]))
-                }
-                2 => {
-                    // EIP-1559 transaction
-                    let tx = TxEip1559 {
-                        chain_id: 1,
-                        nonce: transactions_nonce[i],
-                        max_fee_per_gas: transactions_max_fee_per_gas[i].unwrap_or(0),
-                        max_priority_fee_per_gas: transactions_max_priority_fee_per_gas[i]
-                            .unwrap_or(0),
-                        gas_limit: transactions_gas[i],
-                        to,
-                        value: transactions_value[i],
-                        input,
-                        access_list,
-                    };
-                    TxEnvelope::Eip1559(Signed::new_unchecked(tx, signature, transactions_hash[i]))
-                }
-                3 => {
-                    // EIP-4844 transaction (blob transaction)
-                    let tx = TxEip4844 {
-                        chain_id: 1,
-                        nonce: transactions_nonce[i],
-                        max_fee_per_gas: transactions_max_fee_per_gas[i].unwrap_or(0),
-                        max_priority_fee_per_gas: transactions_max_priority_fee_per_gas[i]
-                            .unwrap_or(0),
-                        gas_limit: transactions_gas[i],
-                        to: match to {
-                            TxKind::Call(addr) => addr,
-                            TxKind::Create => {
-                                panic!("EIP-4844 transactions cannot be contract creation")
-                            }
-                        },
-                        value: transactions_value[i],
-                        input,
-                        access_list,
-                        blob_versioned_hashes: Vec::new(),
-                        max_fee_per_blob_gas: 0,
-                    };
-                    TxEnvelope::Eip4844(Signed::new_unchecked(
-                        TxEip4844Variant::TxEip4844(tx),
-                        signature,
-                        transactions_hash[i],
-                    ))
-                }
-                4 => {
-                    // EIP-7702 transaction
-                    let tx = TxEip7702 {
-                        chain_id: 1,
-                        nonce: transactions_nonce[i],
-                        max_fee_per_gas: transactions_max_fee_per_gas[i].unwrap_or(0),
-                        max_priority_fee_per_gas: transactions_max_priority_fee_per_gas[i]
-                            .unwrap_or(0),
-                        gas_limit: transactions_gas[i],
-                        to: match to {
-                            TxKind::Call(addr) => addr,
-                            TxKind::Create => {
-                                panic!("EIP-7702 transactions cannot be contract creation")
-                            }
-                        },
-                        value: transactions_value[i],
-                        input,
-                        access_list,
-                        authorization_list,
-                    };
-                    TxEnvelope::Eip7702(Signed::new_unchecked(tx, signature, transactions_hash[i]))
-                }
-                _ => {
-                    panic!("Unsupported transaction type: {}", transactions_type[i])
-                }
-            };
-
-            envelopes.push(tx_envelope);
-        }
-
-        envelopes
     }
 
     impl From<PrivateTxRow> for SystemTransaction {
