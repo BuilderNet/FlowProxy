@@ -1,18 +1,14 @@
 //! Contains the model used for storing data inside Clickhouse.
 
-use crate::{
-    indexer::{
-        ser::{address, addresses, hash, hashes, u256, u256es},
-        BuilderName,
-    },
-    types::SystemTransaction,
+use crate::indexer::{
+    ser::{address, addresses, hash, hashes, u256es},
+    BuilderName,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use rbuilder_primitives::BundleVersion;
-use serde_bytes;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -308,135 +304,18 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
     }
 }
 
-/// Model representing clickhouse private transaction row.
-///
-/// NOTE: Make sure the fields are in the same order as the columns in the Clickhouse table.
-#[derive(clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(test, derive(PartialEq, Eq))]
-pub(crate) struct PrivateTxRow {
-    /// The timestamp at which private transaction was observed.
-    #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-    pub time: OffsetDateTime,
-    /// Transaction hash.
-    #[serde(with = "hash")]
-    pub hash: B256,
-    /// Transaction from address.
-    #[serde(with = "address")]
-    pub from: Address,
-    /// Transaction nonce.
-    pub nonce: u64,
-    /// Signature `r` value.
-    #[serde(with = "u256")]
-    pub r: U256,
-    /// Signature `s` value.
-    #[serde(with = "u256")]
-    pub s: U256,
-    /// Signature `v` value.
-    pub v: u8,
-    /// Transaction to addresses if present.
-    #[serde(with = "address::option")]
-    pub to: Option<Address>,
-    /// Transaction gas limit.
-    pub gas: u64,
-    /// Transaction type.
-    #[serde(rename = "type")]
-    pub tx_type: u8,
-    /// Transaction input field.
-    #[serde(with = "serde_bytes")]
-    pub input: Vec<u8>,
-    /// Transaction value.
-    #[serde(with = "u256")]
-    pub value: U256,
-    /// Transaction gas price.
-    pub gas_price: Option<u128>,
-    /// Transaction max fee per gas value.
-    pub max_fee_per_gas: Option<u128>,
-    /// Transaction max priority fee per gas value.
-    pub max_priority_fee_per_gas: Option<u128>,
-    /// Blob transaction fee field,
-    pub max_fee_per_blob_gas: Option<u128>,
-    /// Transaction access list.
-    #[serde(with = "serde_bytes")]
-    pub access_list: Option<Vec<u8>>,
-    /// EIP-7702 authorization list
-    #[serde(with = "serde_bytes")]
-    pub authorization_list: Option<Vec<u8>>,
-    #[serde(with = "hashes")]
-    pub blob_versioned_hashes: Vec<B256>,
-    /// Builder name.
-    pub builder_name: String,
-}
-
-impl From<(SystemTransaction, BuilderName)> for PrivateTxRow {
-    fn from(value: (SystemTransaction, BuilderName)) -> Self {
-        let (system_tx, builder_name) = value;
-        let tx = &*system_tx.transaction; // Dereference the Arc<PooledTransaction>
-
-        // Extract signature components
-        let signature = tx.signature();
-
-        let micros = system_tx.received_at.microsecond();
-
-        Self {
-            time: system_tx
-                .received_at
-                // Needed so that the `BundleRow` created has the same timestamp precision
-                // (micros) as the row written on clickhouse db.
-                .replace_microsecond(micros)
-                .expect("to replace microseconds")
-                .into(),
-            hash: *tx.tx_hash(),
-            from: system_tx.signer,
-            nonce: tx.nonce(),
-            r: signature.r(),
-            s: signature.s(),
-            v: signature.v() as u8,
-            to: tx.to(),
-            gas: tx.gas_limit(),
-            tx_type: tx.tx_type() as u8,
-            input: tx.input().to_vec(),
-            value: tx.value(),
-            gas_price: tx.gas_price(),
-            max_fee_per_gas: Some(tx.max_fee_per_gas()),
-            max_priority_fee_per_gas: tx.max_priority_fee_per_gas(),
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas(),
-            access_list: tx.access_list().map(|al| {
-                let mut buf: Vec<u8> = Vec::new();
-                al.encode(&mut buf);
-                buf
-            }),
-            authorization_list: tx.authorization_list().map(|al| {
-                let mut buf: Vec<u8> = Vec::new();
-                al.to_vec().encode(&mut buf);
-                buf
-            }),
-            blob_versioned_hashes: tx.blob_versioned_hashes().unwrap_or_default().to_vec(),
-            builder_name,
-        }
-    }
-}
-
 /// Tests to make sure round-trip conversion between raw bundle and clickhouse bundle types is
 /// feasible.
 #[cfg(test)]
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use alloy_consensus::{
-        BlobTransactionSidecar, EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844,
-        TxEip4844WithSidecar, TxEip7702, TxLegacy,
-    };
-    use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Encodable2718};
-    use alloy_primitives::{Bytes, Signature, TxKind, U64};
-    use alloy_rlp::Decodable;
+    use alloy_primitives::{Bytes, U64};
     use rbuilder_primitives::serialize::RawBundle;
 
     use crate::{
-        indexer::{
-            self,
-            models::{BundleRow, PrivateTxRow},
-        },
-        types::{EthereumTransaction, SystemBundle, SystemTransaction},
+        indexer::{self, models::BundleRow},
+        types::SystemBundle,
     };
 
     impl From<BundleRow> for RawBundle {
@@ -462,132 +341,6 @@ pub(crate) mod tests {
                 signing_address: value.signer_address,
                 delayed_refund: None,
             }
-        }
-    }
-
-    impl From<PrivateTxRow> for SystemTransaction {
-        fn from(tx_row: PrivateTxRow) -> Self {
-            // Parse signature
-            let signature = Signature::new(tx_row.r, tx_row.s, tx_row.v != 0);
-
-            // Parse destination address
-            let to = match &tx_row.to {
-                Some(addr) => TxKind::Call(*addr),
-                None => TxKind::Create,
-            };
-
-            // Parse input data
-            let input = Bytes::from(tx_row.input.clone());
-
-            // Parse access list if present
-            let access_list = match tx_row.access_list.clone() {
-                Some(al_bytes) => AccessList::decode(&mut al_bytes.as_slice()).unwrap(),
-                None => AccessList::default(),
-            };
-
-            // Parse authorization list if present
-            let authorization_list = tx_row
-                .authorization_list
-                .map(|al| Vec::<SignedAuthorization>::decode(&mut al.as_slice()).unwrap());
-
-            type Envelope = EthereumTxEnvelope<TxEip4844WithSidecar>;
-
-            // Create transaction based on type
-            let tx_envelope: Envelope = match tx_row.tx_type {
-                0 => {
-                    // Legacy transaction
-                    let tx = TxLegacy {
-                        chain_id: Some(1),
-                        nonce: tx_row.nonce,
-                        gas_price: tx_row.gas_price.unwrap_or(0),
-                        gas_limit: tx_row.gas,
-                        to,
-                        value: tx_row.value,
-                        input,
-                    };
-                    Envelope::Legacy(Signed::new_unchecked(tx, signature, tx_row.hash))
-                }
-                1 => {
-                    // EIP-2930 transaction
-                    let tx = TxEip2930 {
-                        chain_id: 1,
-                        nonce: tx_row.nonce,
-                        gas_price: tx_row.gas_price.unwrap_or(0),
-                        gas_limit: tx_row.gas,
-                        to,
-                        value: tx_row.value,
-                        input,
-                        access_list,
-                    };
-                    Envelope::Eip2930(Signed::new_unchecked(tx, signature, tx_row.hash))
-                }
-                2 => {
-                    // EIP-1559 transaction
-                    let tx = TxEip1559 {
-                        chain_id: 1,
-                        nonce: tx_row.nonce,
-                        max_fee_per_gas: tx_row.max_fee_per_gas.unwrap_or(0),
-                        max_priority_fee_per_gas: tx_row.max_priority_fee_per_gas.unwrap_or(0),
-                        gas_limit: tx_row.gas,
-                        to,
-                        value: tx_row.value,
-                        input,
-                        access_list,
-                    };
-                    Envelope::Eip1559(Signed::new_unchecked(tx, signature, tx_row.hash))
-                }
-                3 => {
-                    // EIP-4844 transaction (blob transaction)
-                    let tx = TxEip4844WithSidecar {
-                        tx: TxEip4844 {
-                            chain_id: 1,
-                            nonce: tx_row.nonce,
-                            max_fee_per_gas: tx_row.max_fee_per_gas.unwrap_or(0),
-                            max_priority_fee_per_gas: tx_row.max_priority_fee_per_gas.unwrap_or(0),
-                            gas_limit: tx_row.gas,
-                            to: match to {
-                                TxKind::Call(addr) => addr,
-                                TxKind::Create => {
-                                    panic!("EIP-4844 transactions cannot be contract creation")
-                                }
-                            },
-                            value: tx_row.value,
-                            input,
-                            access_list,
-                            blob_versioned_hashes: tx_row.blob_versioned_hashes,
-                            max_fee_per_blob_gas: tx_row.max_fee_per_blob_gas.unwrap(),
-                        },
-                        sidecar: BlobTransactionSidecar::default(), // TODO: raw blob support.
-                    };
-                    Envelope::Eip4844(Signed::new_unchecked(tx, signature, tx_row.hash))
-                }
-                4 => {
-                    // EIP-7702 transaction
-                    let tx = TxEip7702 {
-                        chain_id: 1,
-                        nonce: tx_row.nonce,
-                        max_fee_per_gas: tx_row.max_fee_per_gas.unwrap_or(0),
-                        max_priority_fee_per_gas: tx_row.max_priority_fee_per_gas.unwrap_or(0),
-                        gas_limit: tx_row.gas,
-                        to: match to {
-                            TxKind::Call(addr) => addr,
-                            TxKind::Create => {
-                                panic!("EIP-7702 transactions cannot be contract creation")
-                            }
-                        },
-                        value: tx_row.value,
-                        input,
-                        access_list,
-                        authorization_list: authorization_list.unwrap(),
-                    };
-                    Envelope::Eip7702(Signed::new_unchecked(tx, signature, tx_row.hash))
-                }
-                _ => panic!("Unsupported transaction type: {}", tx_row.tx_type),
-            };
-
-            let raw = tx_envelope.encoded_2718().into();
-            let transaction = Arc::new(EthereumTransaction::new(tx_envelope, raw));
-            SystemTransaction { transaction, signer: tx_row.from, received_at: tx_row.time.into() }
         }
     }
 
@@ -628,21 +381,5 @@ pub(crate) mod tests {
         .unwrap();
 
         assert_eq!(system_bundle, system_bundle_round_trip);
-    }
-
-    #[test]
-    fn clickhouse_transaction_conversion_roundle_trip_works() {
-        let mut system_transaction = indexer::tests::system_transaction_example();
-
-        // Convert to 6 digits precision
-        let micros = system_transaction.received_at.microsecond();
-        system_transaction.received_at =
-            system_transaction.received_at.replace_microsecond(micros).unwrap();
-
-        let transaction_row: PrivateTxRow =
-            (system_transaction.clone(), "buildernet".to_string()).into();
-
-        let system_transaction_round_trip = transaction_row.into();
-        assert_eq!(system_transaction, system_transaction_round_trip);
     }
 }

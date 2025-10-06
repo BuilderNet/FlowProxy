@@ -9,7 +9,7 @@ use crate::{
     cli::IndexerArgs,
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     tasks::TaskExecutor,
-    types::{BundleReceipt, SystemBundle, SystemTransaction},
+    types::{BundleReceipt, SystemBundle},
 };
 
 mod click;
@@ -37,7 +37,6 @@ pub(crate) type BuilderName = String;
 pub trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt);
-    fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
 /// The collection of channel senders to send data to be indexed.
@@ -45,7 +44,6 @@ pub trait OrderIndexer: Sync + Send {
 pub(crate) struct OrderSenders {
     bundle_tx: mpsc::Sender<SystemBundle>,
     bundle_receipt_tx: mpsc::Sender<BundleReceipt>,
-    transaction_tx: mpsc::Sender<SystemTransaction>,
 }
 
 /// The collection of channel receivers to receive data to be indexed.
@@ -53,7 +51,6 @@ pub(crate) struct OrderSenders {
 pub(crate) struct OrderReceivers {
     bundle_rx: mpsc::Receiver<SystemBundle>,
     bundle_receipt_rx: mpsc::Receiver<BundleReceipt>,
-    transaction_rx: mpsc::Receiver<SystemTransaction>,
 }
 
 impl OrderSenders {
@@ -61,9 +58,8 @@ impl OrderSenders {
     pub(crate) fn new() -> (Self, OrderReceivers) {
         let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
         let (bundle_receipt_tx, bundle_receipt_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let (transaction_tx, transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
-        let senders = Self { bundle_tx, bundle_receipt_tx, transaction_tx };
-        let receivers = OrderReceivers { bundle_rx, bundle_receipt_rx, transaction_rx };
+        let senders = Self { bundle_tx, bundle_receipt_tx };
+        let receivers = OrderReceivers { bundle_rx, bundle_receipt_rx };
         (senders, receivers)
     }
 }
@@ -125,11 +121,6 @@ impl OrderIndexer for IndexerHandle {
             tracing::error!(?e, "failed to send bundle receipt to index");
         }
     }
-    fn index_transaction(&self, system_transaction: SystemTransaction) {
-        if let Err(e) = self.senders.transaction_tx.try_send(system_transaction) {
-            tracing::error!(?e, "failed to send transaction to index");
-        }
-    }
 }
 
 /// A mock indexer that simply drains the channels.
@@ -139,22 +130,18 @@ impl MockIndexer {
     fn run(self, receivers: OrderReceivers, task_executor: TaskExecutor) {
         tracing::info!(target: TRACING_TARGET, "Running with mocked indexer");
 
-        let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx, mut transaction_rx } = receivers;
+        let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx } = receivers;
 
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
         task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
-        task_executor.spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
     }
 }
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
-
-    use alloy_consensus::transaction::SignerRecoverable;
     use rbuilder_primitives::serialize::RawBundle;
     use time::UtcDateTime;
 
-    use crate::types::{decode_transaction, EthereumTransaction, SystemBundle, SystemTransaction};
+    use crate::types::SystemBundle;
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
     /// bundle, along with the block number set to zero. The rest is to mainly populate some
@@ -201,14 +188,5 @@ pub(crate) mod tests {
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcDateTime::now();
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
-    }
-
-    pub(crate) fn system_transaction_example() -> SystemTransaction {
-        let bytes = alloy_primitives::Bytes::from(alloy_primitives::hex!("02f89201820132850826299e00850826299e0082a1d694f82300c34f0d11b0420ac3ce85f0ebe4e3e0544280a40d2959800000000000000000000000000000000000000000000000000000000000000001c001a0030c9637d6d442bd2f9a43f69ec09dbaedb12e08ef1fe38ae5ce855bbcfc36ada064101cb4c00d6c21e792a2959c896992c9bbf8e2d84ce7647d561bfbcf59365a"));
-        let decoded = decode_transaction(&bytes).unwrap();
-        let transaction = Arc::new(EthereumTransaction::new(decoded, bytes));
-        let signer = transaction.recover_signer().unwrap();
-        let received_at = UtcDateTime::now();
-        SystemTransaction { transaction, signer, received_at }
     }
 }

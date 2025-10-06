@@ -13,12 +13,9 @@ use tracing::info;
 
 use crate::{
     cli::ClickhouseArgs,
-    indexer::{
-        models::{BundleRow, PrivateTxRow},
-        BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET,
-    },
+    indexer::{models::BundleRow, BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET},
     tasks::TaskExecutor,
-    types::{SystemBundle, SystemTransaction},
+    types::SystemBundle,
 };
 
 /// An high-level order type that can be indexed in clickhouse.
@@ -52,20 +49,6 @@ impl ClickhouseIndexableOrder for SystemBundle {
     }
 }
 
-impl ClickhouseIndexableOrder for SystemTransaction {
-    type ClickhouseRowType = PrivateTxRow;
-
-    const ORDER_TYPE: &'static str = "transaction";
-
-    fn hash(&self) -> B256 {
-        self.tx_hash()
-    }
-
-    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
-        row
-    }
-}
-
 /// A namespace struct to spawn a Clickhouse indexer.
 #[derive(Debug, Clone)]
 pub(crate) struct ClickhouseIndexer;
@@ -91,7 +74,7 @@ impl ClickhouseIndexer {
 
         info!(%host, "Running with clickhouse indexer");
 
-        let OrderReceivers { bundle_rx, mut bundle_receipt_rx, transaction_rx } = receivers;
+        let OrderReceivers { bundle_rx, mut bundle_receipt_rx } = receivers;
 
         let client = ClickhouseClient::default()
             .with_url(host)
@@ -108,15 +91,6 @@ impl ClickhouseIndexer {
             .with_max_rows(65_536);
         let mut bundle_inserter_runner =
             InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
-
-        let transaction_inserter = client
-            .inserter::<PrivateTxRow>(BUNDLE_TABLE_NAME)
-            .with_period(Some(Duration::from_secs(3))) // Dump every 3s
-            .with_period_bias(0.1)
-            .with_max_bytes(128 * 1024 * 1024) // 128MiB
-            .with_max_rows(65_536);
-        let mut transaction_inserter_runner =
-            InserterRunner::new(transaction_rx, transaction_inserter, builder_name);
 
         // TODO: Make this generic over order types. Requires some trait bounds.
         task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
@@ -137,29 +111,6 @@ impl ClickhouseIndexer {
                 }
                 Err(e) => {
                     tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of bundles to indexer");
-                }
-            }
-            drop(shutdown_guard);
-        });
-
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = transaction_inserter_runner.run_loop() => {
-                    info!(target: TRACING_TARGET, "clickhouse transaction indexer channel closed");
-                }
-                guard = shutdown => {
-                    info!(target: TRACING_TARGET, "Received shutdown for transaction indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
-
-            match  transaction_inserter_runner.inserter.end().await {
-                Ok(quantities) => {
-                    info!(target: TRACING_TARGET, ?quantities, "finalized clickhouse transaction inserter");
-                }
-                Err(e) => {
-                    tracing::error!(target: TRACING_TARGET, ?e, "failed to write end insertion of transactions to indexer");
                 }
             }
             drop(shutdown_guard);
@@ -231,10 +182,8 @@ pub(crate) mod tests {
     use crate::{
         cli::ClickhouseArgs,
         indexer::{
-            click::ClickhouseIndexer,
-            models::{BundleRow, PrivateTxRow},
-            tests::{system_bundle_example, system_transaction_example},
-            OrderSenders, BUNDLE_TABLE_NAME, TRANSACTIONS_TABLE_NAME,
+            click::ClickhouseIndexer, models::BundleRow, tests::system_bundle_example,
+            OrderSenders, BUNDLE_TABLE_NAME,
         },
         tasks::TaskManager,
     };
@@ -379,22 +328,6 @@ pub(crate) mod tests {
         client.query(&create_bundles_table_ddl).execute().await
     }
 
-    /// Creates the transactions table from the DDL present inside the `fixtures` folder.
-    async fn create_clickhouse_transactions_table(
-        client: &ClickhouseClient,
-    ) -> ClickhouseResult<()> {
-        let create_transactions_table = fs::read_to_string(
-            "./fixtures/create_transactions_table.sql",
-        )
-        .expect("could not read create_transactions_table.sql")
-        // NOTE: for local instances, ReplicatedMergeTree isn't supported.
-        .replace(
-            "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
-            "ENGINE = MergeTree()",
-        );
-        client.query(&create_transactions_table).execute().await
-    }
-
     #[tokio::test]
     async fn clickhouse_bundles_table_create_table_succeds() {
         let (image, client, _) = create_test_clickhouse_client(true).await.unwrap();
@@ -427,36 +360,6 @@ pub(crate) mod tests {
             .unwrap();
 
         assert_eq!(select_row, system_bundle_row);
-
-        drop(image);
-    }
-
-    #[tokio::test]
-    async fn clickhouse_transactions_insert_single_row_succeeds() {
-        let (image, client, _) = create_test_clickhouse_client(false).await.unwrap();
-        create_clickhouse_transactions_table(&client).await.unwrap();
-
-        let mut bundle_inserter =
-            client.inserter::<PrivateTxRow>(TRANSACTIONS_TABLE_NAME).with_max_rows(0); // force commit immediately
-        let builder_name = "buildernet".to_string();
-
-        // Insert system transaction
-
-        let system_transaction = system_transaction_example();
-        let system_transaction_row = (system_transaction.clone(), builder_name.clone()).into();
-
-        bundle_inserter.write(&system_transaction_row).await.unwrap();
-        bundle_inserter.commit().await.unwrap();
-
-        // Now select then, and verify they match with original input.
-
-        let select_rows = client
-            .query(&format!("SELECT * FROM {TRANSACTIONS_TABLE_NAME} ORDER BY time ASC"))
-            .fetch_all::<PrivateTxRow>()
-            .await
-            .unwrap();
-
-        assert_eq!(select_rows, vec![system_transaction_row]);
 
         drop(image);
     }
