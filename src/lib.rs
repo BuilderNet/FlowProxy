@@ -236,7 +236,7 @@ async fn run_update_peers(
                 let mut client = client.clone();
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
-                if let Some(ref tls_cert) = builder.orderflow_proxy.tls_certificate() {
+                if let Some(ref tls_cert) = builder.tls_certificate() {
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
                     client = reqwest::Client::builder()

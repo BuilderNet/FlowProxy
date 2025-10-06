@@ -11,23 +11,10 @@ use crate::DEFAULT_SYSTEM_PORT;
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubOrderflowProxyCredentials {
     /// TLS certificate of the orderflow proxy in UTF-8 encoded PEM format.
-    pub tls_cert: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls_cert: Option<String>,
     /// Orderflow signer public key.
     pub ecdsa_pubkey_address: Address,
-}
-
-impl BuilderHubOrderflowProxyCredentials {
-    /// Get the TLS certificate from the orderflow proxy credentials.
-    /// If the certificate is empty (an empty string), return `None`.
-    pub fn tls_certificate(&self) -> Option<Certificate> {
-        if self.tls_cert.is_empty() {
-            None
-        } else {
-            // SAFETY: We expect the certificate to be valid. It's added as a root
-            // certificate.
-            Some(Certificate::from_pem(self.tls_cert.as_bytes()).unwrap())
-        }
-    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
@@ -57,10 +44,22 @@ impl BuilderHubBuilder {
             format!("{}:{}", self.dns_name, DEFAULT_SYSTEM_PORT)
         };
 
-        if self.orderflow_proxy.tls_certificate().is_some() {
+        if self.tls_certificate().is_some() {
             format!("https://{host}")
         } else {
             format!("http://{host}")
+        }
+    }
+
+    /// Get the TLS certificate from the orderflow proxy credentials.
+    /// If the certificate is empty (an empty string), return `None`.
+    pub fn tls_certificate(&self) -> Option<Certificate> {
+        if self.instance.tls_cert.is_empty() {
+            None
+        } else {
+            // SAFETY: We expect the certificate to be valid. It's added as a root
+            // certificate.
+            Some(Certificate::from_pem(self.instance.tls_cert.as_bytes()).unwrap())
         }
     }
 }
@@ -95,7 +94,7 @@ impl BuilderHub {
         let endpoint =
             format!("{}/api/l1-builder/v1/register_credentials/orderflow_proxy", self.url);
         let body = BuilderHubOrderflowProxyCredentials {
-            tls_cert: String::new(),
+            tls_cert: None,
             ecdsa_pubkey_address: signer_address,
         };
         let response = self.client.post(endpoint).json(&body).send().await?;
@@ -138,7 +137,7 @@ impl LocalPeerStore {
                 // {dns_name}:5544
                 dns_name: "".to_string(),
                 orderflow_proxy: BuilderHubOrderflowProxyCredentials {
-                    tls_cert: String::new(),
+                    tls_cert: None,
                     ecdsa_pubkey_address: signer_address,
                 },
                 instance: BuilderHubInstanceData { tls_cert: "".to_string() },
