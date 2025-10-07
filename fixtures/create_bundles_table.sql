@@ -39,7 +39,7 @@ CREATE TABLE bundles (
   `hash` FixedString(32),
   `internal_uuid` UUID,
 
-  `builder_name` LowCardinality(String),
+  `builder_name` LowCardinality(String) COMMENT 'Name of the builder which received the bundle from user endpoint',
   `version` UInt8,
 
   INDEX from_bloom_filter `transactions.from` TYPE bloom_filter GRANULARITY 10,
