@@ -54,7 +54,7 @@ hosts:
       # we mainly care about metadata. 20 bytes represents minimum IPv4 header size.
       pcap_capture_size: 20
     processes:
-    - path: /root/buildernet-orderflow-proxy
+    - path: /root/buildernet-orderflow-proxy-go
       args: --user-listen-addr 0.0.0.0:9754 --system-listen-addr 0.0.0.0:9755 --builder-confighub-endpoint http://hub:3000 --connections-per-peer 256 -- --proxy2
       start_time: 1s
       shutdown_time: 4m
@@ -69,6 +69,8 @@ hosts:
       pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-addr 0.0.0.0:9754 --system-listen-addr 0.0.0.0:9755 --builder-confighub-endpoint http://hub:3000 --connections-per-peer 256 -- --proxy2
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
+      environment:
+        RUST_LOG: info
