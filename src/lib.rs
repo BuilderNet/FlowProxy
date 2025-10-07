@@ -1,10 +1,17 @@
 //! Orderflow ingress for BuilderNet.
 
-use crate::{runner::CliContext, statics::LOCAL_PEER_STORE};
+use crate::{
+    metrics::{
+        BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
+    },
+    runner::CliContext,
+    statics::LOCAL_PEER_STORE,
+};
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Request},
+    middleware::Next,
     routing::{get, post},
     Router,
 };
@@ -15,7 +22,12 @@ use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
-use std::{net::SocketAddr, str::FromStr as _, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    str::FromStr as _,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::net::TcpListener;
 use tracing::{level_filters::LevelFilter, *};
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
@@ -26,16 +38,16 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{
-    builderhub::PeerStore, cache::OrderCache, indexer::Indexer, ingress::OrderflowIngressMetrics,
-};
+use crate::{builderhub::PeerStore, cache::OrderCache, indexer::Indexer};
 
 pub mod builderhub;
 mod cache;
+pub mod consts;
 pub mod entity;
 pub mod forwarder;
 pub mod indexer;
 pub mod jsonrpc;
+pub mod metrics;
 pub mod priority;
 pub mod rate_limit;
 pub mod runner;
@@ -46,6 +58,10 @@ pub mod utils;
 pub mod validation;
 
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
+    if let Some(ref metrics_addr) = args.metrics {
+        spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
+    }
+
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
     let system_listener = TcpListener::bind(&args.system_listen_url).await?;
     let builder_listener = TcpListener::bind(&args.builder_listen_url).await?;
@@ -67,10 +83,6 @@ pub async fn run_with_listeners(
         let _ = registry.with(tracing_subscriber::fmt::layer().json()).try_init();
     } else {
         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
-    }
-
-    if let Some(metrics_addr) = args.metrics {
-        spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
     }
 
     let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.task_executor);
@@ -139,7 +151,6 @@ pub async fn run_with_listeners(
         order_cache,
         forwarders,
         local_builder_url: builder_url,
-        metrics: OrderflowIngressMetrics::default(),
         indexer_handle,
     });
 
@@ -157,6 +168,7 @@ pub async fn run_with_listeners(
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
+        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressUserMetrics>))
         .with_state(ingress.clone());
     let addr = user_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting user ingress server");
@@ -166,6 +178,7 @@ pub async fn run_with_listeners(
         .route("/", post(OrderflowIngress::system_handler))
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
         .layer(DefaultBodyLimit::max(args.max_request_size))
+        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting system ingress server");
@@ -198,6 +211,7 @@ async fn run_update_peers(
         let builders = match peer_store.get_peers().await {
             Ok(builders) => builders,
             Err(error) => {
+                BuilderHubMetrics::increment_builderhub_peer_request_failures(error.to_string());
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
                 continue;
@@ -239,6 +253,8 @@ async fn run_update_peers(
             }
         }
 
+        BuilderHubMetrics::builderhub_peer_count(peers.len());
+
         tokio::time::sleep(delay).await;
     }
 }
@@ -249,7 +265,7 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
 
     // Prefix all metrics with provider prefix
     Stack::new(recorder)
-        .push(PrefixLayer::new("orderflow_ingress"))
+        .push(PrefixLayer::new("orderflow_proxy"))
         .install()
         .wrap_err("unable to install metrics recorder")?;
 
@@ -264,4 +280,17 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
     });
 
     Ok(())
+}
+
+/// Middleware to track server metrics.
+async fn track_server_metrics<T: IngressHandlerMetricsExt>(request: Request, next: Next) {
+    let path = request.uri().path().to_string();
+    let method = request.method().to_string();
+
+    let start = Instant::now();
+    let response = next.run(request).await;
+    let latency = start.elapsed();
+    let status = response.status().as_u16().to_string();
+
+    T::observe_raw_request(path, method, status, latency);
 }

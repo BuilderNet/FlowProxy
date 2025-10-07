@@ -17,6 +17,7 @@ use crate::{
         models::{BundleRow, PrivateTxRow},
         BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET,
     },
+    metrics::IndexerMetrics,
     tasks::TaskExecutor,
     types::{SystemBundle, SystemTransaction},
 };
@@ -194,6 +195,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
             let value_ref = T::to_row_ref(&order_row);
 
             if let Err(e) = self.inserter.write(value_ref).await {
+                IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
                 tracing::error!(target: TRACING_TARGET,
                     ?e,
                     %hash,
@@ -216,6 +218,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
                     }
                 }
                 Err(e) => {
+                    IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
                     tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
                 }
             }

@@ -1,9 +1,16 @@
 use crate::{
     cache::OrderCache,
+    consts::{
+        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, USE_LEGACY_SIGNATURE,
+    },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
+    metrics::{
+        IngressHandlerMetricsExt as _, IngressMetrics, IngressSystemMetrics, IngressUserMetrics,
+    },
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
@@ -25,8 +32,6 @@ use axum::{
 };
 use dashmap::DashMap;
 use flate2::read::GzDecoder;
-use metrics::{Counter, Histogram};
-use metrics_derive::Metrics;
 use rbuilder_primitives::serialize::RawBundle;
 use reqwest::Url;
 use std::{
@@ -41,27 +46,6 @@ use tracing::*;
 
 pub mod error;
 use error::IngressError;
-
-/// Header name for flashbots signature.
-pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
-
-/// Header name for flashbots priority.
-pub const BUILDERNET_PRIORITY_HEADER: &str = "X-BuilderNet-Priority";
-
-/// Header name for BuilderNet sent at timestamp (in Unix microseconds).
-pub const BUILDERNET_SENT_AT_HEADER: &str = "X-BuilderNet-SentAtUs";
-
-/// Header name for XFF header.
-pub const XFF_HEADER: &str = "X-Forwarded-For";
-
-/// JSON-RPC method name for sending bundles.
-pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
-
-/// JSON-RPC method name for sending raw transactions.
-pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
-
-/// Whether to use the legacy signature verification.
-const USE_LEGACY_SIGNATURE: bool = true;
 
 #[derive(Debug)]
 pub struct OrderflowIngress {
@@ -78,7 +62,6 @@ pub struct OrderflowIngress {
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
-    pub metrics: OrderflowIngressMetrics,
     pub indexer_handle: IndexerHandle,
 }
 
@@ -123,6 +106,8 @@ impl OrderflowIngress {
             self.entities.retain(|_, c| c.rate_limit.count() > 0 || !c.scores.is_empty());
             let len_after = self.entities.len();
             let num_removed = len_before.saturating_sub(len_after);
+
+            IngressMetrics::entity_count(len_after);
             info!(target: "ingress::state", entries = len_after, num_removed, "Finished state maintenance");
         }
     }
@@ -135,7 +120,7 @@ impl OrderflowIngress {
         let received_at = Instant::now();
         let received_at_utc = UtcDateTime::now();
 
-        ingress.metrics.user.requests_received.increment(1);
+        IngressUserMetrics::increment_requests_received();
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
@@ -153,7 +138,7 @@ impl OrderflowIngress {
         if let Some(mut data) = ingress.entity_data(entity) {
             if data.rate_limit.count() > ingress.rate_limit_count {
                 trace!(target: "ingress", "Rate limited request");
-                ingress.metrics.user.requests_rate_limited.increment(1);
+                IngressUserMetrics::increment_requests_rate_limited();
                 return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
             }
             data.rate_limit.inc();
@@ -164,7 +149,7 @@ impl OrderflowIngress {
             Ok(request) => request,
             Err(error) => {
                 trace!(target: "ingress", "Error parsing JSON-RPC request");
-                ingress.metrics.user.json_rpc_parse_errors.increment(1);
+                IngressUserMetrics::increment_json_rpc_parse_errors();
                 return JsonRpcResponse::error(None, error);
             }
         };
@@ -180,7 +165,7 @@ impl OrderflowIngress {
                 let Some(Ok(bundle)) =
                     request.take_single_param().map(serde_json::from_value::<RawBundle>)
                 else {
-                    ingress.metrics.user.json_rpc_parse_errors.increment(1);
+                    IngressUserMetrics::increment_json_rpc_parse_errors();
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
@@ -197,7 +182,7 @@ impl OrderflowIngress {
                         Ok(EthereumTransaction::new(decoded, raw))
                     })
                 else {
-                    ingress.metrics.user.json_rpc_parse_errors.increment(1);
+                    IngressUserMetrics::increment_json_rpc_parse_errors();
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
@@ -221,7 +206,7 @@ impl OrderflowIngress {
             }
         };
 
-        ingress.metrics.user.record_method_metrics(&request.method, received_at);
+        IngressUserMetrics::record_method_metrics(&request.method, received_at);
 
         response
     }
@@ -269,7 +254,7 @@ impl OrderflowIngress {
         let received_at_utc = UtcDateTime::now();
         let payload_size = body.len();
 
-        ingress.metrics.system.requests_received.increment(1);
+        IngressSystemMetrics::increment_requests_received();
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
@@ -292,7 +277,7 @@ impl OrderflowIngress {
             Ok(request) => request,
             Err(error) => {
                 error!(target: "ingress", "Error parsing JSON-RPC request");
-                ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                IngressSystemMetrics::increment_json_rpc_parse_errors();
                 return JsonRpcResponse::error(None, error);
             }
         };
@@ -309,13 +294,13 @@ impl OrderflowIngress {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(raw) = request.take_single_param() else {
                     error!(target: "ingress", "Error parsing bundle from system request");
-                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    IngressSystemMetrics::increment_json_rpc_parse_errors();
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 let Ok(bundle) = serde_json::from_value::<RawBundle>(raw.clone()) else {
                     error!(target: "ingress", "Error parsing bundle from system request");
-                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    IngressSystemMetrics::increment_json_rpc_parse_errors();
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
@@ -346,14 +331,14 @@ impl OrderflowIngress {
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(raw) = request.take_single_param() else {
-                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    IngressSystemMetrics::increment_json_rpc_parse_errors();
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
                 let Ok(tx) =
                     decode_transaction(&serde_json::from_value::<Bytes>(raw.clone()).unwrap())
                 else {
-                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    IngressSystemMetrics::increment_json_rpc_parse_errors();
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
@@ -376,7 +361,7 @@ impl OrderflowIngress {
         // Send request only to the local builder forwarder.
         ingress.forwarders.send_to_local(priority, &request.method, raw);
 
-        ingress.metrics.system.record_method_metrics(&request.method, received_at);
+        IngressSystemMetrics::record_method_metrics(&request.method, received_at);
 
         JsonRpcResponse::result(request.id, response)
     }
@@ -546,62 +531,4 @@ pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) ->
 fn maybe_buildernet_priority(headers: &HeaderMap) -> Option<Priority> {
     let priority_header = headers.get(BUILDERNET_PRIORITY_HEADER)?;
     priority_header.to_str().ok()?.parse().ok()
-}
-
-#[derive(Clone, Debug)]
-pub struct OrderflowIngressMetrics {
-    user: OrderflowHandlerMetrics,
-    system: OrderflowHandlerMetrics,
-}
-
-impl Default for OrderflowIngressMetrics {
-    fn default() -> Self {
-        Self {
-            user: OrderflowHandlerMetrics::new_with_labels(&[("handler", "user")]),
-            system: OrderflowHandlerMetrics::new_with_labels(&[("handler", "system")]),
-        }
-    }
-}
-
-#[derive(Clone, Metrics)]
-#[metrics(scope = "handler")]
-pub struct OrderflowHandlerMetrics {
-    /// The total number of requests received.
-    requests_received: Counter,
-    /// The total number of requests that were rate limited.
-    requests_rate_limited: Counter,
-    /// The total number of JSON-RPC requests that couldn't be parsed.
-    json_rpc_parse_errors: Counter,
-    /// The total number of JSON-RPC requests with unknown method.
-    json_rpc_unknown_method: Counter,
-    /// The total number of bundles received.
-    bundles_received: Counter,
-    /// The total number of raw transactions received.
-    raw_transactions_received: Counter,
-    /// The number of seconds in which the request was processed.
-    processed_in: Histogram,
-    /// The number of seconds in which bundle was processed.
-    bundle_processed_in: Histogram,
-    /// The number of seconds in which raw transaction was processed.
-    raw_transaction_processed_in: Histogram,
-}
-
-impl OrderflowHandlerMetrics {
-    fn record_method_metrics(&self, method: &str, received_at: Instant) {
-        let elapsed_secs = received_at.elapsed().as_secs_f64();
-        self.processed_in.record(elapsed_secs);
-        match method {
-            ETH_SEND_BUNDLE_METHOD => {
-                self.bundle_processed_in.record(elapsed_secs);
-                self.bundles_received.increment(1);
-            }
-            ETH_SEND_RAW_TRANSACTION_METHOD => {
-                self.raw_transaction_processed_in.record(elapsed_secs);
-                self.raw_transactions_received.increment(1);
-            }
-            _ => {
-                self.json_rpc_unknown_method.increment(1);
-            }
-        };
-    }
 }

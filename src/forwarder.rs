@@ -1,6 +1,6 @@
 use crate::{
     builderhub::BuilderHubBuilder,
-    ingress::{
+    consts::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
         ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
     },
