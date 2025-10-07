@@ -21,6 +21,10 @@ pub struct ClickhouseArgs {
 
     #[arg(long = "indexer.clickhouse.database", env = "CLICKHOUSE_DATABASE")]
     pub database: Option<String>,
+
+    /// The table name to store bundles data.
+    #[arg(long = "indexer.clickhouse.bundles-table-name", env = "CLICKHOUSE_BUNDLES_TABLE_NAME")]
+    pub bundles_table_name: Option<String>,
 }
 
 /// Arguments required to setup file-based parquet indexing.

@@ -482,8 +482,6 @@ impl OrderflowIngress {
             .await
             .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
 
-        self.indexer_handle.index_transaction(transaction.clone());
-
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(priority, transaction);
 
