@@ -54,7 +54,8 @@ async fn register_credentials(
         ip: format!("{}:{}", addr.ip(), registry.system_port),
         dns_name: addr.ip().to_string(),
         orderflow_proxy: creds,
-        instance: BuilderHubInstanceData { tls_cert: "test".to_string() },
+        // NOTE: Empty TLS certificate to ensure proxies use plain HTTP.
+        instance: BuilderHubInstanceData { tls_cert: String::new() },
     };
 
     registry.builders.insert(signer, builder);
