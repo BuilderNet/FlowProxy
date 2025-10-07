@@ -266,8 +266,17 @@ impl OrderflowIngress {
             .get(BUILDERNET_SENT_AT_HEADER)
             .map(|h| UtcDateTime::parse_header(h).expect("Failed to parse sent at header"));
         let received_at = Instant::now();
+
         let received_at_utc = UtcDateTime::now();
         let payload_size = body.len();
+
+        if let Some(sent_at) = sent_at {
+            if received_at_utc.unix_timestamp_nanos() / 1000 % 1000 == 0 {
+                let diff = (received_at_utc.unix_timestamp_nanos() / 1000) -
+                    (sent_at.unix_timestamp_nanos() / 1000);
+                info!(target: "ingress", diff, ?sent_at, ?received_at_utc, "Received system request");
+            }
+        }
 
         ingress.metrics.system.requests_received.increment(1);
 
