@@ -116,6 +116,7 @@ impl OrderIndexer for IndexerHandle {
             tracing::error!(?e, "failed to send bundle to index");
         }
     }
+
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt) {
         if let Err(e) = self.senders.bundle_receipt_tx.try_send(bundle_receipt) {
             tracing::error!(?e, "failed to send bundle receipt to index");
@@ -131,7 +132,6 @@ impl MockIndexer {
         tracing::info!(target: TRACING_TARGET, "Running with mocked indexer");
 
         let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx } = receivers;
-
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
         task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
     }

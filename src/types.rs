@@ -14,8 +14,11 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes};
 use derive_more::Deref;
 use rbuilder_primitives::{
-    serialize::{RawBundle, RawBundleConvertError, RawBundleDecodeResult, TxEncoding},
-    Bundle, BundleReplacementData,
+    serialize::{
+        CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult, RawShareBundle,
+        RawShareBundleConvertError, RawShareBundleDecodeResult, TxEncoding,
+    },
+    Bundle, BundleReplacementData, ShareBundle,
 };
 use revm_primitives::B256;
 use serde::Serialize;
@@ -23,31 +26,10 @@ use serde_json::json;
 use time::UtcDateTime;
 use uuid::Uuid;
 
-use crate::priority::Priority;
-
-/// Bundle type that is used for the system API. It contains the verified signer with the original
-/// bundle.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SystemBundle {
-    #[serde(rename = "signingAddress")]
-    pub signer: Address,
-    /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
-    #[serde(flatten)]
-    pub raw_bundle: Arc<RawBundle>,
-
-    /// The decoded bundle.
-    #[serde(skip)]
-    pub decoded_bundle: Arc<DecodedBundle>,
-
-    /// The bundle hash.
-    #[serde(skip)]
-    pub bundle_hash: B256,
-
-    /// The timestamp at which the bundle has first been seen from the local operator.
-    #[serde(skip)]
-    pub received_at: UtcDateTime,
-}
+use crate::{
+    ingress::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, MEV_SEND_BUNDLE_METHOD},
+    priority::Priority,
+};
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
 #[allow(clippy::large_enum_variant)]
@@ -143,6 +125,81 @@ impl BundleHash for RawBundle {
     }
 }
 
+impl BundleHash for RawShareBundle {
+    fn bundle_hash(&self) -> B256 {
+        fn hash(bundle: &RawShareBundle, state: &mut wyhash::WyHash) {
+            let RawShareBundle { version, inclusion, body, validity, metadata, replacement_uuid } =
+                bundle;
+
+            version.hash(state);
+
+            inclusion.block.to::<u64>().hash(state);
+            if let Some(max_block) = &inclusion.max_block {
+                max_block.to::<u64>().hash(state);
+            }
+
+            for entry in body {
+                if let Some(tx) = &entry.tx {
+                    tx.hash(state);
+                }
+                entry.can_revert.hash(state);
+                if let Some(mode) = &entry.revert_mode {
+                    mode.hash(state);
+                }
+                if let Some(bundle) = &entry.bundle {
+                    bundle.hash(state);
+                }
+            }
+
+            if let Some(validity) = validity {
+                validity.hash(state);
+            }
+
+            if let Some(metadata) = metadata {
+                metadata.hash(state);
+            }
+
+            if let Some(uuid) = replacement_uuid {
+                uuid.hash(state);
+            }
+        }
+
+        let mut hasher = wyhash::WyHash::default();
+        let mut bytes = [0u8; 32];
+        for i in 0..4 {
+            hash(self, &mut hasher);
+            let hash = hasher.finish();
+            bytes[(i * 8)..((i + 1) * 8)].copy_from_slice(&hash.to_be_bytes());
+        }
+
+        B256::from(bytes)
+    }
+}
+
+/// Bundle type that is used for the system API. It contains the verified signer with the original
+/// bundle.
+#[derive(PartialEq, Eq, Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemBundle {
+    #[serde(rename = "signingAddress")]
+    pub signer: Address,
+    /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
+    #[serde(flatten)]
+    pub raw_bundle: Arc<RawBundle>,
+
+    /// The decoded bundle.
+    #[serde(skip)]
+    pub decoded_bundle: Arc<DecodedBundle>,
+
+    /// The bundle hash.
+    #[serde(skip)]
+    pub bundle_hash: B256,
+
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    #[serde(skip)]
+    pub received_at: UtcDateTime,
+}
+
 impl SystemBundle {
     /// Create a new system bundle from a raw bundle and a signer.
     /// Returns an error if the bundle fails to decode.
@@ -209,7 +266,7 @@ impl SystemBundle {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
-            "method": "eth_sendBundle",
+            "method": ETH_SEND_BUNDLE_METHOD,
             "params": [self.raw_bundle]
         });
 
@@ -221,10 +278,104 @@ impl SystemBundle {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
-            "method": "eth_sendBundle",
+            "method": ETH_SEND_BUNDLE_METHOD,
             "params": [self]
         });
 
+        serde_json::to_vec(&json).unwrap()
+    }
+}
+
+/// Decoded MEV Share bundle.
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum DecodedShareBundle {
+    /// New bundle.
+    New(Box<ShareBundle>),
+    /// Bundle cancellation.
+    Cancel(CancelShareBundle),
+}
+
+impl DecodedShareBundle {
+    /// Create new decoded share bundle from [`RawShareBundleDecodeResult`].
+    pub fn from_result(bundle: RawShareBundleDecodeResult) -> Self {
+        match bundle {
+            RawShareBundleDecodeResult::NewShareBundle(bundle) => Self::New(bundle),
+            RawShareBundleDecodeResult::CancelShareBundle(bundle) => Self::Cancel(bundle),
+        }
+    }
+}
+
+/// A wrapper around MEV share bundle.
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct SystemMevShareBundle {
+    /// The decoded MEV Share bundle.
+    pub decoded: Arc<DecodedShareBundle>,
+
+    /// The raw bundle.
+    pub raw: Arc<RawShareBundle>,
+
+    /// Signer address.
+    pub signer: Address,
+
+    /// The bundle hash.
+    pub bundle_hash: B256,
+
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    pub received_at: UtcDateTime,
+}
+
+impl SystemMevShareBundle {
+    /// Create a new system bundle from a raw bundle and a signer.
+    /// Returns an error if the bundle fails to decode.
+    pub fn try_from_bundle_and_signer(
+        raw: RawShareBundle,
+        signer: Address,
+        received_at: UtcDateTime,
+    ) -> Result<Self, RawShareBundleConvertError> {
+        let decoded =
+            DecodedShareBundle::from_result(raw.clone().decode(TxEncoding::WithBlobData)?);
+        let bundle_hash = raw.bundle_hash();
+        Ok(Self {
+            decoded: Arc::new(decoded),
+            raw: Arc::new(raw),
+            signer,
+            bundle_hash,
+            received_at,
+        })
+    }
+
+    /// Returns the bundle hash.
+    pub fn bundle_hash(&self) -> B256 {
+        self.bundle_hash
+    }
+}
+
+impl SystemMevShareBundle {
+    /// Encode the inner bundle (no signer).
+    pub fn encode_local(self) -> Vec<u8> {
+        let json = json!({
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": MEV_SEND_BUNDLE_METHOD,
+            "params": [self.raw]
+        });
+
+        serde_json::to_vec(&json).unwrap()
+    }
+
+    /// Encode the full system bundle.
+    pub fn encode(self) -> Vec<u8> {
+        let mut value = serde_json::to_value(&self.raw).unwrap();
+        value.as_object_mut().unwrap().insert(
+            "signingAddress".to_owned(),
+            serde_json::Value::String(self.signer.to_string()),
+        );
+        let json = json!({
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": MEV_SEND_BUNDLE_METHOD,
+            "params": [value]
+        });
         serde_json::to_vec(&json).unwrap()
     }
 }
@@ -274,7 +425,7 @@ impl SystemTransaction {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
-            "method": "eth_sendRawTransaction",
+            "method": ETH_SEND_RAW_TRANSACTION_METHOD,
             "params": [&self.transaction.raw]
         });
 

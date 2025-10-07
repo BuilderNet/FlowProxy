@@ -7,8 +7,8 @@ use crate::{
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
-        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
-        EthereumTransaction, SystemBundle, SystemTransaction,
+        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
+        EthResponse, EthereumTransaction, SystemBundle, SystemMevShareBundle, SystemTransaction,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -27,7 +27,7 @@ use dashmap::DashMap;
 use flate2::read::GzDecoder;
 use metrics::{Counter, Histogram};
 use metrics_derive::Metrics;
-use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use reqwest::Url;
 use std::{
     collections::HashMap,
@@ -59,6 +59,9 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
+
+/// JSON-RPC method name for sending MEV Share bundles.
+pub const MEV_SEND_BUNDLE_METHOD: &str = "mev_sendBundle";
 
 /// Whether to use the legacy signature verification.
 const USE_LEGACY_SIGNATURE: bool = true;
@@ -205,6 +208,19 @@ impl OrderflowIngress {
                     .send_raw_transaction(entity, tx, received_at_utc)
                     .await
                     .map(EthResponse::TxHash)
+            }
+            MEV_SEND_BUNDLE_METHOD => {
+                let Some(Ok(bundle)) =
+                    request.take_single_param().map(serde_json::from_value::<RawShareBundle>)
+                else {
+                    ingress.metrics.user.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                ingress
+                    .on_mev_share_bundle(entity, bundle, received_at_utc)
+                    .await
+                    .map(EthResponse::BundleHash)
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
@@ -399,7 +415,7 @@ impl OrderflowIngress {
         // Deduplicate bundles.
         let bundle_hash = bundle.bundle_hash();
         if self.order_cache.contains(&bundle_hash) {
-            trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
+            trace!(target: "ingress", %bundle_hash, "Bundle already processed");
             return Ok(bundle_hash);
         }
 
@@ -419,16 +435,63 @@ impl OrderflowIngress {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
             }
             DecodedBundle::Replacement(replacement_data) => {
-                debug!(target: "ingress", replacement_data = ?replacement_data, "Replacement bundle decoded");
+                debug!(target: "ingress", ?replacement_data, "Replacement bundle decoded");
             }
         }
 
         let elapsed = start.elapsed();
-        debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
+        debug!(target: "ingress", bundle_uuid = %bundle.uuid(), ?elapsed, "Bundle validated");
 
         self.indexer_handle.index_bundle(bundle.clone());
 
         self.send_bundle(priority, bundle).await
+    }
+
+    /// Handles a new MEV Share bundle.
+    async fn on_mev_share_bundle(
+        &self,
+        entity: Entity,
+        bundle: RawShareBundle,
+        received_at: UtcDateTime,
+    ) -> Result<B256, IngressError> {
+        let start = Instant::now();
+        trace!(target: "ingress", ?entity, "Processing MEV Share bundle");
+        // Convert to system bundle.
+        let Entity::Signer(signer) = entity else { unreachable!() };
+
+        let priority = self.priority_for(entity, EntityRequest::MevShareBundle(&bundle));
+
+        // Deduplicate bundles.
+        let bundle_hash = bundle.bundle_hash();
+        if self.order_cache.contains(&bundle_hash) {
+            trace!(target: "ingress", %bundle_hash, "Bundle already processed");
+            return Ok(bundle_hash);
+        }
+
+        self.order_cache.insert(bundle_hash);
+
+        // Decode and validate the bundle.
+        let bundle = self
+            .pqueues
+            .spawn_with_priority(priority, move || {
+                SystemMevShareBundle::try_from_bundle_and_signer(bundle, signer, received_at)
+            })
+            .await
+            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
+
+        match bundle.decoded.as_ref() {
+            DecodedShareBundle::New(bundle) => {
+                debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
+            }
+            DecodedShareBundle::Cancel(cancellation) => {
+                debug!(target: "ingress", ?cancellation, "Cancellation bundle decoded");
+            }
+        }
+
+        let elapsed = start.elapsed();
+        debug!(target: "ingress", %bundle_hash, ?elapsed, "MEV Share bundle validated");
+
+        self.send_mev_share_bundle(priority, bundle).await
     }
 
     async fn send_bundle(
@@ -436,13 +499,22 @@ impl OrderflowIngress {
         priority: Priority,
         bundle: SystemBundle,
     ) -> Result<B256, IngressError> {
-        let uuid = bundle.uuid();
+        let bundle_uuid = bundle.uuid();
         let bundle_hash = bundle.bundle_hash();
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(priority, bundle);
+        debug!(target: "ingress", %bundle_uuid, %bundle_hash, "Bundle processed");
+        Ok(bundle_hash)
+    }
 
-        debug!(target: "ingress", bundle_uuid = %uuid, bundle_hash = %bundle_hash, "Bundle processed");
-
+    async fn send_mev_share_bundle(
+        &self,
+        priority: Priority,
+        bundle: SystemMevShareBundle,
+    ) -> Result<B256, IngressError> {
+        let bundle_hash = bundle.bundle_hash();
+        self.forwarders.broadcast_mev_share_bundle(priority, bundle);
+        debug!(target: "ingress", %bundle_hash, "MEV Share bundle processed");
         Ok(bundle_hash)
     }
 

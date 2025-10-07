@@ -2,10 +2,10 @@ use crate::{
     builderhub::BuilderHubBuilder,
     ingress::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
-        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD,
     },
     priority::{pchannel, Priority},
-    types::{SystemBundle, SystemTransaction},
+    types::{SystemBundle, SystemMevShareBundle, SystemTransaction},
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;
@@ -85,21 +85,24 @@ impl IngressForwarders {
         let local = Self::create_request(priority, bundle.clone().encode_local(), None, None);
         let _ = self.local.send(priority, local);
 
+        // Difference: we encode the whole bundle (including the signer), and we add the signature
+        // header.
         let body = bundle.encode();
-
-        let body_hash = keccak256(&body);
-        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
-        let header = format!("{:?}:{}", self.signer.address(), signature);
-
-        // Difference: we encode the whole bundle (including the signer), and we
-        // add the signature header.
-        let forward = Self::create_request(priority, body, Some(header), Some(UtcDateTime::now()));
-
         debug!(target: "ingress::forwarder", name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        self.sign_and_forward_to_peers(priority, body);
+    }
 
-        for entry in self.peers.iter() {
-            let _ = entry.value().sender.send(priority, forward.clone());
-        }
+    /// Broadcast MEV share bundle to all forwarders.
+    pub fn broadcast_mev_share_bundle(&self, priority: Priority, bundle: SystemMevShareBundle) {
+        // Create local request first
+        let local = Self::create_request(priority, bundle.clone().encode_local(), None, None);
+        let _ = self.local.send(priority, local);
+
+        // Difference: we encode the whole bundle (including the signer), and we add the signature
+        // header.
+        let body = bundle.encode();
+        debug!(target: "ingress::forwarder", name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending MEV Share bundle to peers");
+        self.sign_and_forward_to_peers(priority, body);
     }
 
     /// Broadcast transaction to all forwarders.
@@ -109,15 +112,17 @@ impl IngressForwarders {
         let local = Self::create_request(priority, body.clone(), None, None);
         let _ = self.local.send(priority, local);
 
+        // Difference: we add the signature header.
+        debug!(target: "ingress::forwarder", name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        self.sign_and_forward_to_peers(priority, body);
+    }
+
+    /// Internal method to broadcast request to system peers.
+    fn sign_and_forward_to_peers(&self, priority: Priority, body: Vec<u8>) {
         let body_hash = keccak256(&body);
         let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
         let header = format!("{:?}:{}", self.signer.address(), signature);
-
-        // Difference: we add the signature header.
         let forward = Self::create_request(priority, body, Some(header), Some(UtcDateTime::now()));
-
-        debug!(target: "ingress::forwarder", name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
-
         for entry in self.peers.iter() {
             let _ = entry.value().sender.send(priority, forward.clone());
         }
