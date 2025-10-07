@@ -123,10 +123,11 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
     fn from((bundle, builder_name): (SystemBundle, BuilderName)) -> Self {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
-                let micros = bundle.received_at.microsecond();
+                let micros = bundle.received_at.utc.microsecond();
                 BundleRow {
                     time: bundle
                         .received_at
+                        .utc
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
                         .replace_microsecond(micros)
@@ -243,10 +244,11 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
             // transactions.
             DecodedBundle::Replacement(ref replacement) => {
-                let micros = bundle.received_at.microsecond();
+                let micros = bundle.received_at.utc.microsecond();
                 BundleRow {
                     time: bundle
                         .received_at
+                        .utc
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
                         .replace_microsecond(micros)
@@ -359,11 +361,12 @@ impl From<(SystemTransaction, BuilderName)> for PrivateTxRow {
         // Extract signature components
         let signature = tx.signature();
 
-        let micros = system_tx.received_at.microsecond();
+        let micros = system_tx.received_at.utc.microsecond();
 
         Self {
             time: system_tx
                 .received_at
+                .utc
                 // Needed so that the `BundleRow` created has the same timestamp precision
                 // (micros) as the row written on clickhouse db.
                 .replace_microsecond(micros)
@@ -404,7 +407,7 @@ impl From<(SystemTransaction, BuilderName)> for PrivateTxRow {
 /// feasible.
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::Instant};
 
     use alloy_consensus::{
         BlobTransactionSidecar, EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844,
@@ -420,7 +423,7 @@ pub(crate) mod tests {
             self,
             models::{BundleRow, PrivateTxRow},
         },
-        types::{EthereumTransaction, SystemBundle, SystemTransaction},
+        types::{EthereumTransaction, SystemBundle, SystemTransaction, UtcInstant},
     };
 
     impl From<BundleRow> for RawBundle {
@@ -743,7 +746,8 @@ pub(crate) mod tests {
 
             let raw = tx_envelope.encoded_2718().into();
             let transaction = Arc::new(EthereumTransaction::new(tx_envelope, raw));
-            SystemTransaction { transaction, signer: tx_row.from, received_at: tx_row.time.into() }
+            let received_at = UtcInstant { utc: tx_row.time.into(), instant: Instant::now() };
+            SystemTransaction { transaction, signer: tx_row.from, received_at }
         }
     }
 
@@ -757,12 +761,14 @@ pub(crate) mod tests {
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
 
-        let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
+        let mut system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
         )
         .unwrap();
+
+        system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
 
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
@@ -776,12 +782,14 @@ pub(crate) mod tests {
         let raw_bundle_round_trip: RawBundle = bundle_row.into();
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
-        let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
+        let mut system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
         )
         .unwrap();
+
+        system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
 
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
@@ -791,14 +799,16 @@ pub(crate) mod tests {
         let mut system_transaction = indexer::tests::system_transaction_example();
 
         // Convert to 6 digits precision
-        let micros = system_transaction.received_at.microsecond();
-        system_transaction.received_at =
-            system_transaction.received_at.replace_microsecond(micros).unwrap();
+        let micros = system_transaction.received_at.utc.microsecond();
+        system_transaction.received_at.utc =
+            system_transaction.received_at.utc.replace_microsecond(micros).unwrap();
 
         let transaction_row: PrivateTxRow =
             (system_transaction.clone(), "buildernet".to_string()).into();
 
-        let system_transaction_round_trip = transaction_row.into();
+        let mut system_transaction_round_trip: SystemTransaction = transaction_row.into();
+        system_transaction_round_trip.received_at.instant = system_transaction.received_at.instant;
+
         assert_eq!(system_transaction, system_transaction_round_trip);
     }
 }

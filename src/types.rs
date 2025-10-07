@@ -1,7 +1,7 @@
 use std::{
     hash::{Hash as _, Hasher as _},
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use alloy_consensus::{
@@ -45,9 +45,9 @@ pub struct SystemBundle {
     #[serde(skip)]
     pub bundle_hash: B256,
 
-    /// The timestamp at which the bundle has first been seen from the local operator.
+    /// The time at which the bundle has first been seen from the local operator.
     #[serde(skip)]
-    pub received_at: UtcDateTime,
+    pub received_at: UtcInstant,
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
@@ -150,7 +150,7 @@ impl SystemBundle {
     pub fn try_from_bundle_and_signer(
         mut bundle: RawBundle,
         signer: Address,
-        received_at: UtcDateTime,
+        received_at: UtcInstant,
     ) -> Result<Self, RawBundleConvertError> {
         bundle.signing_address = Some(signer);
 
@@ -257,7 +257,7 @@ pub struct SystemTransaction {
     /// The original transaction signer.
     pub signer: Address,
     /// The timestamp at which the bundle has first been seen from the local operator.
-    pub received_at: UtcDateTime,
+    pub received_at: UtcInstant,
 }
 
 impl SystemTransaction {
@@ -265,7 +265,7 @@ impl SystemTransaction {
     pub fn from_transaction_and_signer(
         transaction: EthereumTransaction,
         signer: Address,
-        received_at: UtcDateTime,
+        received_at: UtcInstant,
     ) -> Self {
         Self { transaction: Arc::new(transaction), signer, received_at }
     }
@@ -333,27 +333,33 @@ pub enum EthResponse {
     TxHash(B256),
 }
 
-/// An instant in time with a UTC timestamp.
+/// A UTC timestamp along with a monotonic `Instant` to measure elapsed time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UtcInstant {
-    instant: Instant,
-    utc: UtcDateTime,
+    pub instant: Instant,
+    pub utc: UtcDateTime,
 }
 
 impl UtcInstant {
     /// Create a new `UtcInstant` from an `Instant` and a `UtcDateTime`.
-    pub fn new(instant: Instant, utc: UtcDateTime) -> Self {
-        Self { instant, utc }
+    pub fn now() -> Self {
+        Self { instant: Instant::now(), utc: UtcDateTime::now() }
     }
 
-    /// Returns the inner `Instant`.
-    pub fn instant(&self) -> Instant {
-        self.instant
+    pub fn elapsed(&self) -> Duration {
+        self.instant.elapsed()
     }
+}
 
-    /// Returns the inner `UtcDateTime`.
-    pub fn utc(&self) -> UtcDateTime {
-        self.utc
+impl From<UtcInstant> for UtcDateTime {
+    fn from(value: UtcInstant) -> Self {
+        value.utc
+    }
+}
+
+impl From<UtcInstant> for Instant {
+    fn from(value: UtcInstant) -> Self {
+        value.instant
     }
 }
 

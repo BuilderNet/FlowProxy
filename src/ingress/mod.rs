@@ -15,7 +15,7 @@ use crate::{
     rate_limit::CounterOverTime,
     types::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
-        EthereumTransaction, SystemBundle, SystemTransaction,
+        EthereumTransaction, SystemBundle, SystemTransaction, UtcInstant,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -117,8 +117,7 @@ impl OrderflowIngress {
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
-        let received_at = Instant::now();
-        let received_at_utc = UtcDateTime::now();
+        let received_at = UtcInstant::now();
 
         IngressUserMetrics::increment_requests_received();
 
@@ -156,7 +155,7 @@ impl OrderflowIngress {
 
         // Explicitly change the mutability of the `entity` variable.
         if let Some(mut data) = ingress.entity_data(entity) {
-            data.scores.score_mut(received_at).number_of_requests += 1;
+            data.scores.score_mut(received_at.into()).number_of_requests += 1;
         }
 
         trace!(target: "ingress", ?entity, id = request.id, method = request.method, params = ?request.params, "Serving user JSON-RPC request");
@@ -169,10 +168,7 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress
-                    .on_bundle(entity, bundle, received_at_utc)
-                    .await
-                    .map(EthResponse::BundleHash)
+                ingress.on_bundle(entity, bundle, received_at).await.map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(Ok(tx)) =
@@ -186,10 +182,7 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                ingress
-                    .send_raw_transaction(entity, tx, received_at_utc)
-                    .await
-                    .map(EthResponse::TxHash)
+                ingress.send_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
@@ -199,14 +192,14 @@ impl OrderflowIngress {
             Err(error) => {
                 if error.is_validation() {
                     if let Some(mut data) = ingress.entity_data(entity) {
-                        data.scores.score_mut(received_at).invalid_requests += 1;
+                        data.scores.score_mut(received_at.into()).invalid_requests += 1;
                     }
                 }
                 JsonRpcResponse::error(Some(request.id), error.into_jsonrpc_error())
             }
         };
 
-        IngressUserMetrics::record_method_metrics(&request.method, received_at);
+        IngressUserMetrics::record_method_metrics(&request.method, received_at.into());
 
         response
     }
@@ -371,7 +364,7 @@ impl OrderflowIngress {
         &self,
         entity: Entity,
         bundle: RawBundle,
-        received_at: UtcDateTime,
+        received_at: UtcInstant,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
         trace!(target: "ingress", ?entity, "Processing bundle");
@@ -436,7 +429,7 @@ impl OrderflowIngress {
         &self,
         entity: Entity,
         transaction: EthereumTransaction,
-        received_at: UtcDateTime,
+        received_at: UtcInstant,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
         let tx_hash = *transaction.hash();

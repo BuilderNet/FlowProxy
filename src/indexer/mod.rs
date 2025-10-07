@@ -155,9 +155,10 @@ pub(crate) mod tests {
 
     use alloy_consensus::transaction::SignerRecoverable;
     use rbuilder_primitives::serialize::RawBundle;
-    use time::UtcDateTime;
 
-    use crate::types::{decode_transaction, EthereumTransaction, SystemBundle, SystemTransaction};
+    use crate::types::{
+        decode_transaction, EthereumTransaction, SystemBundle, SystemTransaction, UtcInstant,
+    };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
     /// bundle, along with the block number set to zero. The rest is to mainly populate some
@@ -194,7 +195,7 @@ pub(crate) mod tests {
     pub(crate) fn system_bundle_example() -> SystemBundle {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
-        let received_at = UtcDateTime::now();
+        let received_at = UtcInstant::now();
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
@@ -202,7 +203,7 @@ pub(crate) mod tests {
     pub(crate) fn system_cancel_bundle_example() -> SystemBundle {
         let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
-        let received_at = UtcDateTime::now();
+        let received_at = UtcInstant::now();
         SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
     }
 
@@ -211,7 +212,7 @@ pub(crate) mod tests {
         let decoded = decode_transaction(&bytes).unwrap();
         let transaction = Arc::new(EthereumTransaction::new(decoded, bytes));
         let signer = transaction.recover_signer().unwrap();
-        let received_at = UtcDateTime::now();
+        let received_at = UtcInstant::now();
         SystemTransaction { transaction, signer, received_at }
     }
 }

@@ -4,6 +4,7 @@ use metrics::{counter, gauge, histogram};
 
 use crate::{
     consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD},
+    forwarder::ForwardingType,
     priority::Priority,
 };
 
@@ -124,6 +125,17 @@ pub struct IngressMetrics;
 impl IngressMetrics {
     pub fn entity_count(count: usize) {
         gauge!("ingress_entity_count").set(count as f64);
+    }
+
+    pub fn record_e2e_order_processing_time(
+        duration: Duration,
+        priority: Priority,
+        forward_type: ForwardingType,
+    ) {
+        let labels =
+            [("priority", priority.to_string()), ("forward_type", forward_type.to_string())];
+        histogram!("ingress_e2e_order_processing_time_seconds", &labels)
+            .record(duration.as_millis() as f64);
     }
 }
 
