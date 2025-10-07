@@ -45,6 +45,9 @@ pub mod types;
 pub mod utils;
 pub mod validation;
 
+/// Default system port for proxy instances.
+const DEFAULT_SYSTEM_PORT: u16 = 5544;
+
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
     let system_listener = TcpListener::bind(&args.system_listen_url).await?;
@@ -230,8 +233,21 @@ async fn run_update_peers(
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
+                let mut client = client.clone();
+
+                // If the TLS certificate is present, use HTTPS and configure the client to use it.
+                if let Some(ref tls_cert) = builder.tls_certificate() {
+                    // SAFETY: We expect the certificate to be valid. It's added as a root
+                    // certificate.
+                    client = reqwest::Client::builder()
+                        .https_only(true)
+                        .add_root_certificate(tls_cert.clone())
+                        .build()
+                        .expect("Valid root certificate");
+                }
+
                 let sender =
-                    spawn_forwarder(builder.name.clone(), builder.ip.clone(), client.clone())
+                    spawn_forwarder(builder.name.clone(), builder.system_api(), client.clone())
                         .expect("malformed url");
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Inserting peer configuration");

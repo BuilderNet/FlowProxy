@@ -1,13 +1,17 @@
 use std::{sync::Arc, time::Duration};
 
 use dashmap::DashMap;
+use reqwest::Certificate;
 use revm_primitives::Address;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
+use crate::DEFAULT_SYSTEM_PORT;
+
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubOrderflowProxyCredentials {
-    /// Deprecated TLS certificate field for backward compatibility.
+    /// TLS certificate of the orderflow proxy in UTF-8 encoded PEM format.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tls_cert: Option<String>,
     /// Orderflow signer public key.
     pub ecdsa_pubkey_address: Address,
@@ -27,9 +31,46 @@ pub struct BuilderHubBuilder {
     pub instance: BuilderHubInstanceData,
 }
 
+impl BuilderHubBuilder {
+    /// Get the system API URL for the builder.
+    /// Mirrors Go proxy behavior: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
+    pub fn system_api(&self) -> String {
+        let host = if self.dns_name.is_empty() {
+            if self.ip.contains(":") {
+                self.ip.clone()
+            } else {
+                format!("{}:{}", self.ip, DEFAULT_SYSTEM_PORT)
+            }
+        } else {
+            format!("{}:{}", self.dns_name, DEFAULT_SYSTEM_PORT)
+        };
+
+        if self.tls_certificate().is_some() {
+            format!("https://{host}")
+        } else {
+            format!("http://{host}")
+        }
+    }
+
+    /// Get the TLS certificate from the orderflow proxy credentials.
+    /// If the certificate is empty (an empty string), return `None`.
+    pub fn tls_certificate(&self) -> Option<Certificate> {
+        if self.instance.tls_cert.is_empty() {
+            None
+        } else {
+            // SAFETY: We expect the certificate to be valid. It's added as a root
+            // certificate.
+            Some(
+                Certificate::from_pem(self.instance.tls_cert.as_bytes())
+                    .expect("Valid certificate"),
+            )
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubInstanceData {
-    /// TLS certificate.
+    /// TLS certificate of the instance in UTF-8 encoded PEM format.
     pub tls_cert: String,
 }
 
@@ -95,8 +136,10 @@ impl LocalPeerStore {
             signer_address.to_string(),
             BuilderHubBuilder {
                 name: signer_address.to_string(),
-                ip: format!("http://127.0.0.1:{}", port.unwrap()),
-                dns_name: "localhost".to_string(),
+                ip: format!("127.0.0.1:{}", port.unwrap()),
+                // Don't set the DNS name for local peer store or it will try to connect to
+                // {dns_name}:5544
+                dns_name: "".to_string(),
                 orderflow_proxy: BuilderHubOrderflowProxyCredentials {
                     tls_cert: None,
                     ecdsa_pubkey_address: signer_address,
