@@ -277,13 +277,15 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
+            // NOTE: We don't verify the signature here, because we can assume the channel (HTTPs
+            // session) is authenticated.
+            if let Some(address) = maybe_extract_signer(&headers) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
                 }
             }
 
-            error!(target: "ingress", header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER), "Error verifying peer signature");
+            error!(target: "ingress", header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER), "Error extracting peer signer");
             return JsonRpcResponse::error(None, JsonRpcError::Internal);
         };
 
@@ -540,6 +542,14 @@ pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) ->
         let signer = recover_signer(&signature, body_hash).ok()?;
         Some(signer).filter(|signer| Some(signer) == Address::from_str(address).ok().as_ref())
     }
+}
+
+/// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and extract the signer of the request (without
+/// verifying the signature). For signature verification, use [`maybe_verify_signature`].
+pub fn maybe_extract_signer(headers: &HeaderMap) -> Option<Address> {
+    let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
+    let (address, _) = signature_header.to_str().ok()?.split_once(':')?;
+    Address::from_str(address).ok()
 }
 
 /// Attempt to retrieve BuilderNet priority set by other ingresses.
