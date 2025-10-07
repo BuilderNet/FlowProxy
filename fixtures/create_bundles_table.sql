@@ -1,7 +1,7 @@
 -- DDL to create a ClickHouse table for storing Ethereum bundles data.
 CREATE TABLE bundles (
-  `time` DateTime64(6),
-  `timestamp` DateTime64(6) ALIAS time,
+  `received_at` DateTime64(6, 'UTC'),
+  `time` DateTime64(6, 'UTC') ALIAS `received_at`,
   `transactions.hash` Array(FixedString(32)),
   `transactions.from` Array(FixedString(20)),
   `transactions.nonce` Array(UInt64),
@@ -11,15 +11,16 @@ CREATE TABLE bundles (
   `transactions.to` Array(Nullable(FixedString(20))),
   `transactions.gas` Array(UInt64),
   `transactions.type` Array(UInt8),
-  `transactions.input` Array(String),
+  `transactions.input` Array(BLOB),
   `transactions.value` Array(UInt256),
   `transactions.gasPrice` Array(Nullable(UInt128)),
   `transactions.maxFeePerGas` Array(Nullable(UInt128)),
   `transactions.maxPriorityFeePerGas` Array(Nullable(UInt128)),
-  `transactions.accessList` Array(Nullable(String)),
-  `transactions.authorizationList` Array(Nullable(String)),
+  `transactions.accessList` Array(Nullable(BLOB)),
+  `transactions.authorizationList` Array(Nullable(BLOB)),
+  `transactions.raw` Array(BLOB) COMMENT 'EIP-2718 RLP-encoding (without blob sidecar) of the transactions stored as binary, not 0x-prefixed hex strings',
 
-  `block_number` Nullable(UInt64),
+  `block_number` UInt64,
   `min_timestamp` Nullable(UInt64),
   `max_timestamp` Nullable(UInt64),
 
@@ -27,31 +28,27 @@ CREATE TABLE bundles (
   `dropping_tx_hashes` Array(FixedString(32)),
   `refund_tx_hashes` Array(FixedString(32)),
 
-  `hash` FixedString(32),
-  `internal_uuid` Nullable(UUID),
   `replacement_uuid` Nullable(UUID),
   `replacement_nonce` Nullable(UInt64),
   `refund_percent` Nullable(UInt8),
   `refund_recipient` Nullable(FixedString(20)),
-  `signer_address` Nullable(FixedString(20)),
   `refund_identity` Nullable(FixedString(20)),
 
-  `builder_name` LowCardinality(String),
+  `signer_address` Nullable(FixedString(20)),
+
+  `hash` FixedString(32),
+  `internal_uuid` UUID,
+
+  `builder_name` LowCardinality(String) COMMENT 'Name of the builder which received the bundle from user endpoint',
+  `version` UInt8,
 
   INDEX from_bloom_filter `transactions.from` TYPE bloom_filter GRANULARITY 10,
   INDEX transactions_hash_bloom_filter `transactions.hash` TYPE bloom_filter GRANULARITY 10,
   INDEX hash_bloom_filter hash TYPE bloom_filter GRANULARITY 10,
   INDEX internal_uuid_bloom_filter internal_uuid TYPE bloom_filter GRANULARITY 10,
-  
-  -- For bundles: `internal_uuid` should be set.
-  -- For replacement bundles with transactions: `internal_uuid` and `replacement_uuid` should be set.
-  -- For replacement bundles without transactions (a.k.a. "cancellations"): only `replacement_uuid` should be set.
-  -- So this is the invariant we want to enforce:
-  CONSTRAINT valid_uuid_or_replacement CHECK (internal_uuid IS NOT NULL OR replacement_uuid IS NOT NULL)
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')
-PARTITION BY toYYYYMM(time)
-PRIMARY KEY (time)
-ORDER BY (time)
-TTL toDateTime(time) + toIntervalMonth(1) RECOMPRESS CODEC(ZSTD(6))
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(received_at)
+PRIMARY KEY (received_at)
+ORDER BY (received_at)
 SETTINGS index_granularity = 8192;
