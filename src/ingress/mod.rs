@@ -407,6 +407,8 @@ impl OrderflowIngress {
             }
         }
 
+        IngressUserMetrics::increment_bundles_with_priority_received(priority);
+
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
 
@@ -453,6 +455,7 @@ impl OrderflowIngress {
 
         // Determine priority for processing given request.
         let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
+        IngressUserMetrics::increment_transactions_with_priority_received(priority);
 
         let tx = transaction.transaction.clone();
 

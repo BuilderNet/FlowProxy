@@ -1,7 +1,10 @@
+use crate::metrics::{PriorityQueueMetrics, Sampler};
+
 use super::Priority;
 use std::{
     future::poll_fn,
     task::{Context, Poll},
+    time::Duration,
 };
 use tokio::sync::mpsc;
 
@@ -10,9 +13,21 @@ pub fn unbounded_channel<T>() -> (UnboundedSender<T>, UnboundedReceiver<T>) {
     let (high_tx, high_rx) = mpsc::unbounded_channel();
     let (medium_tx, medium_rx) = mpsc::unbounded_channel();
     let (low_tx, low_rx) = mpsc::unbounded_channel();
+
+    let sampler_high =
+        Sampler::default().with_sample_size(1024).with_interval(Duration::from_secs(4));
+    let sampler_mid = sampler_high.clone();
+    let sampler_low = sampler_high.clone();
     (
         UnboundedSender { high: high_tx, medium: medium_tx, low: low_tx },
-        UnboundedReceiver { high: high_rx, medium: medium_rx, low: low_rx },
+        UnboundedReceiver {
+            high: high_rx,
+            medium: medium_rx,
+            low: low_rx,
+            sampler_high,
+            sampler_medium: sampler_mid,
+            sampler_low,
+        },
     )
 }
 
@@ -41,6 +56,11 @@ pub struct UnboundedReceiver<T> {
     high: mpsc::UnboundedReceiver<T>,
     medium: mpsc::UnboundedReceiver<T>,
     low: mpsc::UnboundedReceiver<T>,
+
+    // Metrics samplers.
+    sampler_high: Sampler,
+    sampler_medium: Sampler,
+    sampler_low: Sampler,
 }
 
 impl<T> UnboundedReceiver<T> {
@@ -59,14 +79,19 @@ impl<T> UnboundedReceiver<T> {
     ///  * `Poll::Ready(None)` if any of the channels has been closed.
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
         if let Poll::Ready(message) = self.high.poll_recv(cx) {
+            self.sampler_high
+                .sample(|| PriorityQueueMetrics::set_queue_size(self.high.len(), "high"));
             return Poll::Ready(message);
         }
 
         if let Poll::Ready(message) = self.medium.poll_recv(cx) {
+            self.sampler_medium
+                .sample(|| PriorityQueueMetrics::set_queue_size(self.medium.len(), "medium"));
             return Poll::Ready(message);
         }
 
         if let Poll::Ready(message) = self.low.poll_recv(cx) {
+            self.sampler_low.sample(|| PriorityQueueMetrics::set_queue_size(self.low.len(), "low"));
             return Poll::Ready(message);
         }
 
