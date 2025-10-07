@@ -1,7 +1,6 @@
 -- DDL to create a ClickHouse table for storing Ethereum bundles data.
 CREATE TABLE bundles (
-  `time` DateTime64(6, 'UTC'),
-  `timestamp` DateTime64(6, 'UTC') ALIAS time,
+  `received_at` DateTime64(6, 'UTC'),
   `transactions.hash` Array(FixedString(32)),
   `transactions.from` Array(FixedString(20)),
   `transactions.nonce` Array(UInt64),
@@ -47,7 +46,8 @@ CREATE TABLE bundles (
   INDEX hash_bloom_filter hash TYPE bloom_filter GRANULARITY 10,
   INDEX internal_uuid_bloom_filter internal_uuid TYPE bloom_filter GRANULARITY 10,
 )
-ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')
-PARTITION BY toYYYYMM(time)
-PRIMARY KEY (time)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(received_at)
+PRIMARY KEY (received_at)
+ORDER BY (received_at)
 SETTINGS index_granularity = 8192;

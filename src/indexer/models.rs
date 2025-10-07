@@ -22,7 +22,7 @@ use crate::types::{DecodedBundle, SystemBundle};
 pub(crate) struct BundleRow {
     /// The timestamp at which the bundle was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-    pub time: OffsetDateTime,
+    pub received_at: OffsetDateTime,
     #[serde(rename = "transactions.hash", with = "hashes")]
     /// Collection of hashes for transactions in the bundle.
     pub transactions_hash: Vec<B256>,
@@ -128,7 +128,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
             DecodedBundle::Bundle(ref decoded) => {
                 let micros = bundle.received_at.microsecond();
                 BundleRow {
-                    time: bundle
+                    received_at: bundle
                         .received_at
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
@@ -253,7 +253,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
             DecodedBundle::Replacement(ref replacement) => {
                 let micros = bundle.received_at.microsecond();
                 BundleRow {
-                    time: bundle
+                    received_at: bundle
                         .received_at
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
