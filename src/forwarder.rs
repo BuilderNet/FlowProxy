@@ -263,13 +263,13 @@ fn send_http_request(
     Box::pin(async move {
         let start_time = Instant::now();
 
-        let response = client
-            .post(url)
-            // TODO(mempirate): Anything to do about this clone?
-            .body(request.body.clone())
-            .headers(request.headers.clone())
-            .send()
-            .await;
+        // Try to avoid cloning the body and headers if there is only one reference.
+        let (body, headers) = Arc::try_unwrap(request).map_or_else(
+            |req| (req.body.clone(), req.headers.clone()),
+            |inner| (inner.body, inner.headers),
+        );
+
+        let response = client.post(url).body(body).headers(headers).send().await;
 
         BuilderResponse { start_time, response }
     })

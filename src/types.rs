@@ -1,6 +1,7 @@
 use std::{
     hash::{Hash as _, Hasher as _},
     sync::Arc,
+    time::Instant,
 };
 
 use alloy_consensus::{
@@ -330,6 +331,30 @@ pub enum EthResponse {
     BundleHash(B256),
     #[serde(untagged)]
     TxHash(B256),
+}
+
+/// An instant in time with a UTC timestamp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UtcInstant {
+    instant: Instant,
+    utc: UtcDateTime,
+}
+
+impl UtcInstant {
+    /// Create a new `UtcInstant` from an `Instant` and a `UtcDateTime`.
+    pub fn new(instant: Instant, utc: UtcDateTime) -> Self {
+        Self { instant, utc }
+    }
+
+    /// Returns the inner `Instant`.
+    pub fn instant(&self) -> Instant {
+        self.instant
+    }
+
+    /// Returns the inner `UtcDateTime`.
+    pub fn utc(&self) -> UtcDateTime {
+        self.utc
+    }
 }
 
 #[cfg(test)]
