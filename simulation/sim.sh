@@ -75,24 +75,21 @@ run() {
   if [[ "$profile" == true ]]; then
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
       /bin/bash -c "
-        ./shadow --template-directory /root/testdata/ scenarios/${scenario} > /dev/null &
+        # Start profiler collection in background subshell
+        (
+          # Wait for processes to start
+          sleep 5
+          for pid in \$(pgrep -f buildernet-orderflow-proxy); do
+            proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy[0-9]+' || true)
+            if [[ -n \"\$proxyName\" ]]; then
+              mkdir -p /root/svg
+              (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/svg/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
+            fi
+          done
+        ) &
 
-        # Wait a bit for processes to start
-        sleep 5
-
-        echo 'Generating flamegraphs for running processes...'
-        for pid in \$(pgrep -f buildernet-orderflow-proxy); do
-          proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy[0-9]+' || true)
-          if [[ -n \"\$proxyName\" ]]; then
-            echo -n
-            echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
-            mkdir -p /root/svg
-            (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/svg/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
-          fi
-        done
-
-        echo \"Waiting for flamegraph generation to complete...\"
-        wait
+        # Run shadow in foreground with TTY attached (for progress bar)
+        ./shadow --template-directory /root/testdata/ scenarios/${scenario} > /dev/null
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
