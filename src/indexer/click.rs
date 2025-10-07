@@ -65,11 +65,12 @@ impl ClickhouseIndexer {
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let (host, database, username, password) = (
+        let (host, database, username, password, bundles_table_name) = (
             args.host.expect("host is set"),
             args.database.expect("database is set"),
             args.username.expect("username is set"),
             args.password.expect("password is set"),
+            args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
         );
 
         info!(%host, "Running with clickhouse indexer");
@@ -84,7 +85,7 @@ impl ClickhouseIndexer {
             .with_validation(validation);
 
         let bundle_inserter = client
-            .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
+            .inserter::<BundleRow>(bundles_table_name.as_str())
             .with_period(Some(Duration::from_secs(4))) // Dump every 4s
             .with_period_bias(0.1) // 4±(0.1*4)
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
@@ -279,6 +280,7 @@ pub(crate) mod tests {
                 database: Some("default".to_string()),
                 username: Some(config.user),
                 password: Some(config.password),
+                bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
             }
         }
     }

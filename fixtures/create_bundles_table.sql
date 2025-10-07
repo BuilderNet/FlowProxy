@@ -1,6 +1,7 @@
 -- DDL to create a ClickHouse table for storing Ethereum bundles data.
 CREATE TABLE bundles (
   `received_at` DateTime64(6, 'UTC'),
+  `time` DateTime64(6, 'UTC') ALIAS `received_at`,
   `transactions.hash` Array(FixedString(32)),
   `transactions.from` Array(FixedString(20)),
   `transactions.nonce` Array(UInt64),
@@ -10,16 +11,16 @@ CREATE TABLE bundles (
   `transactions.to` Array(Nullable(FixedString(20))),
   `transactions.gas` Array(UInt64),
   `transactions.type` Array(UInt8),
-  `transactions.input` Array(String),
+  `transactions.input` Array(BLOB),
   `transactions.value` Array(UInt256),
   `transactions.gasPrice` Array(Nullable(UInt128)),
   `transactions.maxFeePerGas` Array(Nullable(UInt128)),
   `transactions.maxPriorityFeePerGas` Array(Nullable(UInt128)),
-  `transactions.accessList` Array(Nullable(String)),
-  `transactions.authorizationList` Array(Nullable(String)),
-  `transactions.raw` Array(String) COMMENT 'RLP-encoded transaction',
+  `transactions.accessList` Array(Nullable(BLOB)),
+  `transactions.authorizationList` Array(Nullable(BLOB)),
+  `transactions.raw` Array(BLOB) COMMENT 'EIP-2718 RLP-encoding (without blob sidecar) of the transactions stored as binary, not 0x-prefixed hex strings',
 
-  `block_number` Nullable(UInt64),
+  `block_number` UInt64,
   `min_timestamp` Nullable(UInt64),
   `max_timestamp` Nullable(UInt64),
 

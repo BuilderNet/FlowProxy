@@ -75,7 +75,7 @@ pub(crate) struct BundleRow {
     pub transactions_raw: Vec<Vec<u8>>,
 
     /// Bundle block number.
-    pub block_number: Option<u64>,
+    pub block_number: u64,
     /// Minimum timestamp for the bundle.
     pub min_timestamp: Option<u64>,
     /// Maximum timestamp for the bundle.
@@ -222,7 +222,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                         })
                         .collect(),
                     transactions_raw: bundle.raw_bundle.txs.iter().map(|tx| tx.to_vec()).collect(),
-                    block_number: bundle.raw_bundle.block_number.map(|b| b.to::<u64>()),
+                    block_number: bundle.raw_bundle.block_number.map_or(0, |b| b.to::<u64>()),
                     min_timestamp: bundle.raw_bundle.min_timestamp,
                     max_timestamp: bundle.raw_bundle.max_timestamp,
                     reverting_tx_hashes: bundle.raw_bundle.reverting_tx_hashes.clone(),
@@ -277,7 +277,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     transactions_access_list: Vec::new(),
                     transactions_authorization_list: Vec::new(),
                     transactions_raw: Vec::new(),
-                    block_number: None,
+                    block_number: 0,
                     min_timestamp: None,
                     max_timestamp: None,
                     reverting_tx_hashes: Vec::new(),
@@ -321,7 +321,7 @@ pub(crate) mod tests {
     impl From<BundleRow> for RawBundle {
         fn from(value: BundleRow) -> Self {
             RawBundle {
-                block_number: value.block_number.map(|b| U64::from(b)),
+                block_number: Some(U64::from(value.block_number)),
                 min_timestamp: value.min_timestamp,
                 max_timestamp: value.max_timestamp,
                 txs: value.transactions_raw.into_iter().map(Bytes::from).collect(),

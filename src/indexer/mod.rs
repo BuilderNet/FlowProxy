@@ -166,12 +166,16 @@ pub(crate) mod tests {
     ///
     /// NOTE: we populate refndTxHashes with an empty hash to satisfy the schema, which doesn't
     /// accept `Nullable(Array(String))`.
+    ///
+    /// NOTE: adding block number just to satisfy round trip conversion logic, since on DB we
+    /// always add the block number.
     const TEST_CANCEL_BUNDLE: &str = r#"{
     "txs": [],
     "replacementUuid": "bcf24b5c-a8f8-4174-a1ad-f7521f3bd70c",
     "replacementNonce": 1,
     "signingAddress": "0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c",
-    "refundTxHashes": []
+    "refundTxHashes": [],
+    "blockNumber": "0x0"
 }"#;
 
     /// An example system bundle to use for testing.
