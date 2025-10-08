@@ -280,6 +280,7 @@ pub struct RawOrderMetadata {
 }
 
 /// Decoded MEV Share bundle.
+#[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DecodedShareBundle {
     /// New bundle.
