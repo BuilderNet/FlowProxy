@@ -447,7 +447,10 @@ impl OrderflowIngress {
                 SystemBundle::try_from_raw_bundle(bundle, signer, received_at, priority)
             })
             .await
-            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
+            .inspect_err(|e| {
+                error!(target: "ingress", ?e, "Error decoding bundle");
+                IngressUserMetrics::increment_validation_errors(&e);
+            })?;
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
@@ -504,7 +507,10 @@ impl OrderflowIngress {
                 )
             })
             .await
-            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
+            .inspect_err(|e| {
+                error!(target: "ingress", ?e, "Error decoding bundle");
+                IngressUserMetrics::increment_validation_errors(&e);
+            })?;
 
         match bundle.decoded.as_ref() {
             DecodedShareBundle::New(bundle) => {
@@ -580,7 +586,10 @@ impl OrderflowIngress {
                 Ok::<(), IngressError>(())
             })
             .await
-            .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
+            .inspect_err(|e| {
+                error!(target: "ingress", ?e, "Error validating transaction");
+                IngressUserMetrics::increment_validation_errors(e);
+            })?;
 
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(system_transaction);

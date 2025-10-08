@@ -46,6 +46,11 @@ pub trait IngressHandlerMetricsExt {
     }
 
     #[inline]
+    fn increment_validation_errors<E: std::error::Error>(error: &E) {
+        counter!("ingress_validation_errors", "handler" => Self::HANDLER, "error" => error.to_string()).increment(1);
+    }
+
+    #[inline]
     fn increment_order_cache_hit() {
         counter!("ingress_order_cache_hit", "handler" => Self::HANDLER).increment(1);
     }
