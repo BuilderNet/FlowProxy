@@ -149,6 +149,7 @@ pub async fn run_with_listeners(
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
+        rate_limiting_enabled: args.enable_rate_limiting,
         rate_limit_lookback_s: args.rate_limit_lookback_s,
         rate_limit_count: args.rate_limit_count,
         score_lookback_s: args.score_lookback_s,
