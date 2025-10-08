@@ -275,11 +275,12 @@ impl OrderflowIngress {
             }
         };
 
-        let mut priority = Priority::Low;
+        // TODO: Change to Low once Go proxy is updated / everyone is running Rust proxy.
+        let mut priority = Priority::Medium;
         if let Some(priority_) = maybe_buildernet_priority(&headers) {
             priority = priority_;
         } else {
-            error!(target: "ingress", %peer, "Error retrieving priority from system request, defaulting to low");
+            debug!(target: "ingress", %peer, "Error retrieving priority from system request, defaulting to {priority}");
         }
 
         trace!(target: "ingress", %peer, id = request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");
@@ -461,8 +462,6 @@ impl OrderflowIngress {
             })
             .await
             .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
-
-        self.indexer_handle.index_transaction(transaction.clone());
 
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(priority, transaction);
