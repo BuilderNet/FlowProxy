@@ -348,6 +348,7 @@ fn send_http_request(
                     order.received_at().elapsed(),
                     order.priority(),
                     direction,
+                    is_big,
                 );
             }
             EncodedOrder::Transaction(_) => {
@@ -355,6 +356,7 @@ fn send_http_request(
                     order.received_at().elapsed(),
                     order.priority(),
                     direction,
+                    is_big,
                 );
             }
             EncodedOrder::RawOrder(_) => {
@@ -362,6 +364,7 @@ fn send_http_request(
                     order.received_at().elapsed(),
                     order.priority(),
                     direction,
+                    is_big,
                 );
             }
         }
@@ -369,7 +372,9 @@ fn send_http_request(
         let start_time = Instant::now();
         let response =
             client.post(&url).body(order.encoding().to_vec()).headers(headers).send().await;
-        ForwarderMetrics::record_rpc_call(url, start_time.elapsed(), is_big);
+        if response.is_ok() {
+            ForwarderMetrics::record_rpc_call(url, start_time.elapsed(), is_big);
+        }
 
         BuilderResponse { start_time, response }
     })
