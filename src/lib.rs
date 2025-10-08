@@ -149,6 +149,9 @@ pub async fn run_with_listeners(
         IngressForwarders::new(local_sender, peers, orderflow_signer)
     };
 
+    let builder_ready_endpoint =
+        args.builder_ready_endpoint.map(|url| Url::from_str(&url)).transpose()?;
+
     let order_cache = OrderCache::new(args.cache_ttl, args.cache_size);
 
     let ingress = Arc::new(OrderflowIngress {
@@ -164,6 +167,7 @@ pub async fn run_with_listeners(
         order_cache,
         forwarders,
         local_builder_url: builder_url,
+        builder_ready_endpoint,
         indexer_handle,
     });
 
@@ -179,6 +183,7 @@ pub async fn run_with_listeners(
     let user_router = Router::new()
         .route("/", post(OrderflowIngress::user_handler))
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
+        .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
         .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressUserMetrics>))
