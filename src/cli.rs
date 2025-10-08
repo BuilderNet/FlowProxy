@@ -108,6 +108,10 @@ pub struct OrderflowIngressArgs {
     #[clap(long, default_value_t = 4)]
     pub score_bucket_s: u64,
 
+    /// Disable forwarding to peers (useful for testing).
+    #[clap(long, default_value_t = false)]
+    pub disable_forwarding: bool,
+
     /// Outputs logs in JSON format if enabled.
     #[clap(long = "log.json", default_value_t = true, env = "LOG_JSON")]
     pub log_json: bool,
@@ -141,6 +145,7 @@ impl Default for OrderflowIngressArgs {
             metrics: None,
             orderflow_signer: None,
             max_request_size: MAX_REQUEST_SIZE_BYTES,
+            disable_forwarding: false,
             rate_limit_lookback_s: 1,
             rate_limit_count: 500,
             score_lookback_s: 60,
@@ -192,8 +197,15 @@ impl OrderflowIngressArgs {
         self
     }
 
+    /// Disable the builder hub.
     pub fn disable_builder_hub(mut self) -> Self {
         self.builder_hub_url = None;
+        self
+    }
+
+    /// Disable forwarding to peers.
+    pub fn disable_forwarding(mut self) -> Self {
+        self.disable_forwarding = true;
         self
     }
 }
