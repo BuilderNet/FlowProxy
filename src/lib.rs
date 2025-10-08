@@ -195,6 +195,9 @@ pub async fn run_with_listeners(
     let system_router = Router::new()
         .route("/", post(OrderflowIngress::system_handler))
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
+        .route("/livez", get(|| async { Ok::<_, ()>(()) }))
+        .route("/readyz", get(OrderflowIngress::ready_handler))
+        .layer(DefaultBodyLimit::max(args.max_request_size))
         .layer(DefaultBodyLimit::max(args.max_request_size))
         .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
         .with_state(ingress.clone());
