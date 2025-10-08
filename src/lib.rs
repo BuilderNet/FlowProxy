@@ -264,11 +264,6 @@ async fn run_update_peers(
 
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
-                if disable_forwarding {
-                    warn!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Skipped spawning forwarder (disabled forwarding)");
-                    continue;
-                }
-
                 let mut client = client.clone();
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
@@ -282,6 +277,11 @@ async fn run_update_peers(
                         .add_root_certificate(tls_cert.clone())
                         .build()
                         .expect("Valid root certificate");
+                }
+
+                if disable_forwarding {
+                    warn!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Skipped spawning forwarder (disabled forwarding)");
+                    continue;
                 }
 
                 let sender =
