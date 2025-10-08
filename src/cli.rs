@@ -61,7 +61,7 @@ pub struct OrderflowIngressArgs {
 
     /// Listen URL for receiving builder stats.
     #[clap(long, value_hint = ValueHint::Url)]
-    pub builder_listen_url: String,
+    pub builder_listen_url: Option<String>,
 
     /// The URL of the local builder. This should be set in production.
     #[clap(long, value_hint = ValueHint::Url)]
@@ -129,7 +129,7 @@ impl Default for OrderflowIngressArgs {
         Self {
             user_listen_url: String::from("127.0.0.1:0"),
             system_listen_url: String::from("127.0.0.1:0"),
-            builder_listen_url: String::from("127.0.0.1:0"),
+            builder_listen_url: Some(String::from("127.0.0.1:0")),
             builder_url: None,
             builder_name: String::from("buildernet"),
             builder_hub_url: None,

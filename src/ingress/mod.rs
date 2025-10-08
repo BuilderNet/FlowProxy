@@ -1,8 +1,9 @@
 use crate::{
     cache::OrderCache,
     consts::{
-        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
-        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, USE_LEGACY_SIGNATURE,
+        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
+        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
+        USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -257,7 +258,12 @@ impl OrderflowIngress {
                 }
             }
 
-            error!(target: "ingress", header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER), "Error verifying peer signature");
+            error!(
+                target: "ingress",
+                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
+                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
+                "Error verifying peer signature"
+            );
             return JsonRpcResponse::error(None, JsonRpcError::Internal);
         };
 
@@ -499,9 +505,12 @@ pub fn maybe_decompress(
     }
 }
 
-/// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and verify the signer of the request.
+/// Parse the signature from [`BUILDERNET_SIGNATURE_HEADER`] header and verify the signer of the
+/// request. [`FLASHBOTS_SIGNATURE_HEADER`] is supported for backwards compatibility.
 pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) -> Option<Address> {
-    let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
+    let signature_header = headers
+        .get(BUILDERNET_SIGNATURE_HEADER)
+        .or_else(|| headers.get(FLASHBOTS_SIGNATURE_HEADER))?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;
 

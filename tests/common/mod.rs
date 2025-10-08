@@ -33,7 +33,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     args.builder_url = builder_url;
     let user_listener = TcpListener::bind(&args.user_listen_url).await.unwrap();
     let system_listener = TcpListener::bind(&args.system_listen_url).await.unwrap();
-    let builder_listener = TcpListener::bind(&args.builder_listen_url).await.unwrap();
+    let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
     let task_manager = buildernet_orderflow_proxy::tasks::TaskManager::current();

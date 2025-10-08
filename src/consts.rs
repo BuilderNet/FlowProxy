@@ -1,4 +1,8 @@
-/// Header name for flashbots signature.
+/// Header name for BuilderNet signature.
+pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
+
+/// Header name for Flashbots signature.
+/// NOTE: this header is used for backwards compatibility.
 pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
 
 /// Header name for flashbots priority.
