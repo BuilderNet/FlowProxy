@@ -19,10 +19,6 @@ pub enum Priority {
     Low,
 }
 
-pub trait PriorityExt {
-    fn priority(&self) -> Priority;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

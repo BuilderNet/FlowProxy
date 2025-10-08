@@ -354,7 +354,7 @@ impl OrderflowIngress {
         };
 
         // Send request only to the local builder forwarder.
-        ingress.forwarders.send_to_local(priority, &request.method, raw);
+        ingress.forwarders.send_to_local(priority, &request.method, raw, received_at);
 
         JsonRpcResponse::result(request.id, response)
     }

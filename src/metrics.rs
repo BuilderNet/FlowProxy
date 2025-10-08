@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use metrics::{counter, gauge, histogram};
 
-use crate::{forwarder::ForwardingType, priority::Priority};
+use crate::{forwarder::ForwardingDirection, priority::Priority};
 
 #[derive(Debug, Clone)]
 pub struct ForwarderMetrics;
@@ -115,10 +115,9 @@ impl SystemMetrics {
     pub fn record_e2e_bundle_processing_time(
         duration: Duration,
         priority: Priority,
-        forward_type: ForwardingType,
+        direction: ForwardingDirection,
     ) {
-        let labels =
-            [("priority", priority.to_string()), ("forward_type", forward_type.to_string())];
+        let labels = [("priority", priority.to_string()), ("direction", direction.to_string())];
         histogram!("ingress_e2e_bundle_processing_time_ms", &labels)
             .record(duration.as_millis() as f64);
     }
@@ -127,11 +126,20 @@ impl SystemMetrics {
     pub fn record_e2e_transaction_processing_time(
         duration: Duration,
         priority: Priority,
-        forward_type: ForwardingType,
+        direction: ForwardingDirection,
     ) {
-        let labels =
-            [("priority", priority.to_string()), ("forward_type", forward_type.to_string())];
+        let labels = [("priority", priority.to_string()), ("direction", direction.to_string())];
         histogram!("ingress_e2e_transaction_processing_time_ms", &labels)
+            .record(duration.as_millis() as f64);
+    }
+
+    pub fn record_e2e_raw_order_processing_time(
+        duration: Duration,
+        priority: Priority,
+        direction: ForwardingDirection,
+    ) {
+        let labels = [("priority", priority.to_string()), ("direction", direction.to_string())];
+        histogram!("ingress_e2e_raw_order_processing_time_ms", &labels)
             .record(duration.as_millis() as f64);
     }
 }

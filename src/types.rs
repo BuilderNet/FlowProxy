@@ -24,7 +24,7 @@ use serde_json::json;
 use time::UtcDateTime;
 use uuid::Uuid;
 
-use crate::priority::{Priority, PriorityExt};
+use crate::priority::Priority;
 
 /// Bundle type that is used for the system API. It contains the verified signer with the original
 /// bundle.
@@ -217,9 +217,16 @@ impl SystemBundle {
             "params": [self.raw_bundle]
         });
 
-        let encoding = serde_json::to_vec(&json).unwrap();
-        WithEncoding { inner: self, encoding }
+        let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
+        WithEncoding { inner: self, encoding: Arc::new(encoding) }
     }
+}
+
+#[derive(Debug, Clone)]
+/// Metadata about a raw order received from the system endpoint.
+pub struct RawOrderMetadata {
+    pub priority: Priority,
+    pub received_at: UtcInstant,
 }
 
 /// A wrapper around ethereum transaction containing decoded information as well as original raw
@@ -274,8 +281,8 @@ impl SystemTransaction {
             "params": [self.transaction.raw]
         });
 
-        let encoding = serde_json::to_vec(&json).unwrap();
-        WithEncoding { inner: self, encoding }
+        let encoding = serde_json::to_vec(&json).expect("to JSON serialize transaction");
+        WithEncoding { inner: self, encoding: Arc::new(encoding) }
     }
 
     pub fn tx_hash(&self) -> B256 {
@@ -370,22 +377,38 @@ pub struct WithEncoding<T> {
 /// to be sent on the wire.
 #[derive(Debug, Clone)]
 pub enum EncodedOrder {
+    /// Raw order bytes received from the system endpoint, already ready to be forwarded.
+    RawOrder(WithEncoding<RawOrderMetadata>),
+    /// A bundle along with its JSON-RPC encoding.
     Bundle(WithEncoding<SystemBundle>),
+    /// A transaction along with its JSON-RPC encoding.
     Transaction(WithEncoding<SystemTransaction>),
 }
 
 impl EncodedOrder {
+    /// Returns the JSON-RPC encoding of the order.
     pub fn encoding(&self) -> &[u8] {
         match self {
+            EncodedOrder::RawOrder(order) => &order.encoding,
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
         }
     }
 
+    /// Returns the priority of the order.
     pub fn priority(&self) -> Priority {
         match self {
+            EncodedOrder::RawOrder(order) => order.inner.priority,
             EncodedOrder::Bundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
+        }
+    }
+
+    pub fn received_at(&self) -> UtcInstant {
+        match self {
+            EncodedOrder::RawOrder(order) => order.inner.received_at,
+            EncodedOrder::Bundle(bundle) => bundle.inner.received_at,
+            EncodedOrder::Transaction(tx) => tx.inner.received_at,
         }
     }
 }
