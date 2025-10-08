@@ -12,6 +12,7 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::{
     extract::{DefaultBodyLimit, Request},
     middleware::Next,
+    response::Response,
     routing::{get, post},
     Router,
 };
@@ -299,7 +300,10 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
 }
 
 /// Middleware to track server metrics.
-async fn track_server_metrics<T: IngressHandlerMetricsExt>(request: Request, next: Next) {
+async fn track_server_metrics<T: IngressHandlerMetricsExt>(
+    request: Request,
+    next: Next,
+) -> Response {
     let path = request.uri().path().to_string();
     let method = request.method().to_string();
 
@@ -309,4 +313,6 @@ async fn track_server_metrics<T: IngressHandlerMetricsExt>(request: Request, nex
     let status = response.status().as_u16().to_string();
 
     T::record_http_request(path, method, status, latency);
+
+    response
 }
