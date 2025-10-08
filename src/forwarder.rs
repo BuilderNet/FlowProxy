@@ -165,12 +165,6 @@ pub fn spawn_forwarder(
     Ok(request_tx)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderType {
-    Bundle,
-    Transaction,
-}
-
 /// The direction of the forwarding request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardingDirection {
@@ -295,7 +289,6 @@ impl HttpForwarder {
         &mut self,
         response: BuilderResponse<reqwest::Response, reqwest::Error>,
     ) {
-        // TODO: track this?
         let BuilderResponse { start_time, response, .. } = response;
         if let Err(error) = response {
             warn!(target: "ingress::forwarder", name = %self.name, ?error, elapsed = ?start_time.elapsed(), "Error forwarding request");
