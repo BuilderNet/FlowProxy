@@ -114,7 +114,9 @@ pub async fn run_with_listeners(
 
         tokio::spawn({
             let peers = peers.clone();
-            async move { run_update_peers(local_signer, builder_hub, peers).await }
+            async move {
+                run_update_peers(local_signer, builder_hub, peers, args.disable_forwarding).await
+            }
         });
     } else {
         warn!("No BuilderHub URL provided, running with local peer store");
@@ -125,7 +127,9 @@ pub async fn run_with_listeners(
 
         tokio::spawn({
             let peers = peers.clone();
-            async move { run_update_peers(local_signer, peer_store, peers).await }
+            async move {
+                run_update_peers(local_signer, peer_store, peers, args.disable_forwarding).await
+            }
         });
     }
 
@@ -219,6 +223,7 @@ async fn run_update_peers(
     local_signer: Address,
     peer_store: impl PeerStore,
     peers: Arc<DashMap<String, PeerHandle>>,
+    disable_forwarding: bool,
 ) {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
     let delay = Duration::from_secs(30);
@@ -259,8 +264,9 @@ async fn run_update_peers(
 
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
-                debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
                 let mut client = client.clone();
+
+                debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
                 if let Some(ref tls_cert) = builder.tls_certificate() {
@@ -271,6 +277,11 @@ async fn run_update_peers(
                         .add_root_certificate(tls_cert.clone())
                         .build()
                         .expect("Valid root certificate");
+                }
+
+                if disable_forwarding {
+                    warn!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Skipped spawning forwarder (disabled forwarding)");
+                    continue;
                 }
 
                 let sender =
