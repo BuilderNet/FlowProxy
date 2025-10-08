@@ -68,7 +68,7 @@ pub struct OrderflowIngressArgs {
     pub builder_url: Option<String>,
 
     /// The endpoint to check if the local builder is ready.
-    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_READY_ENDPOINT", id = "BUILDER_READY_ENDPOINT")]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_READY_ENDPOINT", id = "BUILDER_READY_ENDPOINT", default_value = "http://127.0.0.1:6070")]
     pub builder_ready_endpoint: Option<String>,
 
     /// The name of the local builder.
