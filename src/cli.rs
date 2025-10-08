@@ -8,22 +8,38 @@ const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Arguments required to create a clickhouse client.
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
-#[group(id = "clickhouse", requires_all = ["host", "username", "password", "database"])]
+#[group(id = "clickhouse", requires_all = ["CLICKHOUSE_HOST", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABASE"])]
 pub struct ClickhouseArgs {
-    #[arg(long = "indexer.clickhouse.host", env = "CLICKHOUSE_HOST")]
+    #[arg(long = "indexer.clickhouse.host", env = "CLICKHOUSE_HOST", id = "CLICKHOUSE_HOST")]
     pub host: Option<String>,
 
-    #[arg(long = "indexer.clickhouse.username", env = "CLICKHOUSE_USERNAME")]
+    #[arg(
+        long = "indexer.clickhouse.username",
+        env = "CLICKHOUSE_USERNAME",
+        id = "CLICKHOUSE_USERNAME"
+    )]
     pub username: Option<String>,
 
-    #[arg(long = "indexer.clickhouse.password", env = "CLICKHOUSE_PASSWORD")]
+    #[arg(
+        long = "indexer.clickhouse.password",
+        env = "CLICKHOUSE_PASSWORD",
+        id = "CLICKHOUSE_PASSWORD"
+    )]
     pub password: Option<String>,
 
-    #[arg(long = "indexer.clickhouse.database", env = "CLICKHOUSE_DATABASE")]
+    #[arg(
+        long = "indexer.clickhouse.database",
+        env = "CLICKHOUSE_DATABASE",
+        id = "CLICKHOUSE_DATABASE"
+    )]
     pub database: Option<String>,
 
     /// The table name to store bundles data.
-    #[arg(long = "indexer.clickhouse.bundles-table-name", env = "CLICKHOUSE_BUNDLES_TABLE_NAME")]
+    #[arg(
+        long = "indexer.clickhouse.bundles-table-name",
+        env = "CLICKHOUSE_BUNDLES_TABLE_NAME",
+        id = "CLICKHOUSE_BUNDLES_TABLE_NAME"
+    )]
     pub bundles_table_name: Option<String>,
 }
 
@@ -35,6 +51,7 @@ pub struct ParquetArgs {
     #[arg(
         long = "indexer.parquet.bundle-receipts-file-path",
         env = "PARQUET_BUNDLE_RECEIPTS_FILE_PATH",
+        id = "PARQUET_BUNDLE_RECEIPTS_FILE_PATH",
         value_hint = ValueHint::FilePath,
     )]
     pub bundle_receipts_file_path: Option<PathBuf>,
@@ -52,36 +69,36 @@ pub struct IndexerArgs {
 #[derive(Parser, Debug)]
 pub struct OrderflowIngressArgs {
     /// Listen URL for receiving user flow.
-    #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR")]
+    #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
     pub user_listen_url: String,
 
     /// Listen URL for receiving system flow.
-    #[clap(long, value_hint = ValueHint::Url, env = "SYSTEM_LISTEN_ADDR")]
+    #[clap(long, value_hint = ValueHint::Url, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
     pub system_listen_url: String,
 
     /// Listen URL for receiving builder stats.
-    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_LISTEN_ADDR")]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
     pub builder_listen_url: Option<String>,
 
     /// The URL of the local builder. This should be set in production.
-    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT")]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT", id = "BUILDER_ENDPOINT")]
     pub builder_url: Option<String>,
 
     /// The name of the local builder.
-    #[clap(long, env = "BUILDERNET_NODE_NAME")]
+    #[clap(long, env = "BUILDERNET_NODE_NAME", id = "BUILDERNET_NODE_NAME")]
     pub builder_name: String,
 
     /// The URL of BuilderHub.
-    #[clap(long, value_hint = ValueHint::Url, env = "BUILDERHUB_ENDPOINT")]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDERHUB_ENDPOINT", id = "BUILDERHUB_ENDPOINT")]
     pub builder_hub_url: Option<String>,
 
     /// Enable Prometheus metrics.
     /// The metrics will be served at the given interface and port.
-    #[arg(long, env = "METRICS_ADDR")]
+    #[arg(long, env = "METRICS_ADDR", id = "METRICS_ADDR")]
     pub metrics: Option<String>,
 
     /// The orderflow signer of this proxy.
-    #[clap(long, env = "FLASHBOTS_ORDERFLOW_SIGNER_ADDRESS")]
+    #[clap(long, env = "FLASHBOTS_ORDERFLOW_SIGNER", id = "FLASHBOTS_ORDERFLOW_SIGNER")]
     pub orderflow_signer: Option<PrivateKeySigner>,
 
     /// The maximum request size in bytes.
@@ -113,7 +130,7 @@ pub struct OrderflowIngressArgs {
     pub disable_forwarding: bool,
 
     /// Outputs logs in JSON format if enabled.
-    #[clap(long = "log.json", default_value_t = false, env = "LOG_JSON")]
+    #[clap(long = "log.json", default_value_t = false, env = "LOG_JSON", id = "LOG_JSON")]
     pub log_json: bool,
 
     /// Flag indicating whether GZIP support is enabled.
@@ -369,6 +386,6 @@ mod tests {
         let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
         assert!(err
             .to_string()
-            .contains("the argument '--indexer.parquet.bundle-receipts-file-path <BUNDLE_RECEIPTS_FILE_PATH>' cannot be used with"), "Unexpected error: {err}");
+            .contains("the argument '--indexer.parquet.bundle-receipts-file-path <PARQUET_BUNDLE_RECEIPTS_FILE_PATH>' cannot be used with"), "Unexpected error: {err}");
     }
 }
