@@ -65,6 +65,7 @@ pub struct OrderflowIngress {
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
+    pub builder_ready_endpoint: Option<Url>,
     pub indexer_handle: IndexerHandle,
 }
 
@@ -224,7 +225,7 @@ impl OrderflowIngress {
     /// Handler for the `/readyz` endpoint. Used to check if the local builder is ready. Always
     /// returns 200 if the local builder is not configured.
     pub async fn ready_handler(State(ingress): State<Arc<Self>>) -> Response {
-        if let Some(ref url) = ingress.local_builder_url {
+        if let Some(ref url) = ingress.builder_ready_endpoint {
             let client =
                 reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
             let url = url.join("readyz").unwrap();

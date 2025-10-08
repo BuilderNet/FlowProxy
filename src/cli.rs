@@ -67,6 +67,10 @@ pub struct OrderflowIngressArgs {
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT")]
     pub builder_url: Option<String>,
 
+    /// The endpoint to check if the local builder is ready.
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_READY_ENDPOINT", id = "BUILDER_READY_ENDPOINT")]
+    pub builder_ready_endpoint: Option<String>,
+
     /// The name of the local builder.
     #[clap(long, env = "BUILDERNET_NODE_NAME")]
     pub builder_name: String,
@@ -139,6 +143,7 @@ impl Default for OrderflowIngressArgs {
             system_listen_url: String::from("127.0.0.1:0"),
             builder_listen_url: Some(String::from("127.0.0.1:0")),
             builder_url: None,
+            builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),
             builder_hub_url: None,
             enable_rate_limiting: false,
