@@ -387,6 +387,30 @@ impl OrderflowIngress {
 
                 (raw, EthResponse::TxHash(tx_hash))
             }
+            MEV_SEND_BUNDLE_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                let Ok(bundle) = serde_json::from_value::<RawShareBundle>(raw.clone()) else {
+                    ingress.metrics.system.json_rpc_parse_errors.increment(1);
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                let bundle_hash = bundle.bundle_hash();
+                if ingress.order_cache.contains(&bundle_hash) {
+                    trace!(target: "ingress", bundle_hash = %bundle_hash, "Share bundle already processed");
+                    return JsonRpcResponse::result(
+                        request.id,
+                        EthResponse::BundleHash(bundle_hash),
+                    );
+                }
+
+                ingress.order_cache.insert(bundle_hash);
+
+                (raw, EthResponse::BundleHash(bundle_hash))
+            }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
 
