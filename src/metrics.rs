@@ -40,6 +40,7 @@ pub trait IngressHandlerMetricsExt {
     fn increment_requests_rate_limited() {
         counter!("ingress_requests_rate_limited", "handler" => Self::HANDLER).increment(1);
     }
+
     fn increment_json_rpc_parse_errors() {
         counter!("ingress_json_rpc_parse_errors", "handler" => Self::HANDLER).increment(1);
     }
@@ -48,69 +49,41 @@ pub trait IngressHandlerMetricsExt {
         counter!("ingress_json_rpc_unknown_method", "handler" => Self::HANDLER).increment(1);
     }
 
-    fn record_processed_in(duration: Duration) {
-        histogram!("ingress_processed_in_seconds", "handler" => Self::HANDLER)
+    fn record_http_handler_duration(duration: Duration) {
+        histogram!("ingress_http_handler_duration_ms", "handler" => Self::HANDLER)
             .record(duration.as_millis() as f64);
     }
 
-    fn observe_raw_request(method: String, path: String, status: String, duration: Duration) {
+    fn record_http_request(method: String, path: String, status: String, duration: Duration) {
         let labels = [
             ("handler", Self::HANDLER.to_string()),
             ("method", method),
             ("path", path),
             ("status", status),
         ];
-        counter!("ingress_requests_total", &labels).increment(1);
-        histogram!("ingress_request_duration_seconds", &labels).record(duration.as_millis() as f64);
-    }
-
-    fn record_method_metrics(method: &str, received_at: Instant) {
-        let elapsed = received_at.elapsed();
-        Self::record_processed_in(elapsed);
-        match method {
-            ETH_SEND_BUNDLE_METHOD => {
-                Self::record_bundle_processed_in(elapsed);
-                Self::increment_bundles_received();
-            }
-            ETH_SEND_RAW_TRANSACTION_METHOD => {
-                Self::record_transaction_processed_in(elapsed);
-                Self::increment_transactions_received();
-            }
-            _ => {
-                Self::increment_json_rpc_unknown_method();
-            }
-        };
+        counter!("ingress_http_requests_total", &labels).increment(1);
+        histogram!("ingress_http_request_duration_ms", &labels).record(duration.as_millis() as f64);
     }
 
     // BUNDLES
 
-    fn increment_bundles_received() {
-        counter!("ingress_bundles_received", "handler" => Self::HANDLER).increment(1);
+    fn increment_bundles_received(priority: Priority) {
+        counter!("ingress_bundles_received", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
-    fn increment_bundles_with_priority_received(priority: Priority) {
-        let labels = [("handler", Self::HANDLER.to_string()), ("priority", priority.to_string())];
-        counter!("ingress_bundles_with_priority_received", &labels).increment(1);
-    }
-
-    fn record_bundle_processed_in(duration: Duration) {
-        histogram!("ingress_bundle_processed_in_seconds", "handler" => Self::HANDLER)
+    fn record_bundle_processing_duration(duration: Duration) {
+        histogram!("ingress_bundle_processing_duration_ms", "handler" => Self::HANDLER)
             .record(duration.as_millis() as f64);
     }
 
     // TRANSACTIONS
 
-    fn increment_transactions_received() {
-        counter!("ingress_transactions_received", "handler" => Self::HANDLER).increment(1);
+    fn increment_transactions_received(priority: Priority) {
+        counter!("ingress_transactions_received", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
-    fn increment_transactions_with_priority_received(priority: Priority) {
-        let labels = [("handler", Self::HANDLER.to_string()), ("priority", priority.to_string())];
-        counter!("ingress_transactions_with_priority_received", &labels).increment(1);
-    }
-
-    fn record_transaction_processed_in(duration: Duration) {
-        histogram!("ingress_transaction_processed_in_seconds", "handler" => Self::HANDLER)
+    fn record_transaction_processing_duration(duration: Duration) {
+        histogram!("ingress_transaction_processing_duration_ms", "handler" => Self::HANDLER)
             .record(duration.as_millis() as f64);
     }
 }

@@ -184,7 +184,10 @@ impl OrderflowIngress {
 
                 ingress.send_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
-            _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
+            _ => {
+                IngressUserMetrics::increment_json_rpc_unknown_method();
+                return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound);
+            }
         };
 
         let response = match result {
@@ -198,8 +201,6 @@ impl OrderflowIngress {
                 JsonRpcResponse::error(Some(request.id), error.into_jsonrpc_error())
             }
         };
-
-        IngressUserMetrics::record_method_metrics(&request.method, received_at.into());
 
         response
     }
@@ -355,8 +356,6 @@ impl OrderflowIngress {
         // Send request only to the local builder forwarder.
         ingress.forwarders.send_to_local(priority, &request.method, raw);
 
-        IngressSystemMetrics::record_method_metrics(&request.method, received_at);
-
         JsonRpcResponse::result(request.id, response)
     }
 
@@ -401,7 +400,7 @@ impl OrderflowIngress {
             }
         }
 
-        IngressUserMetrics::increment_bundles_with_priority_received(priority);
+        IngressUserMetrics::increment_bundles_received(priority);
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
@@ -449,7 +448,7 @@ impl OrderflowIngress {
 
         // Determine priority for processing given request.
         let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
-        IngressUserMetrics::increment_transactions_with_priority_received(priority);
+        IngressUserMetrics::increment_transactions_received(priority);
 
         let tx = transaction.transaction.clone();
 

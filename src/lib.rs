@@ -308,5 +308,5 @@ async fn track_server_metrics<T: IngressHandlerMetricsExt>(request: Request, nex
     let latency = start.elapsed();
     let status = response.status().as_u16().to_string();
 
-    T::observe_raw_request(path, method, status, latency);
+    T::record_http_request(path, method, status, latency);
 }
