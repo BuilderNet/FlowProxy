@@ -1,8 +1,8 @@
 use crate::{
     builderhub::BuilderHubBuilder,
     ingress::{
-        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
-        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD,
+        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
     },
     priority::{pchannel, Priority},
     types::{SystemBundle, SystemTransaction},
@@ -61,7 +61,7 @@ impl IngressForwarders {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         if let Some(signature_header) = signature_header {
-            headers.insert(BUILDERNET_SIGNATURE_HEADER, signature_header.parse().unwrap());
+            headers.insert(FLASHBOTS_SIGNATURE_HEADER, signature_header.parse().unwrap());
         }
 
         if let Some(sent_at) = sent_at_header {

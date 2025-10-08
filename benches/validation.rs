@@ -4,7 +4,7 @@ use alloy_primitives::{keccak256, Address};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use buildernet_orderflow_proxy::{
-    ingress::{maybe_verify_signature, BUILDERNET_SIGNATURE_HEADER},
+    ingress::{maybe_verify_signature, FLASHBOTS_SIGNATURE_HEADER},
     types::SystemBundle,
     utils::testutils::Random,
 };
@@ -62,7 +62,7 @@ fn generate_signed_bundles(size: u64, rng: &mut StdRng) -> Vec<SignedRequest> {
 
             let mut headers = HeaderMap::new();
             headers.insert(
-                BUILDERNET_SIGNATURE_HEADER,
+                FLASHBOTS_SIGNATURE_HEADER,
                 format!("{:?}:{}", signer.address(), signature).parse().unwrap(),
             );
 
