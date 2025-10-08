@@ -51,7 +51,11 @@ const DEFAULT_SYSTEM_PORT: u16 = 5544;
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
     let system_listener = TcpListener::bind(&args.system_listen_url).await?;
-    let builder_listener = TcpListener::bind(&args.builder_listen_url).await?;
+    let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_url {
+        Some(TcpListener::bind(builder_listen_url).await?)
+    } else {
+        None
+    };
     run_with_listeners(args, user_listener, system_listener, builder_listener, ctx).await
 }
 
@@ -59,7 +63,7 @@ pub async fn run_with_listeners(
     args: OrderflowIngressArgs,
     user_listener: TcpListener,
     system_listener: TcpListener,
-    builder_listener: TcpListener,
+    builder_listener: Option<TcpListener>,
     ctx: CliContext,
 ) -> eyre::Result<()> {
     // Initialize tracing.
@@ -173,18 +177,25 @@ pub async fn run_with_listeners(
     let addr = system_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting system ingress server");
 
-    let builder_router = Router::new()
-        .route("/", post(OrderflowIngress::builder_handler))
-        .route("/health", get(|| async { Ok::<_, ()>(()) }))
-        .with_state(ingress);
-    let addr = builder_listener.local_addr()?;
-    info!(target: "ingress", ?addr, "Starting builder server");
+    if let Some(builder_listener) = builder_listener {
+        let builder_router = Router::new()
+            .route("/", post(OrderflowIngress::builder_handler))
+            .route("/health", get(|| async { Ok::<_, ()>(()) }))
+            .with_state(ingress);
+        let addr = builder_listener.local_addr()?;
+        info!(target: "ingress", ?addr, "Starting builder server");
 
-    tokio::try_join!(
-        axum::serve(user_listener, user_router),
-        axum::serve(system_listener, system_router),
-        axum::serve(builder_listener, builder_router)
-    )?;
+        tokio::try_join!(
+            axum::serve(user_listener, user_router),
+            axum::serve(system_listener, system_router),
+            axum::serve(builder_listener, builder_router)
+        )?;
+    } else {
+        tokio::try_join!(
+            axum::serve(user_listener, user_router),
+            axum::serve(system_listener, system_router),
+        )?;
+    }
 
     Ok(())
 }
