@@ -6,6 +6,7 @@ use alloy_signer_local::PrivateKeySigner;
 use buildernet_orderflow_proxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_verify_signature,
+    priority::Priority,
     types::{SystemBundle, UtcInstant},
     utils::testutils::Random,
 };
@@ -90,6 +91,7 @@ pub fn bench_validation(c: &mut Criterion) {
                         input.raw_bundle,
                         input.signer,
                         input.received_at,
+                        Priority::Medium,
                     )
                     .unwrap();
                     black_box(result);

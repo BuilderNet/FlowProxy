@@ -143,7 +143,10 @@ impl MockIndexer {
 pub(crate) mod tests {
     use rbuilder_primitives::serialize::RawBundle;
 
-    use crate::types::{SystemBundle, UtcInstant};
+    use crate::{
+        priority::Priority,
+        types::{SystemBundle, UtcInstant},
+    };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
     /// bundle, along with the block number set to zero. The rest is to mainly populate some
@@ -185,7 +188,7 @@ pub(crate) mod tests {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
-        SystemBundle::try_from_raw_bundle(bundle, signer, received_at).unwrap()
+        SystemBundle::try_from_raw_bundle(bundle, signer, received_at, Priority::Medium).unwrap()
     }
 
     /// An example cancel bundle to use for testing.
@@ -193,6 +196,6 @@ pub(crate) mod tests {
         let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
-        SystemBundle::try_from_raw_bundle(bundle, signer, received_at).unwrap()
+        SystemBundle::try_from_raw_bundle(bundle, signer, received_at, Priority::Medium).unwrap()
     }
 }

@@ -317,6 +317,7 @@ pub(crate) mod tests {
 
     use crate::{
         indexer::{self, models::BundleRow},
+        priority::Priority,
         types::SystemBundle,
     };
 
@@ -360,6 +361,7 @@ pub(crate) mod tests {
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
+            Priority::Medium,
         )
         .unwrap();
 
@@ -381,11 +383,11 @@ pub(crate) mod tests {
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
+            Priority::Medium,
         )
         .unwrap();
 
         system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
-
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
 }

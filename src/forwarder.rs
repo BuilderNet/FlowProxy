@@ -68,7 +68,7 @@ impl IngressForwarders {
         let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
         let _ = self.local.send(local.priority(), local);
 
-        let body_hash = keccak256(&encoded_bundle.encoding.as_ref());
+        let body_hash = keccak256(encoded_bundle.encoding.as_ref());
         let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
         let signature_header = format!("{:?}:{}", self.signer.address(), signature);
 
@@ -165,6 +165,7 @@ pub fn spawn_forwarder(
     Ok(request_tx)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OrderType {
     Bundle,
     Transaction,
@@ -186,18 +187,6 @@ impl Display for ForwardingDirection {
             Self::SystemToLocal => write!(f, "system_to_local"),
         }
     }
-}
-
-/// The arguments for creating a [`ForwardingRequest`].
-#[derive(Debug, Clone)]
-struct ForwardingRequestArgs {
-    encoded_order: EncodedOrder,
-    /// The optional signature header.
-    signature_header: Option<String>,
-    /// The optional sent-at header.
-    sent_at_header: Option<UtcDateTime>,
-
-    _type: ForwardingDirection,
 }
 
 #[derive(Debug)]

@@ -460,7 +460,7 @@ impl OrderflowIngress {
             .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
 
         // Send request to all forwarders.
-        self.forwarders.broadcast_transaction(transaction);
+        self.forwarders.broadcast_transaction(system_transaction);
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", tx_hash = %tx_hash, elapsed = ?elapsed, "Raw transaction processed");
