@@ -46,7 +46,7 @@ use error::IngressError;
 pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
 
 /// Header name for Flashbots signature.
-/// NOTE: this header is used for backwards compatibility and should be deprecated in the future.
+/// NOTE: this header is used for backwards compatibility.
 pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
 
 /// Header name for BuilderNet priority.
