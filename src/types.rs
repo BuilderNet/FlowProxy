@@ -24,7 +24,7 @@ use serde_json::json;
 use time::UtcDateTime;
 use uuid::Uuid;
 
-use crate::priority::Priority;
+use crate::priority::{Priority, PriorityExt};
 
 /// Bundle type that is used for the system API. It contains the verified signer with the original
 /// bundle.
@@ -208,8 +208,8 @@ impl SystemBundle {
         }
     }
 
-    /// Encode the inner bundle (no signer).
-    pub fn encode_local(self) -> WithEncoding<Self> {
+    /// Encode the system bundle in a JSON-RPC payload with params EIP-2718 encoded bytes.
+    pub fn encode(self) -> WithEncoding<Self> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
@@ -219,18 +219,6 @@ impl SystemBundle {
 
         let encoding = serde_json::to_vec(&json).unwrap();
         WithEncoding { inner: self, encoding }
-    }
-
-    /// Encode the full system bundle.
-    pub fn encode(self) -> Vec<u8> {
-        let json = json!({
-            "id": 1,
-            "jsonrpc": "2.0",
-            "method": "eth_sendBundle",
-            "params": [self]
-        });
-
-        serde_json::to_vec(&json).unwrap()
     }
 }
 
@@ -260,30 +248,34 @@ pub struct SystemTransaction {
     pub transaction: Arc<EthereumTransaction>,
     /// The original transaction signer.
     pub signer: Address,
+
     /// The timestamp at which the bundle has first been seen from the local operator.
     pub received_at: UtcInstant,
+    pub priority: Priority,
 }
 
 impl SystemTransaction {
-    /// Create a new system transaction from a transaction and a signer.
-    pub fn from_transaction_and_signer(
+    /// Create a new system transaction from a transaction and additional context data.
+    pub fn from_transaction(
         transaction: EthereumTransaction,
         signer: Address,
         received_at: UtcInstant,
+        priority: Priority,
     ) -> Self {
-        Self { transaction: Arc::new(transaction), signer, received_at }
+        Self { transaction: Arc::new(transaction), signer, received_at, priority }
     }
 
-    /// Encode the transaction as EIP-2718 encoded bytes.
-    pub fn encode(&self) -> Vec<u8> {
+    /// Encode the system transaction in a JSON-RPC payload with params EIP-2718 encoded bytes.
+    pub fn encode(self) -> WithEncoding<SystemTransaction> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
             "method": "eth_sendRawTransaction",
-            "params": [&self.transaction.raw]
+            "params": [self.transaction.raw]
         });
 
-        serde_json::to_vec(&json).unwrap()
+        let encoding = serde_json::to_vec(&json).unwrap();
+        WithEncoding { inner: self, encoding }
     }
 
     pub fn tx_hash(&self) -> B256 {
@@ -371,7 +363,7 @@ impl From<UtcInstant> for Instant {
 #[derive(Debug, Clone)]
 pub struct WithEncoding<T> {
     pub inner: T,
-    pub encoding: Vec<u8>,
+    pub encoding: Arc<Vec<u8>>,
 }
 
 /// An order that can be either a bundle or a transaction, along with its JSON-RPC encoding, ready
@@ -383,10 +375,17 @@ pub enum EncodedOrder {
 }
 
 impl EncodedOrder {
+    pub fn encoding(&self) -> &[u8] {
+        match self {
+            EncodedOrder::Bundle(bundle) => &bundle.encoding,
+            EncodedOrder::Transaction(tx) => &tx.encoding,
+        }
+    }
+
     pub fn priority(&self) -> Priority {
         match self {
             EncodedOrder::Bundle(bundle) => bundle.inner.priority,
-            EncodedOrder::Transaction(tx) => tx.inner.received_at,
+            EncodedOrder::Transaction(tx) => tx.inner.priority,
         }
     }
 }

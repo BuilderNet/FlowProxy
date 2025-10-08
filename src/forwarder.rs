@@ -5,7 +5,7 @@ use crate::{
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
     },
     metrics::{ForwarderMetrics, SystemMetrics},
-    priority::{pchannel, Priority},
+    priority::{pchannel, Priority, PriorityExt},
     types::{EncodedOrder, SystemBundle, SystemTransaction, UtcInstant},
     utils::UtcDateTimeHeader as _,
 };
@@ -63,7 +63,7 @@ impl IngressForwarders {
         let received_at = bundle.received_at;
 
         // Create local request first
-        let local = ForwardingRequest::user_to_local(bundle.clone().encode_local());
+        let local = ForwardingRequest::user_to_local(bundle.clone().encode().into());
         let _ = self.local.send(local);
 
         let body = bundle.encode();
@@ -90,29 +90,26 @@ impl IngressForwarders {
     }
 
     /// Broadcast transaction to all forwarders.
-    pub fn broadcast_transaction(&self, priority: Priority, transaction: SystemTransaction) {
-        let body = transaction.encode();
+    pub fn broadcast_transaction(&self, transaction: SystemTransaction) {
+        let encoded_transaction = transaction.encode();
 
-        let local =
-            ForwardingRequest::user_to_local(priority, body.clone(), transaction.received_at);
-        let _ = self.local.send(priority, local);
+        let local = ForwardingRequest::user_to_local(encoded_transaction.clone().into());
+        let _ = self.local.send(local.priority, local);
 
-        let body_hash = keccak256(&body);
+        let body_hash = keccak256(local.encoded_order.encoding());
         let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
         let header = format!("{:?}:{}", self.signer.address(), signature);
 
         let forward = ForwardingRequest::user_to_system(
-            priority,
-            body,
+            encoded_transaction.into(),
             header,
             UtcDateTime::now(),
-            transaction.received_at,
         );
 
         debug!(target: "ingress::forwarder", name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
 
         for entry in self.peers.iter() {
-            let _ = entry.value().sender.send(priority, forward.clone());
+            let _ = entry.value().sender.send(forward.priority, forward.clone());
         }
     }
 

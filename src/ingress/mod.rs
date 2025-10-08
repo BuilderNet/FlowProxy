@@ -439,14 +439,15 @@ impl OrderflowIngress {
         self.order_cache.insert(tx_hash);
 
         let Entity::Signer(signer) = entity else { unreachable!() };
-        let transaction =
-            SystemTransaction::from_transaction_and_signer(transaction, signer, received_at);
+        let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
+
+        let system_transaction =
+            SystemTransaction::from_transaction(transaction, signer, received_at, priority);
 
         // Determine priority for processing given request.
-        let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
         IngressUserMetrics::increment_transactions_received(priority);
 
-        let tx = transaction.transaction.clone();
+        let tx = system_transaction.transaction.clone();
 
         // Spawn expensive operations like ECDSA recovery and consensus validation.
         self.pqueues
@@ -459,7 +460,7 @@ impl OrderflowIngress {
             .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
 
         // Send request to all forwarders.
-        self.forwarders.broadcast_transaction(priority, transaction);
+        self.forwarders.broadcast_transaction(transaction);
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", tx_hash = %tx_hash, elapsed = ?elapsed, "Raw transaction processed");
