@@ -18,7 +18,7 @@ revm-primitives = { version = "20.2.1", default-features = false }
 revm-interpreter = { version = "25.0.2", default-features = false }
 
 # rbuilder
-rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder.git", rev = "02fe646" }
+rbuilder-primitives = { git = "https://github.com/chainbound/rbuilder.git", rev = "f1184b379622d013cdaa3f950dc6124250eb3646" }
 
 # rt
 tokio = { version = "1", default-features = false, features = [
