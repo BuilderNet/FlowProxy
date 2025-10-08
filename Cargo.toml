@@ -130,6 +130,11 @@ strip = "symbols"
 panic = "unwind"
 codegen-units = 16
 
+[profile.reproducible]
+inherits = "release"
+panic = "abort"
+incremental = false
+
 # Use the `--profile profiling` flag to show symbols in release mode.
 # e.g. `cargo build --profile profiling`
 [profile.profiling]
