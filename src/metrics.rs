@@ -11,7 +11,7 @@ impl ForwarderMetrics {
     /// The duration of the RPC call to a peer.
     #[inline]
     pub fn record_rpc_call(url: String, duration: Duration, big_request: bool) {
-        histogram!("forwarder_rpc_call_duration_ms", "url" => url, "big_request" => big_request.to_string()).record(duration.as_millis() as f64);
+        histogram!("forwarder_rpc_call_duration_s", "url" => url, "big_request" => big_request.to_string()).record(duration.as_secs_f64());
     }
 }
 
@@ -54,7 +54,7 @@ pub trait IngressHandlerMetricsExt {
             ("status", status),
         ];
 
-        histogram!("ingress_http_request_duration_ms", &labels).record(duration.as_millis() as f64);
+        histogram!("ingress_http_request_duration_s", &labels).record(duration.as_secs_f64());
     }
 
     // BUNDLES
@@ -67,8 +67,8 @@ pub trait IngressHandlerMetricsExt {
     /// The duration of the `eth_sendBundle` RPC call.
     #[inline]
     fn record_bundle_rpc_duration(duration: Duration) {
-        histogram!("ingress_send_bundle_request_duration_ms", "handler" => Self::HANDLER)
-            .record(duration.as_millis() as f64);
+        histogram!("ingress_send_bundle_request_duration_s", "handler" => Self::HANDLER)
+            .record(duration.as_secs_f64());
     }
 
     // TRANSACTIONS
@@ -81,8 +81,8 @@ pub trait IngressHandlerMetricsExt {
     /// The duration of the `eth_sendRawTransaction` RPC call.
     #[inline]
     fn record_transaction_rpc_duration(duration: Duration) {
-        histogram!("ingress_send_transaction_request_duration_ms", "handler" => Self::HANDLER)
-            .record(duration.as_millis() as f64);
+        histogram!("ingress_send_transaction_request_duration_s", "handler" => Self::HANDLER)
+            .record(duration.as_secs_f64());
     }
 }
 
@@ -116,10 +116,14 @@ impl SystemMetrics {
         duration: Duration,
         priority: Priority,
         direction: ForwardingDirection,
+        big_request: bool,
     ) {
-        let labels = [("priority", priority.to_string()), ("direction", direction.to_string())];
-        histogram!("ingress_e2e_bundle_processing_time_ms", &labels)
-            .record(duration.as_millis() as f64);
+        let labels = [
+            ("priority", priority.to_string()),
+            ("direction", direction.to_string()),
+            ("big_request", big_request.to_string()),
+        ];
+        histogram!("ingress_e2e_bundle_processing_time_s", &labels).record(duration.as_secs_f64());
     }
 
     #[inline]
@@ -127,20 +131,30 @@ impl SystemMetrics {
         duration: Duration,
         priority: Priority,
         direction: ForwardingDirection,
+        big_request: bool,
     ) {
-        let labels = [("priority", priority.to_string()), ("direction", direction.to_string())];
-        histogram!("ingress_e2e_transaction_processing_time_ms", &labels)
-            .record(duration.as_millis() as f64);
+        let labels = [
+            ("priority", priority.to_string()),
+            ("direction", direction.to_string()),
+            ("big_request", big_request.to_string()),
+        ];
+        histogram!("ingress_e2e_transaction_processing_time_s", &labels)
+            .record(duration.as_secs_f64());
     }
 
     pub fn record_e2e_raw_order_processing_time(
         duration: Duration,
         priority: Priority,
         direction: ForwardingDirection,
+        big_request: bool,
     ) {
-        let labels = [("priority", priority.to_string()), ("direction", direction.to_string())];
-        histogram!("ingress_e2e_raw_order_processing_time_ms", &labels)
-            .record(duration.as_millis() as f64);
+        let labels = [
+            ("priority", priority.to_string()),
+            ("direction", direction.to_string()),
+            ("big_request", big_request.to_string()),
+        ];
+        histogram!("ingress_e2e_raw_order_processing_time_s", &labels)
+            .record(duration.as_secs_f64());
     }
 }
 
