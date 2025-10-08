@@ -113,11 +113,11 @@ pub struct OrderflowIngressArgs {
     pub disable_forwarding: bool,
 
     /// Outputs logs in JSON format if enabled.
-    #[clap(long = "log.json", default_value_t = true, env = "LOG_JSON")]
+    #[clap(long = "log.json", default_value_t = false, env = "LOG_JSON")]
     pub log_json: bool,
 
     /// Flag indicating whether GZIP support is enabled.
-    #[clap(long = "http.enable-gzip", default_value_t = true)]
+    #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
     /// The order cache TTL in seconds.
