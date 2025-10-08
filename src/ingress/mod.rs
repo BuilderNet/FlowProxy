@@ -51,6 +51,7 @@ use error::IngressError;
 #[derive(Debug)]
 pub struct OrderflowIngress {
     pub gzip_enabled: bool,
+    pub rate_limiting_enabled: bool,
     pub rate_limit_lookback_s: u64,
     pub rate_limit_count: u64,
     pub score_lookback_s: u64,
@@ -133,13 +134,15 @@ impl OrderflowIngress {
 
         let entity = Entity::Signer(signer);
 
-        if let Some(mut data) = ingress.entity_data(entity) {
-            if data.rate_limit.count() > ingress.rate_limit_count {
-                trace!(target: "ingress", "Rate limited request");
-                IngressUserMetrics::increment_requests_rate_limited();
-                return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
+        if ingress.rate_limiting_enabled {
+            if let Some(mut data) = ingress.entity_data(entity) {
+                if data.rate_limit.count() > ingress.rate_limit_count {
+                    trace!(target: "ingress", "Rate limited request");
+                    IngressUserMetrics::increment_requests_rate_limited();
+                    return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
+                }
+                data.rate_limit.inc();
             }
-            data.rate_limit.inc();
         }
 
         let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)

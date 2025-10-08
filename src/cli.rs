@@ -52,41 +52,45 @@ pub struct IndexerArgs {
 #[derive(Parser, Debug)]
 pub struct OrderflowIngressArgs {
     /// Listen URL for receiving user flow.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR")]
     pub user_listen_url: String,
 
     /// Listen URL for receiving system flow.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "SYSTEM_LISTEN_ADDR")]
     pub system_listen_url: String,
 
     /// Listen URL for receiving builder stats.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_LISTEN_ADDR")]
     pub builder_listen_url: Option<String>,
 
     /// The URL of the local builder. This should be set in production.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT")]
     pub builder_url: Option<String>,
 
     /// The name of the local builder.
-    #[clap(long, default_value_t = String::from("buildernet"))]
+    #[clap(long, env = "BUILDERNET_NODE_NAME")]
     pub builder_name: String,
 
     /// The URL of BuilderHub.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDERHUB_ENDPOINT")]
     pub builder_hub_url: Option<String>,
 
     /// Enable Prometheus metrics.
     /// The metrics will be served at the given interface and port.
-    #[arg(long)]
+    #[arg(long, env = "METRICS_ADDR")]
     pub metrics: Option<String>,
 
     /// The orderflow signer of this proxy.
-    #[clap(long)]
+    #[clap(long, env = "FLASHBOTS_ORDERFLOW_SIGNER_ADDRESS")]
     pub orderflow_signer: Option<PrivateKeySigner>,
 
     /// The maximum request size in bytes.
     #[clap(long, default_value_t = MAX_REQUEST_SIZE_BYTES)]
     pub max_request_size: usize,
+
+    /// Enable rate limiting.
+    #[clap(long, default_value_t = false)]
+    pub enable_rate_limiting: bool,
 
     /// Number of seconds to look back for ratelimit computation.
     #[clap(long, default_value_t = 1)]
@@ -105,19 +109,19 @@ pub struct OrderflowIngressArgs {
     pub score_bucket_s: u64,
 
     /// Outputs logs in JSON format if enabled.
-    #[clap(long = "log.json")]
+    #[clap(long = "log.json", default_value_t = true, env = "LOG_JSON")]
     pub log_json: bool,
 
     /// Flag indicating whether GZIP support is enabled.
-    #[clap(long = "http.enable-gzip")]
+    #[clap(long = "http.enable-gzip", default_value_t = true)]
     pub gzip_enabled: bool,
 
     /// The order cache TTL in seconds.
-    #[clap(long = "cache.ttl", default_value_t = 12)]
+    #[clap(long = "cache.ttl", default_value_t = 24)]
     pub cache_ttl: u64,
 
     /// The order cache size.
-    #[clap(long = "cache.size", default_value_t = 4096)]
+    #[clap(long = "cache.size", default_value_t = 65_536)]
     pub cache_size: u64,
 
     #[command(flatten)]
@@ -133,6 +137,7 @@ impl Default for OrderflowIngressArgs {
             builder_url: None,
             builder_name: String::from("buildernet"),
             builder_hub_url: None,
+            enable_rate_limiting: false,
             metrics: None,
             orderflow_signer: None,
             max_request_size: MAX_REQUEST_SIZE_BYTES,
@@ -216,6 +221,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
         ];
 
         OrderflowIngressArgs::try_parse_from(args)
@@ -236,6 +243,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
         ];
@@ -262,6 +271,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
             "--indexer.clickhouse.database",
@@ -299,6 +310,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.parquet.bundle-receipts-file-path",
             "pronto.parquet",
         ];
@@ -327,6 +340,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.parquet.bundle-receipts-file-path",
             "pronto.parquet",
             "--indexer.clickhouse.host",
