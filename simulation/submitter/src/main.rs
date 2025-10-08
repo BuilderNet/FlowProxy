@@ -262,7 +262,7 @@ impl Submitter {
         request.body_mut().replace(body.into());
         let headers = request.headers_mut();
         headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        headers.insert("x-flashbots-signature", sig_header);
+        headers.insert("x-buildernet-signature", sig_header);
         self.sender.send(request).unwrap();
     }
 
