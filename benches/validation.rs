@@ -4,8 +4,10 @@ use alloy_primitives::{keccak256, Address};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use buildernet_orderflow_proxy::{
-    ingress::{maybe_verify_signature, FLASHBOTS_SIGNATURE_HEADER},
-    types::SystemBundle,
+    consts::FLASHBOTS_SIGNATURE_HEADER,
+    ingress::maybe_verify_signature,
+    priority::Priority,
+    types::{SystemBundle, UtcInstant},
     utils::testutils::Random,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
@@ -13,12 +15,11 @@ use hyper::HeaderMap;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rbuilder_primitives::serialize::RawBundle;
 use serde_json::json;
-use time::UtcDateTime;
 
 struct RawBundleWithSigner {
     raw_bundle: RawBundle,
     signer: Address,
-    received_at: UtcDateTime,
+    received_at: UtcInstant,
 }
 
 struct SignedRequest {
@@ -31,7 +32,7 @@ impl Random for RawBundleWithSigner {
         Self {
             raw_bundle: RawBundle::random(rng),
             signer: Address::random_with(rng),
-            received_at: UtcDateTime::now(),
+            received_at: UtcInstant::now(),
         }
     }
 }
@@ -86,10 +87,11 @@ pub fn bench_validation(c: &mut Criterion) {
             || generate_bundles_with_signer(size, &mut rng),
             |inputs| {
                 for input in inputs {
-                    let result = SystemBundle::try_from_bundle_and_signer(
+                    let result = SystemBundle::try_from_raw_bundle(
                         input.raw_bundle,
                         input.signer,
                         input.received_at,
+                        Priority::Medium,
                     )
                     .unwrap();
                     black_box(result);

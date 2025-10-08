@@ -2,7 +2,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
 use buildernet_orderflow_proxy::{
-    ingress::FLASHBOTS_SIGNATURE_HEADER,
+    consts::FLASHBOTS_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
     utils::testutils::Random,
 };

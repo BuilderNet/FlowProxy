@@ -14,6 +14,7 @@ use tracing::info;
 use crate::{
     cli::ClickhouseArgs,
     indexer::{models::BundleRow, BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET},
+    metrics::{IndexerMetrics, Sampler},
     tasks::TaskExecutor,
     types::SystemBundle,
 };
@@ -138,14 +139,22 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
     }
 
     async fn run_loop(&mut self) {
+        let mut sampler = Sampler::default()
+            .with_sample_size(self.rx.capacity() / 2)
+            .with_interval(Duration::from_secs(4));
+
         while let Some(order) = self.rx.recv().await {
             tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
+            sampler.sample(|| {
+                IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), T::ORDER_TYPE);
+            });
 
             let hash = order.hash();
             let order_row: T::ClickhouseRowType = (order, self.builder_name.clone()).into();
             let value_ref = T::to_row_ref(&order_row);
 
             if let Err(e) = self.inserter.write(value_ref).await {
+                IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
                 tracing::error!(target: TRACING_TARGET,
                     ?e,
                     %hash,
@@ -168,6 +177,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
                     }
                 }
                 Err(e) => {
+                    IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
                     tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
                 }
             }

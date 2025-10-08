@@ -9,7 +9,8 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::{extract::State, routing::post, Router};
 use buildernet_orderflow_proxy::{
     cli::OrderflowIngressArgs,
-    ingress::{maybe_decompress, FLASHBOTS_SIGNATURE_HEADER},
+    consts::FLASHBOTS_SIGNATURE_HEADER,
+    ingress::maybe_decompress,
     jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
     runner::CliContext,
 };
@@ -32,7 +33,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     args.builder_url = builder_url;
     let user_listener = TcpListener::bind(&args.user_listen_url).await.unwrap();
     let system_listener = TcpListener::bind(&args.system_listen_url).await.unwrap();
-    let builder_listener = TcpListener::bind(&args.builder_listen_url).await.unwrap();
+    let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
     let task_manager = buildernet_orderflow_proxy::tasks::TaskManager::current();

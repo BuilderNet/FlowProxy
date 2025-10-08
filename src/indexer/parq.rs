@@ -23,6 +23,7 @@ use std::{
 use crate::{
     cli::ParquetArgs,
     indexer::{BuilderName, OrderReceivers, TRACING_TARGET},
+    metrics::{IndexerMetrics, Sampler},
     tasks::TaskExecutor,
     types::BundleReceipt,
 };
@@ -215,6 +216,10 @@ struct ParquetRunner {
 
 impl ParquetRunner {
     async fn run_loop(&mut self) {
+        let mut sampler = Sampler::default()
+            .with_sample_size(self.rx.capacity() / 2)
+            .with_interval(Duration::from_secs(4));
+
         let start = Instant::now();
         let mut interval = tokio::time::interval_at(start, Duration::from_secs(4));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -223,6 +228,10 @@ impl ParquetRunner {
         loop {
             tokio::select! {
                 maybe_receipt = self.rx.recv() => {
+                    sampler.sample(|| {
+                        IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), "bundle_receipt");
+                    });
+
                     let Some(receipt) = maybe_receipt else {
                         tracing::error!(target: TRACING_TARGET, "Bundle receipt channel closed, shutting down Parquet indexer");
                         break;

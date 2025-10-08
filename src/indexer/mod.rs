@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use crate::{
     cli::IndexerArgs,
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
+    metrics::IndexerMetrics,
     tasks::TaskExecutor,
     types::{BundleReceipt, SystemBundle},
 };
@@ -113,12 +114,14 @@ pub struct IndexerHandle {
 impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
+            IndexerMetrics::increment_bundle_indexing_failures(e.to_string());
             tracing::error!(?e, "failed to send bundle to index");
         }
     }
 
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt) {
         if let Err(e) = self.senders.bundle_receipt_tx.try_send(bundle_receipt) {
+            IndexerMetrics::increment_bundle_receipt_indexing_failures(e.to_string());
             tracing::error!(?e, "failed to send bundle receipt to index");
         }
     }
@@ -139,9 +142,11 @@ impl MockIndexer {
 #[cfg(test)]
 pub(crate) mod tests {
     use rbuilder_primitives::serialize::RawBundle;
-    use time::UtcDateTime;
 
-    use crate::types::SystemBundle;
+    use crate::{
+        priority::Priority,
+        types::{SystemBundle, UtcInstant},
+    };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
     /// bundle, along with the block number set to zero. The rest is to mainly populate some
@@ -182,15 +187,15 @@ pub(crate) mod tests {
     pub(crate) fn system_bundle_example() -> SystemBundle {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
-        let received_at = UtcDateTime::now();
-        SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
+        let received_at = UtcInstant::now();
+        SystemBundle::try_from_raw_bundle(bundle, signer, received_at, Priority::Medium).unwrap()
     }
 
     /// An example cancel bundle to use for testing.
     pub(crate) fn system_cancel_bundle_example() -> SystemBundle {
         let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
-        let received_at = UtcDateTime::now();
-        SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
+        let received_at = UtcInstant::now();
+        SystemBundle::try_from_raw_bundle(bundle, signer, received_at, Priority::Medium).unwrap()
     }
 }
