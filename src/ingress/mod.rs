@@ -42,10 +42,14 @@ use tracing::*;
 pub mod error;
 use error::IngressError;
 
-/// Header name for flashbots signature.
+/// Header name for BuilderNet signature.
+pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
+
+/// Header name for Flashbots signature.
+/// NOTE: this header is used for backwards compatibility and should be deprecated in the future.
 pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
 
-/// Header name for flashbots priority.
+/// Header name for BuilderNet priority.
 pub const BUILDERNET_PRIORITY_HEADER: &str = "X-BuilderNet-Priority";
 
 /// Header name for BuilderNet sent at timestamp (in Unix microseconds).
@@ -277,13 +281,19 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
+            // TODO:
             if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
                 }
             }
 
-            error!(target: "ingress", header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER), "Error verifying peer signature");
+            error!(
+                target: "ingress",
+                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
+                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
+                "Error verifying peer signature"
+            );
             return JsonRpcResponse::error(None, JsonRpcError::Internal);
         };
 
@@ -522,9 +532,12 @@ pub fn maybe_decompress(
     }
 }
 
-/// Parse [`FLASHBOTS_SIGNATURE_HEADER`] header and verify the signer of the request.
+/// Parse the signature from [`BUILDERNET_SIGNATURE_HEADER`] header and verify the signer of the
+/// request. [`FLASHBOTS_SIGNATURE_HEADER`] is supported for backwards compatibility.
 pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) -> Option<Address> {
-    let signature_header = headers.get(FLASHBOTS_SIGNATURE_HEADER)?;
+    let signature_header = headers
+        .get(BUILDERNET_SIGNATURE_HEADER)
+        .or_else(|| headers.get(FLASHBOTS_SIGNATURE_HEADER))?;
     let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;
 

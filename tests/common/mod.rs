@@ -9,7 +9,7 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::{extract::State, routing::post, Router};
 use buildernet_orderflow_proxy::{
     cli::OrderflowIngressArgs,
-    ingress::{maybe_decompress, FLASHBOTS_SIGNATURE_HEADER},
+    ingress::{maybe_decompress, BUILDERNET_SIGNATURE_HEADER},
     jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
     runner::CliContext,
 };
@@ -80,7 +80,7 @@ impl<S: Signer + Sync> IngressClient<S> {
             .body(body.into());
 
         if let Some(signature_header) = signature_header {
-            request = request.header(FLASHBOTS_SIGNATURE_HEADER, signature_header);
+            request = request.header(BUILDERNET_SIGNATURE_HEADER, signature_header);
         }
 
         request

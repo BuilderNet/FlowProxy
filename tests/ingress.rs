@@ -2,7 +2,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
 use buildernet_orderflow_proxy::{
-    ingress::FLASHBOTS_SIGNATURE_HEADER,
+    ingress::BUILDERNET_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
     utils::testutils::Random,
 };
@@ -118,7 +118,7 @@ async fn ingress_http_e2e() {
     let response = client
         .build_request(compressed, None)
         .header(header::CONTENT_ENCODING, "gzip")
-        .header(FLASHBOTS_SIGNATURE_HEADER, signature)
+        .header(BUILDERNET_SIGNATURE_HEADER, signature)
         .send()
         .await
         .unwrap();
