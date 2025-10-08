@@ -18,3 +18,5 @@ pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 
 /// Whether to use the legacy signature verification.
 pub const USE_LEGACY_SIGNATURE: bool = true;
+
+pub const BIG_REQUEST_SIZE_THRESHOLD_KB: usize = 50_000; // 50 KB

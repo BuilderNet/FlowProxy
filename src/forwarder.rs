@@ -1,10 +1,10 @@
 use crate::{
     builderhub::BuilderHubBuilder,
     consts::{
-        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
-        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
+        BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
+        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
     },
-    metrics::IngressMetrics,
+    metrics::{ForwarderMetrics, IngressMetrics},
     priority::{pchannel, Priority},
     types::{SystemBundle, SystemTransaction, UtcInstant},
     utils::UtcDateTimeHeader as _,
@@ -361,8 +361,6 @@ fn send_http_request(
     request: Arc<ForwardingRequest>,
 ) -> RequestFut<reqwest::Response, reqwest::Error> {
     Box::pin(async move {
-        let start_time = Instant::now();
-
         let received_at = request.received_at;
         let priority = request.priority;
         let forwarding_type = request.forwarding_type;
@@ -373,13 +371,18 @@ fn send_http_request(
             |inner| (inner.body, inner.headers),
         );
 
-        let call = client.post(url).body(body).headers(headers).send();
+        let is_big = body.len() > BIG_REQUEST_SIZE_THRESHOLD_KB;
+
+        let call = client.post(&url).body(body).headers(headers).send();
         IngressMetrics::record_e2e_order_processing_time(
             received_at.elapsed(),
             priority,
             forwarding_type,
         );
+
+        let start_time = Instant::now();
         let response = call.await;
+        ForwarderMetrics::record_rpc_call(start_time.elapsed(), url, is_big);
 
         BuilderResponse { start_time, response }
     })

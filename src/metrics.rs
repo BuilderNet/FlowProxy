@@ -9,6 +9,17 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub struct ForwarderMetrics;
+
+impl ForwarderMetrics {
+    pub fn record_rpc_call(elapsed: Duration, url: String, big_request: bool) {
+        let labels = [("url", url), ("big_request", big_request.to_string())];
+        histogram!("forwarder_rpc_call_duration_milliseconds", &labels)
+            .record(elapsed.as_millis() as f64);
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PriorityQueueMetrics;
 
 impl PriorityQueueMetrics {
