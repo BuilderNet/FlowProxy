@@ -20,6 +20,9 @@ pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 /// JSON-RPC method name for sending raw transactions.
 pub const ETH_SEND_RAW_TRANSACTION_METHOD: &str = "eth_sendRawTransaction";
 
+/// JSON-RPC method name for sending MEV Share bundles.
+pub const MEV_SEND_BUNDLE_METHOD: &str = "mev_sendBundle";
+
 /// Whether to use the legacy signature verification.
 pub const USE_LEGACY_SIGNATURE: bool = true;
 

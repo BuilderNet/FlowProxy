@@ -46,6 +46,16 @@ pub trait IngressHandlerMetricsExt {
     }
 
     #[inline]
+    fn increment_validation_errors<E: std::error::Error>(error: &E) {
+        counter!("ingress_validation_errors", "handler" => Self::HANDLER, "error" => error.to_string()).increment(1);
+    }
+
+    #[inline]
+    fn increment_order_cache_hit() {
+        counter!("ingress_order_cache_hit", "handler" => Self::HANDLER).increment(1);
+    }
+
+    #[inline]
     fn record_http_request(method: String, path: String, status: String, duration: Duration) {
         let labels = [
             ("handler", Self::HANDLER.to_string()),
@@ -62,6 +72,11 @@ pub trait IngressHandlerMetricsExt {
     #[inline]
     fn increment_bundles_received(priority: Priority) {
         counter!("ingress_send_bundle_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
+    }
+
+    #[inline]
+    fn increment_mev_share_bundles_received(priority: Priority) {
+        counter!("ingress_send_mev_share_bundle_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
     /// The duration of the `eth_sendBundle` RPC call.
@@ -124,6 +139,22 @@ impl SystemMetrics {
             ("big_request", big_request.to_string()),
         ];
         histogram!("ingress_e2e_bundle_processing_time_s", &labels).record(duration.as_secs_f64());
+    }
+
+    #[inline]
+    pub fn record_e2e_mev_share_bundle_processing_time(
+        duration: Duration,
+        priority: Priority,
+        direction: ForwardingDirection,
+        big_request: bool,
+    ) {
+        let labels = [
+            ("priority", priority.to_string()),
+            ("direction", direction.to_string()),
+            ("big_request", big_request.to_string()),
+        ];
+        histogram!("ingress_e2e_mev_share_bundle_processing_time_s", &labels)
+            .record(duration.as_secs_f64());
     }
 
     #[inline]

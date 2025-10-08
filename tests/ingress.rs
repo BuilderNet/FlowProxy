@@ -7,7 +7,7 @@ use buildernet_orderflow_proxy::{
     utils::testutils::Random,
 };
 use flate2::{write::GzEncoder, Compression};
-use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use reqwest::{header, StatusCode};
 use serde_json::json;
 use std::io::Write;
@@ -128,5 +128,19 @@ async fn ingress_http_e2e() {
     assert!(received.signing_address.is_some());
     // NOTE: This will have a signing address populated which we reset
     received.signing_address = None;
+    assert_eq!(received, bundle);
+}
+
+#[tokio::test]
+async fn ingress_e2e_mev_share_bundle() {
+    let mut rng = rand::rng();
+    let mut builder = BuilderReceiver::spawn().await;
+    let client = spawn_ingress(Some(builder.url())).await;
+
+    let bundle = RawShareBundle::random(&mut rng);
+    let response = client.send_mev_share_bundle(&bundle).await;
+    assert!(response.status().is_success());
+
+    let received = builder.recv::<RawShareBundle>().await.unwrap();
     assert_eq!(received, bundle);
 }

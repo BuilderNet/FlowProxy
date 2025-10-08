@@ -15,7 +15,7 @@ use buildernet_orderflow_proxy::{
     runner::CliContext,
 };
 use hyper::{header, HeaderMap};
-use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -98,6 +98,16 @@ impl<S: Signer + Sync> IngressClient<S> {
             "id": 0,
             "jsonrpc": JSONRPC_VERSION_2,
             "method": "eth_sendBundle",
+            "params": [bundle]
+        });
+        self.send_json(&request).await
+    }
+
+    pub(crate) async fn send_mev_share_bundle(&self, bundle: &RawShareBundle) -> reqwest::Response {
+        let request = json!({
+            "id": 0,
+            "jsonrpc": JSONRPC_VERSION_2,
+            "method": "mev_sendBundle",
             "params": [bundle]
         });
         self.send_json(&request).await
