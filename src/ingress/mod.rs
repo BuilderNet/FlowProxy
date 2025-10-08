@@ -414,9 +414,12 @@ impl OrderflowIngress {
 
         self.order_cache.insert(bundle_hash);
 
-        // Set replacement nonce if it is not set. This is needed to decode the replacement data
-        // correctly in [`SystemBundle::try_from_bundle_and_signer`].
-        if bundle.replacement_uuid.is_some() && bundle.replacement_nonce.is_none() {
+        // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
+        // needed to decode the replacement data correctly in
+        // [`SystemBundle::try_from_bundle_and_signer`].
+        if (bundle.replacement_uuid.is_some() || bundle.uuid.is_some()) &&
+            bundle.replacement_nonce.is_none()
+        {
             let timestamp = received_at.unix_timestamp_nanos() / 1000;
             bundle.replacement_nonce = Some(timestamp.try_into().expect("Timestamp too large"));
         }
