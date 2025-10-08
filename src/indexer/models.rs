@@ -126,10 +126,11 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
     fn from((bundle, builder_name): (SystemBundle, BuilderName)) -> Self {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
-                let micros = bundle.received_at.microsecond();
+                let micros = bundle.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle
                         .received_at
+                        .utc
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
                         .replace_microsecond(micros)
@@ -251,10 +252,11 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
             // transactions.
             DecodedBundle::Replacement(ref replacement) => {
-                let micros = bundle.received_at.microsecond();
+                let micros = bundle.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle
                         .received_at
+                        .utc
                         // Needed so that the `BundleRow` created has the same timestamp precision
                         // (micros) as the row written on clickhouse db.
                         .replace_microsecond(micros)
@@ -315,6 +317,7 @@ pub(crate) mod tests {
 
     use crate::{
         indexer::{self, models::BundleRow},
+        priority::Priority,
         types::SystemBundle,
     };
 
@@ -354,12 +357,15 @@ pub(crate) mod tests {
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
 
-        let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
+        let mut system_bundle_round_trip = SystemBundle::try_from_raw_bundle(
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
+            Priority::Medium,
         )
         .unwrap();
+
+        system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
 
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
@@ -373,13 +379,15 @@ pub(crate) mod tests {
         let raw_bundle_round_trip: RawBundle = bundle_row.into();
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
-        let system_bundle_round_trip = SystemBundle::try_from_bundle_and_signer(
+        let mut system_bundle_round_trip = SystemBundle::try_from_raw_bundle(
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
+            Priority::Medium,
         )
         .unwrap();
 
+        system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
 }

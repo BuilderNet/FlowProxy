@@ -9,7 +9,8 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::{extract::State, routing::post, Router};
 use buildernet_orderflow_proxy::{
     cli::OrderflowIngressArgs,
-    ingress::{maybe_decompress, FLASHBOTS_SIGNATURE_HEADER},
+    consts::FLASHBOTS_SIGNATURE_HEADER,
+    ingress::maybe_decompress,
     jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
     runner::CliContext,
 };
