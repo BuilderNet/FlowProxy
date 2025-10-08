@@ -3,7 +3,7 @@ use crate::{
     consts::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
-        USE_LEGACY_SIGNATURE,
+        MEV_SEND_BUNDLE_METHOD, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -15,8 +15,9 @@ use crate::{
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
-        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
-        EthereumTransaction, SystemBundle, SystemTransaction, UtcInstant,
+        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
+        EthResponse, EthereumTransaction, SystemBundle, SystemMevShareBundle, SystemTransaction,
+        UtcInstant,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -33,7 +34,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use flate2::read::GzDecoder;
-use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use reqwest::Url;
 use std::{
     collections::HashMap,
@@ -186,6 +187,19 @@ impl OrderflowIngress {
 
                 ingress.send_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
+            MEV_SEND_BUNDLE_METHOD => {
+                let Some(Ok(bundle)) =
+                    request.take_single_param().map(serde_json::from_value::<RawShareBundle>)
+                else {
+                    IngressUserMetrics::increment_json_rpc_parse_errors();
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                ingress
+                    .on_mev_share_bundle(entity, bundle, received_at)
+                    .await
+                    .map(EthResponse::BundleHash)
+            }
             _ => {
                 IngressUserMetrics::increment_json_rpc_unknown_method();
                 return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound);
@@ -307,6 +321,7 @@ impl OrderflowIngress {
                 let bundle_hash = bundle.bundle_hash();
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
+                    IngressSystemMetrics::increment_order_cache_hit();
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -347,6 +362,7 @@ impl OrderflowIngress {
                 let tx_hash = *tx.tx_hash();
                 if ingress.order_cache.contains(&tx_hash) {
                     trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
+                    IngressSystemMetrics::increment_order_cache_hit();
                     return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
                 }
 
@@ -358,6 +374,31 @@ impl OrderflowIngress {
                 IngressSystemMetrics::record_transaction_rpc_duration(received_at.elapsed());
 
                 (raw, EthResponse::TxHash(tx_hash))
+            }
+            MEV_SEND_BUNDLE_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    IngressSystemMetrics::increment_json_rpc_parse_errors();
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                let Ok(bundle) = serde_json::from_value::<RawShareBundle>(raw.clone()) else {
+                    IngressSystemMetrics::increment_json_rpc_parse_errors();
+                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                };
+
+                let bundle_hash = bundle.bundle_hash();
+                if ingress.order_cache.contains(&bundle_hash) {
+                    trace!(target: "ingress", bundle_hash = %bundle_hash, "Share bundle already processed");
+                    IngressSystemMetrics::increment_order_cache_hit();
+                    return JsonRpcResponse::result(
+                        request.id,
+                        EthResponse::BundleHash(bundle_hash),
+                    );
+                }
+
+                ingress.order_cache.insert(bundle_hash);
+
+                (raw, EthResponse::BundleHash(bundle_hash))
             }
             _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
         };
@@ -385,7 +426,8 @@ impl OrderflowIngress {
         // Deduplicate bundles.
         let bundle_hash = bundle.bundle_hash();
         if self.order_cache.contains(&bundle_hash) {
-            trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
+            trace!(target: "ingress", %bundle_hash, "Bundle already processed");
+            IngressUserMetrics::increment_order_cache_hit();
             return Ok(bundle_hash);
         }
 
@@ -408,35 +450,105 @@ impl OrderflowIngress {
                 SystemBundle::try_from_raw_bundle(bundle, signer, received_at, priority)
             })
             .await
-            .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
+            .inspect_err(|e| {
+                error!(target: "ingress", ?e, "Error decoding bundle");
+                IngressUserMetrics::increment_validation_errors(&e);
+            })?;
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
             }
             DecodedBundle::Replacement(replacement_data) => {
-                debug!(target: "ingress", replacement_data = ?replacement_data, "Replacement bundle decoded");
+                debug!(target: "ingress", ?replacement_data, "Replacement bundle decoded");
             }
         }
 
         IngressUserMetrics::increment_bundles_received(priority);
 
         let elapsed = start.elapsed();
-        debug!(target: "ingress", bundle_uuid = %bundle.uuid(), elapsed = ?elapsed, "Bundle validated");
+        debug!(target: "ingress", bundle_uuid = %bundle.uuid(), ?elapsed, "Bundle validated");
 
         self.indexer_handle.index_bundle(bundle.clone());
 
         self.send_bundle(bundle).await
     }
 
+    /// Handles a new MEV Share bundle.
+    async fn on_mev_share_bundle(
+        &self,
+        entity: Entity,
+        bundle: RawShareBundle,
+        received_at: UtcInstant,
+    ) -> Result<B256, IngressError> {
+        let start = Instant::now();
+        trace!(target: "ingress", ?entity, "Processing MEV Share bundle");
+        // Convert to system bundle.
+        let Entity::Signer(signer) = entity else { unreachable!() };
+
+        let priority = self.priority_for(entity, EntityRequest::MevShareBundle(&bundle));
+
+        // Deduplicate bundles.
+        let bundle_hash = bundle.bundle_hash();
+        if self.order_cache.contains(&bundle_hash) {
+            trace!(target: "ingress", %bundle_hash, "Bundle already processed");
+            IngressUserMetrics::increment_order_cache_hit();
+            return Ok(bundle_hash);
+        }
+
+        self.order_cache.insert(bundle_hash);
+
+        // Decode and validate the bundle.
+        let bundle = self
+            .pqueues
+            .spawn_with_priority(priority, move || {
+                SystemMevShareBundle::try_from_bundle_and_signer(
+                    bundle,
+                    signer,
+                    received_at,
+                    priority,
+                )
+            })
+            .await
+            .inspect_err(|e| {
+                error!(target: "ingress", ?e, "Error decoding bundle");
+                IngressUserMetrics::increment_validation_errors(&e);
+            })?;
+
+        match bundle.decoded.as_ref() {
+            DecodedShareBundle::New(bundle) => {
+                debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
+            }
+            DecodedShareBundle::Cancel(cancellation) => {
+                debug!(target: "ingress", ?cancellation, "Cancellation bundle decoded");
+            }
+        }
+
+        IngressUserMetrics::increment_mev_share_bundles_received(priority);
+
+        let elapsed = start.elapsed();
+        debug!(target: "ingress", %bundle_hash, ?elapsed, "MEV Share bundle validated");
+
+        self.send_mev_share_bundle(priority, bundle).await
+    }
+
     async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
-        let uuid = bundle.uuid();
+        let bundle_uuid = bundle.uuid();
         let bundle_hash = bundle.bundle_hash();
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(bundle);
+        debug!(target: "ingress", %bundle_uuid, %bundle_hash, "Bundle processed");
+        Ok(bundle_hash)
+    }
 
-        debug!(target: "ingress", bundle_uuid = %uuid, bundle_hash = %bundle_hash, "Bundle processed");
-
+    async fn send_mev_share_bundle(
+        &self,
+        priority: Priority,
+        bundle: SystemMevShareBundle,
+    ) -> Result<B256, IngressError> {
+        let bundle_hash = bundle.bundle_hash();
+        self.forwarders.broadcast_mev_share_bundle(priority, bundle);
+        debug!(target: "ingress", %bundle_hash, "MEV Share bundle processed");
         Ok(bundle_hash)
     }
 
@@ -452,6 +564,7 @@ impl OrderflowIngress {
         // Deduplicate transactions.
         if self.order_cache.contains(&tx_hash) {
             trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
+            IngressUserMetrics::increment_order_cache_hit();
             return Ok(tx_hash);
         }
 
@@ -476,7 +589,10 @@ impl OrderflowIngress {
                 Ok::<(), IngressError>(())
             })
             .await
-            .inspect_err(|e| error!(target: "ingress", ?e, "Error validating transaction"))?;
+            .inspect_err(|e| {
+                error!(target: "ingress", ?e, "Error validating transaction");
+                IngressUserMetrics::increment_validation_errors(e);
+            })?;
 
         // Send request to all forwarders.
         self.forwarders.broadcast_transaction(system_transaction);
