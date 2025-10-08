@@ -9,7 +9,7 @@ use crate::{
     indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{
-        IngressHandlerMetricsExt as _, IngressMetrics, IngressSystemMetrics, IngressUserMetrics,
+        IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics, SystemMetrics,
     },
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
@@ -107,7 +107,7 @@ impl OrderflowIngress {
             let len_after = self.entities.len();
             let num_removed = len_before.saturating_sub(len_after);
 
-            IngressMetrics::entity_count(len_after);
+            SystemMetrics::entity_count(len_after);
             info!(target: "ingress::state", entries = len_after, num_removed, "Finished state maintenance");
         }
     }
@@ -118,8 +118,6 @@ impl OrderflowIngress {
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
         let received_at = UtcInstant::now();
-
-        IngressUserMetrics::increment_requests_received();
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
@@ -244,11 +242,8 @@ impl OrderflowIngress {
         let sent_at = headers
             .get(BUILDERNET_SENT_AT_HEADER)
             .map(|h| UtcDateTime::parse_header(h).expect("Failed to parse sent at header"));
-        let received_at = Instant::now();
-        let received_at_utc = UtcDateTime::now();
+        let received_at = UtcInstant::now();
         let payload_size = body.len();
-
-        IngressSystemMetrics::increment_requests_received();
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
@@ -314,13 +309,16 @@ impl OrderflowIngress {
                 let receipt = BundleReceipt {
                     bundle_hash,
                     sent_at,
-                    received_at: received_at_utc,
+                    received_at: received_at.utc,
                     src_builder_name: peer,
                     dst_builder_name: None,
                     payload_size: payload_size as u32,
                     priority,
                 };
+
                 ingress.indexer_handle.index_bundle_receipt(receipt);
+
+                IngressSystemMetrics::record_bundle_rpc_duration(received_at.elapsed());
 
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
@@ -347,6 +345,8 @@ impl OrderflowIngress {
 
                 // TODO: Index transaction receipt
                 _ = sent_at;
+
+                IngressSystemMetrics::record_transaction_rpc_duration(received_at.elapsed());
 
                 (raw, EthResponse::TxHash(tx_hash))
             }
@@ -386,7 +386,7 @@ impl OrderflowIngress {
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
-                SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at)
+                SystemBundle::try_from_raw_bundle(bundle, signer, received_at, priority)
             })
             .await
             .inspect_err(|e| error!(target: "ingress", ?e, "Error decoding bundle"))?;
@@ -407,18 +407,14 @@ impl OrderflowIngress {
 
         self.indexer_handle.index_bundle(bundle.clone());
 
-        self.send_bundle(priority, bundle).await
+        self.send_bundle(bundle).await
     }
 
-    async fn send_bundle(
-        &self,
-        priority: Priority,
-        bundle: SystemBundle,
-    ) -> Result<B256, IngressError> {
+    async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
         let uuid = bundle.uuid();
         let bundle_hash = bundle.bundle_hash();
         // Send request to all forwarders.
-        self.forwarders.broadcast_bundle(priority, bundle);
+        self.forwarders.broadcast_bundle(bundle);
 
         debug!(target: "ingress", bundle_uuid = %uuid, bundle_hash = %bundle_hash, "Bundle processed");
 

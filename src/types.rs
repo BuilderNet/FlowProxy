@@ -36,11 +36,9 @@ pub struct SystemBundle {
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
     #[serde(flatten)]
     pub raw_bundle: Arc<RawBundle>,
-
     /// The decoded bundle.
     #[serde(skip)]
     pub decoded_bundle: Arc<DecodedBundle>,
-
     /// The bundle hash.
     #[serde(skip)]
     pub bundle_hash: B256,
@@ -48,6 +46,9 @@ pub struct SystemBundle {
     /// The time at which the bundle has first been seen from the local operator.
     #[serde(skip)]
     pub received_at: UtcInstant,
+    /// The priority of the bundle.
+    #[serde(skip)]
+    pub priority: Priority,
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
@@ -145,12 +146,13 @@ impl BundleHash for RawBundle {
 }
 
 impl SystemBundle {
-    /// Create a new system bundle from a raw bundle and a signer.
-    /// Returns an error if the bundle fails to decode.
-    pub fn try_from_bundle_and_signer(
+    /// Create a new system bundle from a raw bundle and additional data.
+    /// Returns an error if the raw bundle fails to decode.
+    pub fn try_from_raw_bundle(
         mut bundle: RawBundle,
         signer: Address,
         received_at: UtcInstant,
+        priority: Priority,
     ) -> Result<Self, RawBundleConvertError> {
         bundle.signing_address = Some(signer);
 
@@ -168,6 +170,7 @@ impl SystemBundle {
             decoded_bundle: Arc::new(decoded),
             bundle_hash,
             received_at,
+            priority,
         })
     }
 
@@ -206,7 +209,7 @@ impl SystemBundle {
     }
 
     /// Encode the inner bundle (no signer).
-    pub fn encode_local(self) -> Vec<u8> {
+    pub fn encode_local(self) -> WithEncoding<Self> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
@@ -214,7 +217,8 @@ impl SystemBundle {
             "params": [self.raw_bundle]
         });
 
-        serde_json::to_vec(&json).unwrap()
+        let encoding = serde_json::to_vec(&json).unwrap();
+        WithEncoding { inner: self, encoding }
     }
 
     /// Encode the full system bundle.
@@ -360,6 +364,42 @@ impl From<UtcInstant> for UtcDateTime {
 impl From<UtcInstant> for Instant {
     fn from(value: UtcInstant) -> Self {
         value.instant
+    }
+}
+
+/// A wrapper around a type `T` that includes its encoding (e.g. JSON-RPC) as bytes.
+#[derive(Debug, Clone)]
+pub struct WithEncoding<T> {
+    pub inner: T,
+    pub encoding: Vec<u8>,
+}
+
+/// An order that can be either a bundle or a transaction, along with its JSON-RPC encoding, ready
+/// to be sent on the wire.
+#[derive(Debug, Clone)]
+pub enum EncodedOrder {
+    Bundle(WithEncoding<SystemBundle>),
+    Transaction(WithEncoding<SystemTransaction>),
+}
+
+impl EncodedOrder {
+    pub fn priority(&self) -> Priority {
+        match self {
+            EncodedOrder::Bundle(bundle) => bundle.inner.priority,
+            EncodedOrder::Transaction(tx) => tx.inner.received_at,
+        }
+    }
+}
+
+impl From<WithEncoding<SystemBundle>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemBundle>) -> Self {
+        Self::Bundle(value)
+    }
+}
+
+impl From<WithEncoding<SystemTransaction>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemTransaction>) -> Self {
+        Self::Transaction(value)
     }
 }
 

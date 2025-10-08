@@ -4,9 +4,9 @@ use crate::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
     },
-    metrics::{ForwarderMetrics, IngressMetrics},
+    metrics::{ForwarderMetrics, SystemMetrics},
     priority::{pchannel, Priority},
-    types::{SystemBundle, SystemTransaction, UtcInstant},
+    types::{EncodedOrder, SystemBundle, SystemTransaction, UtcInstant},
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;
@@ -59,13 +59,12 @@ impl IngressForwarders {
     }
 
     /// Broadcast bundle to all forwarders.
-    pub fn broadcast_bundle(&self, priority: Priority, bundle: SystemBundle) {
+    pub fn broadcast_bundle(&self, bundle: SystemBundle) {
         let received_at = bundle.received_at;
 
         // Create local request first
-        let local =
-            ForwardingRequest::user_to_local(priority, bundle.clone().encode_local(), received_at);
-        let _ = self.local.send(priority, local);
+        let local = ForwardingRequest::user_to_local(bundle.clone().encode_local());
+        let _ = self.local.send(local);
 
         let body = bundle.encode();
 
@@ -161,6 +160,11 @@ pub fn spawn_forwarder(
     Ok(request_tx)
 }
 
+pub enum OrderType {
+    Bundle,
+    Transaction,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ForwardingType {
     UserToLocal,
@@ -181,17 +185,11 @@ impl Display for ForwardingType {
 /// The arguments for creating a [`ForwardingRequest`].
 #[derive(Debug, Clone)]
 struct ForwardingRequestArgs {
-    /// The priority of the request.
-    pub priority: Priority,
-    /// The method of the request.
-    body: Vec<u8>,
+    encoded_order: EncodedOrder,
     /// The optional signature header.
     signature_header: Option<String>,
     /// The optional sent-at header.
     sent_at_header: Option<UtcDateTime>,
-
-    /// The time at which we first received the data we're forwarding.
-    received_at: UtcInstant,
 
     _type: ForwardingType,
 }
@@ -199,7 +197,7 @@ struct ForwardingRequestArgs {
 #[derive(Debug)]
 pub struct ForwardingRequest {
     /// The data to be forwarded.
-    pub body: Vec<u8>,
+    pub encoded_order: EncodedOrder,
     /// The headers of the request.
     pub headers: reqwest::header::HeaderMap,
     /// The priority of data forwarded.
@@ -211,57 +209,45 @@ pub struct ForwardingRequest {
 }
 
 impl ForwardingRequest {
-    pub fn user_to_local(priority: Priority, body: Vec<u8>, received_at: UtcInstant) -> Arc<Self> {
+    pub fn user_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
         let args = ForwardingRequestArgs {
-            priority,
-            body,
+            encoded_order,
             signature_header: None,
             sent_at_header: None,
-            received_at,
             _type: ForwardingType::UserToLocal,
         };
         Self::create_request(args)
     }
 
     pub fn user_to_system(
-        priority: Priority,
-        body: Vec<u8>,
+        encoded_order: EncodedOrder,
         signature_header: String,
         sent_at_header: UtcDateTime,
-        received_at: UtcInstant,
     ) -> Arc<Self> {
         let args = ForwardingRequestArgs {
-            priority,
-            body,
+            encoded_order,
             signature_header: Some(signature_header),
             sent_at_header: Some(sent_at_header),
-            received_at,
             _type: ForwardingType::UserToSystem,
         };
         Self::create_request(args)
     }
 
-    pub fn system_to_local(
-        priority: Priority,
-        body: Vec<u8>,
-        received_at: UtcInstant,
-    ) -> Arc<Self> {
+    pub fn system_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
         let args = ForwardingRequestArgs {
-            priority,
-            body,
+            encoded_order,
             signature_header: None,
             sent_at_header: None,
-            received_at,
             _type: ForwardingType::SystemToLocal,
         };
         Self::create_request(args)
     }
 
-    /// Create a new forwarding request to a builder. The [`BUILDERNET_SENT_AT_HEADER`] is formatted as a UNIX
-    /// timestamp in nanoseconds.
+    /// Create a new forwarding request to a builder. The [`BUILDERNET_SENT_AT_HEADER`] is formatted
+    /// as a UNIX timestamp in nanoseconds.
     fn create_request(args: ForwardingRequestArgs) -> Arc<Self> {
         let mut headers = HeaderMap::new();
-        headers.insert(BUILDERNET_PRIORITY_HEADER, args.priority.to_string().parse().unwrap());
+        headers.insert(BUILDERNET_PRIORITY_HEADER, args.priority().to_string().parse().unwrap());
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         if let Some(signature_header) = args.signature_header {
@@ -281,6 +267,10 @@ impl ForwardingRequest {
         };
 
         Arc::new(req)
+    }
+
+    pub fn is_big(&self) -> bool {
+        self.body.len() > BIG_REQUEST_SIZE_THRESHOLD_KB
     }
 }
 
@@ -364,6 +354,7 @@ fn send_http_request(
         let received_at = request.received_at;
         let priority = request.priority;
         let forwarding_type = request.forwarding_type;
+        let is_big = request.is_big();
 
         // Try to avoid cloning the body and headers if there is only one reference.
         let (body, headers) = Arc::try_unwrap(request).map_or_else(
@@ -371,17 +362,14 @@ fn send_http_request(
             |inner| (inner.body, inner.headers),
         );
 
-        let is_big = body.len() > BIG_REQUEST_SIZE_THRESHOLD_KB;
-
-        let call = client.post(&url).body(body).headers(headers).send();
-        IngressMetrics::record_e2e_order_processing_time(
+        SystemMetrics::record_e2e_order_processing_time(
             received_at.elapsed(),
             priority,
             forwarding_type,
         );
 
         let start_time = Instant::now();
-        let response = call.await;
+        let response = client.post(&url).body(body).headers(headers).send().await;
         ForwarderMetrics::record_rpc_call(start_time.elapsed(), url, is_big);
 
         BuilderResponse { start_time, response }

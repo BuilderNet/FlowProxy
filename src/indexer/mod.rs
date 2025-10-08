@@ -185,7 +185,7 @@ pub(crate) mod tests {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
-        SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
+        SystemBundle::try_from_raw_bundle(bundle, signer, received_at).unwrap()
     }
 
     /// An example cancel bundle to use for testing.
@@ -193,6 +193,6 @@ pub(crate) mod tests {
         let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
-        SystemBundle::try_from_bundle_and_signer(bundle, signer, received_at).unwrap()
+        SystemBundle::try_from_raw_bundle(bundle, signer, received_at).unwrap()
     }
 }

@@ -2,20 +2,16 @@ use std::time::{Duration, Instant};
 
 use metrics::{counter, gauge, histogram};
 
-use crate::{
-    consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD},
-    forwarder::ForwardingType,
-    priority::Priority,
-};
+use crate::{forwarder::ForwardingType, priority::Priority};
 
 #[derive(Debug, Clone)]
 pub struct ForwarderMetrics;
 
 impl ForwarderMetrics {
-    pub fn record_rpc_call(elapsed: Duration, url: String, big_request: bool) {
-        let labels = [("url", url), ("big_request", big_request.to_string())];
-        histogram!("forwarder_rpc_call_duration_milliseconds", &labels)
-            .record(elapsed.as_millis() as f64);
+    /// The duration of the RPC call to a peer.
+    #[inline]
+    pub fn record_rpc_call(url: String, duration: Duration, big_request: bool) {
+        histogram!("forwarder_rpc_call_duration_ms", "url" => url, "big_request" => big_request.to_string()).record(duration.as_millis() as f64);
     }
 }
 
@@ -23,6 +19,7 @@ impl ForwarderMetrics {
 pub struct PriorityQueueMetrics;
 
 impl PriorityQueueMetrics {
+    #[inline]
     pub fn set_queue_size(size: usize, priority: &'static str) {
         gauge!("priority_queue_size", "priority" => priority).set(size as f64);
     }
@@ -33,27 +30,22 @@ pub trait IngressHandlerMetricsExt {
 
     // MISC
 
-    fn increment_requests_received() {
-        counter!("ingress_requests_received", "handler" => Self::HANDLER).increment(1);
-    }
-
+    #[inline]
     fn increment_requests_rate_limited() {
         counter!("ingress_requests_rate_limited", "handler" => Self::HANDLER).increment(1);
     }
 
+    #[inline]
     fn increment_json_rpc_parse_errors() {
         counter!("ingress_json_rpc_parse_errors", "handler" => Self::HANDLER).increment(1);
     }
 
+    #[inline]
     fn increment_json_rpc_unknown_method() {
         counter!("ingress_json_rpc_unknown_method", "handler" => Self::HANDLER).increment(1);
     }
 
-    fn record_http_handler_duration(duration: Duration) {
-        histogram!("ingress_http_handler_duration_ms", "handler" => Self::HANDLER)
-            .record(duration.as_millis() as f64);
-    }
-
+    #[inline]
     fn record_http_request(method: String, path: String, status: String, duration: Duration) {
         let labels = [
             ("handler", Self::HANDLER.to_string()),
@@ -61,29 +53,35 @@ pub trait IngressHandlerMetricsExt {
             ("path", path),
             ("status", status),
         ];
-        counter!("ingress_http_requests_total", &labels).increment(1);
+
         histogram!("ingress_http_request_duration_ms", &labels).record(duration.as_millis() as f64);
     }
 
     // BUNDLES
 
+    #[inline]
     fn increment_bundles_received(priority: Priority) {
-        counter!("ingress_bundles_received", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
+        counter!("ingress_send_bundle_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
-    fn record_bundle_processing_duration(duration: Duration) {
-        histogram!("ingress_bundle_processing_duration_ms", "handler" => Self::HANDLER)
+    /// The duration of the `eth_sendBundle` RPC call.
+    #[inline]
+    fn record_bundle_rpc_duration(duration: Duration) {
+        histogram!("ingress_send_bundle_request_duration_ms", "handler" => Self::HANDLER)
             .record(duration.as_millis() as f64);
     }
 
     // TRANSACTIONS
 
+    #[inline]
     fn increment_transactions_received(priority: Priority) {
-        counter!("ingress_transactions_received", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
+        counter!("ingress_send_transaction_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
-    fn record_transaction_processing_duration(duration: Duration) {
-        histogram!("ingress_transaction_processing_duration_ms", "handler" => Self::HANDLER)
+    /// The duration of the `eth_sendRawTransaction` RPC call.
+    #[inline]
+    fn record_transaction_rpc_duration(duration: Duration) {
+        histogram!("ingress_send_transaction_request_duration_ms", "handler" => Self::HANDLER)
             .record(duration.as_millis() as f64);
     }
 }
@@ -102,23 +100,38 @@ impl IngressHandlerMetricsExt for IngressSystemMetrics {
     const HANDLER: &'static str = "system";
 }
 
+/// Metrics related to the whole system.
 #[derive(Debug, Clone)]
-pub struct IngressMetrics;
+pub struct SystemMetrics;
 
 #[allow(missing_debug_implementations)]
-impl IngressMetrics {
+impl SystemMetrics {
+    #[inline]
     pub fn entity_count(count: usize) {
         gauge!("ingress_entity_count").set(count as f64);
     }
 
-    pub fn record_e2e_order_processing_time(
+    #[inline]
+    pub fn record_e2e_bundle_processing_time(
         duration: Duration,
         priority: Priority,
         forward_type: ForwardingType,
     ) {
         let labels =
             [("priority", priority.to_string()), ("forward_type", forward_type.to_string())];
-        histogram!("ingress_e2e_order_processing_time_seconds", &labels)
+        histogram!("ingress_e2e_bundle_processing_time_ms", &labels)
+            .record(duration.as_millis() as f64);
+    }
+
+    #[inline]
+    pub fn record_e2e_transaction_processing_time(
+        duration: Duration,
+        priority: Priority,
+        forward_type: ForwardingType,
+    ) {
+        let labels =
+            [("priority", priority.to_string()), ("forward_type", forward_type.to_string())];
+        histogram!("ingress_e2e_transaction_processing_time_ms", &labels)
             .record(duration.as_millis() as f64);
     }
 }
@@ -128,10 +141,12 @@ pub struct BuilderHubMetrics;
 
 #[allow(missing_debug_implementations)]
 impl BuilderHubMetrics {
+    #[inline]
     pub fn increment_builderhub_peer_request_failures(err: String) {
         counter!("builderhub_peer_request_failures", "error" => err).increment(1);
     }
 
+    #[inline]
     pub fn builderhub_peer_count(count: usize) {
         gauge!("builderhub_peer_count").set(count as f64);
     }
@@ -142,26 +157,32 @@ pub struct IndexerMetrics;
 
 #[allow(missing_debug_implementations)]
 impl IndexerMetrics {
+    #[inline]
     pub fn increment_bundle_indexing_failures(err: String) {
         counter!("indexer_bundle_indexing_failures", "error" => err).increment(1);
     }
 
+    #[inline]
     pub fn increment_bundle_receipt_indexing_failures(err: String) {
         counter!("indexer_bundle_receipt_indexing_failures", "error" => err).increment(1);
     }
 
+    #[inline]
     pub fn increment_clickhouse_write_failures(err: String) {
         counter!("indexer_clickhouse_writing_failures", "error" => err).increment(1);
     }
 
+    #[inline]
     pub fn increment_clickhouse_commit_failures(err: String) {
         counter!("indexer_clickhouse_writing_failures", "error" => err).increment(1);
     }
 
+    #[inline]
     pub fn set_clickhouse_queue_size(size: usize, order: &'static str) {
         gauge!("indexer_clickhouse_queue_size", "order" => order).set(size as f64);
     }
 
+    #[inline]
     pub fn set_parquet_queue_size(size: usize, order: &'static str) {
         gauge!("indexer_parquet_queue_size", "order" => order).set(size as f64);
     }
