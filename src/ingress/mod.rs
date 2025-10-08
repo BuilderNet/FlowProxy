@@ -281,7 +281,6 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            // TODO:
             if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
