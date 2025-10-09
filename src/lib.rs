@@ -6,6 +6,7 @@ use crate::{
     },
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
+    tasks::TaskExecutor,
 };
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -93,7 +94,7 @@ pub async fn run_with_listeners(
         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
     }
 
-    let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.task_executor);
+    let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.task_executor.clone());
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
@@ -112,11 +113,17 @@ pub async fn run_with_listeners(
         let builder_hub = builderhub::BuilderHub::new(builder_hub_url);
         builder_hub.register(local_signer, None).await?;
 
-        tokio::spawn({
-            let peers = peers.clone();
-            async move {
-                run_update_peers(local_signer, builder_hub, peers, args.disable_forwarding).await
-            }
+        let peers = peers.clone();
+        let task_executor = ctx.task_executor.clone();
+        ctx.task_executor.spawn_critical("run_update_peers", async move {
+            run_update_peers(
+                local_signer,
+                builder_hub,
+                peers,
+                args.disable_forwarding,
+                task_executor,
+            )
+            .await
         });
     } else {
         warn!("No BuilderHub URL provided, running with local peer store");
@@ -125,10 +132,18 @@ pub async fn run_with_listeners(
         let peer_store =
             local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
 
-        tokio::spawn({
-            let peers = peers.clone();
+        let peers = peers.clone();
+        let task_executor = ctx.task_executor.clone();
+        ctx.task_executor.spawn_critical("local_update_peers", {
             async move {
-                run_update_peers(local_signer, peer_store, peers, args.disable_forwarding).await
+                run_update_peers(
+                    local_signer,
+                    peer_store,
+                    peers,
+                    args.disable_forwarding,
+                    task_executor.clone(),
+                )
+                .await
             }
         });
     }
@@ -140,6 +155,7 @@ pub async fn run_with_listeners(
             String::from("local-builder"),
             builder_url.to_string(),
             client.clone(),
+            ctx.task_executor.clone(),
         )?;
 
         IngressForwarders::new(local_sender, peers, orderflow_signer)
@@ -232,6 +248,7 @@ async fn run_update_peers(
     peer_store: impl PeerStore,
     peers: Arc<DashMap<String, PeerHandle>>,
     disable_forwarding: bool,
+    task_executor: TaskExecutor,
 ) {
     let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
     let delay = Duration::from_secs(30);
@@ -292,9 +309,13 @@ async fn run_update_peers(
                     continue;
                 }
 
-                let sender =
-                    spawn_forwarder(builder.name.clone(), builder.system_api(), client.clone())
-                        .expect("malformed url");
+                let sender = spawn_forwarder(
+                    builder.name.clone(),
+                    builder.system_api(),
+                    client.clone(),
+                    task_executor.clone(),
+                )
+                .expect("malformed url");
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Inserting peer configuration");
                 entry.insert(PeerHandle { info: builder, sender });

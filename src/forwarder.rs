@@ -5,8 +5,10 @@ use crate::{
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
         MEV_SEND_BUNDLE_METHOD,
     },
+    jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::{ForwarderMetrics, SystemMetrics},
     priority::{pchannel, Priority},
+    tasks::TaskExecutor,
     types::{
         EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithEncoding,
@@ -32,7 +34,10 @@ use std::{
     time::Instant,
 };
 use time::UtcDateTime;
+use tokio::sync::mpsc;
 use tracing::*;
+
+const FORWARDER: &str = "ingress::forwarder";
 
 #[derive(Debug)]
 pub struct IngressForwarders {
@@ -79,7 +84,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: "ingress::forwarder", name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(target: FORWARDER, name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -99,7 +104,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: "ingress::forwarder", name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(target: FORWARDER, name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -119,7 +124,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: "ingress::forwarder", name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        debug!(target: FORWARDER, name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
         self.broadcast(forward);
     }
 
@@ -175,12 +180,16 @@ pub fn spawn_forwarder(
     name: String,
     url: String,
     client: reqwest::Client, // request client to be reused for http senders
+    task_executor: TaskExecutor,
 ) -> eyre::Result<pchannel::UnboundedSender<Arc<ForwardingRequest>>> {
     let (request_tx, request_rx) = pchannel::unbounded_channel();
     match Url::parse(&url)?.scheme() {
         "http" | "https" => {
             info!(%name, %url, "Spawning HTTP forwarder");
-            tokio::spawn(HttpForwarder::new(client, name, url, request_rx));
+            let (forwarder, decoder) =
+                HttpForwarder::new(client.clone(), name.clone(), url, request_rx);
+            task_executor.spawn(forwarder);
+            task_executor.spawn(decoder.run());
         }
 
         scheme => {
@@ -293,11 +302,18 @@ struct BuilderResponse<Ok, Err> {
 
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = BuilderResponse<Ok, Err>> + Send>>;
 
+/// An HTTP forwarder that forwards requests to a builder.
 struct HttpForwarder {
     client: reqwest::Client,
+    /// The name of the builder we're forwarding to.
     name: String,
+    /// The URL of the builder.
     url: String,
+    /// The receiver of forwarding requests.
     request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
+    /// The sender to decode [`reqwest::Response`] errors.
+    error_decoder_tx: mpsc::Sender<reqwest::Response>,
+    /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
 }
 
@@ -307,17 +323,55 @@ impl HttpForwarder {
         name: String,
         url: String,
         request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
-    ) -> Self {
-        Self { client, name, url, request_rx, pending: FuturesUnordered::new() }
+    ) -> (Self, ResponseErrorDecoder) {
+        let (error_decoder_tx, error_decoder_rx) = mpsc::channel(1024);
+        let decoder =
+            ResponseErrorDecoder { name: name.clone(), url: url.clone(), rx: error_decoder_rx };
+        (
+            Self {
+                client,
+                name,
+                url,
+                request_rx,
+                pending: FuturesUnordered::new(),
+                error_decoder_tx,
+            },
+            decoder,
+        )
     }
 
     fn on_builder_response(
         &mut self,
         response: BuilderResponse<reqwest::Response, reqwest::Error>,
     ) {
-        let BuilderResponse { start_time, response, .. } = response;
-        if let Err(error) = response {
-            warn!(target: "ingress::forwarder", name = %self.name, ?error, elapsed = ?start_time.elapsed(), "Error forwarding request");
+        let BuilderResponse { start_time, response: response_result, .. } = response;
+        let elapsed = start_time.elapsed();
+
+        match response_result {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_client_error() {
+                    error!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Client error from builder");
+                    // `response.json` is async, so we send it to the decoder.
+                    if let Err(e) = self.error_decoder_tx.try_send(response) {
+                        error!(target: FORWARDER, name = %self.name, ?e, "Failed to send error response to decoder");
+                    }
+                    ForwarderMetrics::increment_http_call_failures(
+                        self.name.clone(),
+                        status.to_string(),
+                    );
+                } else if status.is_server_error() {
+                    warn!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Server error from builder");
+                    ForwarderMetrics::increment_http_call_failures(
+                        self.name.clone(),
+                        status.to_string(),
+                    );
+                }
+            }
+            Err(error) => {
+                error!(target: FORWARDER, name = %self.name, ?error, ?elapsed, "Error forwarding request");
+                ForwarderMetrics::increment_request_processing_failures(self.name.clone());
+            }
         }
     }
 }
@@ -331,10 +385,10 @@ impl Future for HttpForwarder {
         loop {
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
-                    info!(target: "ingress::forwarder", name = %this.name, "Terminating forwarder");
+                    info!(target: FORWARDER, name = %this.name, "Terminating forwarder");
                     return Poll::Ready(());
                 };
-                trace!(target: "ingress::forwarder", name = %this.name, ?request, "Sending request");
+                trace!(target: FORWARDER, name = %this.name, ?request, "Sending request");
                 this.pending.push(send_http_request(
                     this.client.clone(),
                     this.url.clone(),
@@ -349,6 +403,44 @@ impl Future for HttpForwarder {
             }
 
             return Poll::Pending;
+        }
+    }
+}
+
+/// A [`reqwest::Response`] error decoder, associated to a certain [`HttpForwarder`] which traces
+/// errors from client error responses.
+#[derive(Debug)]
+pub struct ResponseErrorDecoder {
+    /// The name of the builder
+    pub name: String,
+    /// The url of the builder
+    pub url: String,
+    /// The receiver of the error responses.
+    pub rx: mpsc::Receiver<reqwest::Response>,
+}
+
+impl ResponseErrorDecoder {
+    pub async fn run(mut self) {
+        while let Some(response) = self.rx.recv().await {
+            let status = response.status();
+            if !status.is_client_error() {
+                warn!(target: FORWARDER, name = %self.name, url = %self.url, %status, "Ignoring non-client-error response in error decoder");
+            }
+
+            match response.json::<JsonRpcResponse<()>>().await {
+                Ok(body) => match body.result_or_error {
+                    JsonRpcResponseTy::Result(res) => {
+                        warn!(target: FORWARDER, name = %self.name, url = %self.url, %status, ?res, "Unexpected success response from builder on error status code");
+                    }
+                    JsonRpcResponseTy::Error { code, message } => {
+                        error!(target: FORWARDER, name = %self.name, url = %self.url, %status, %code, %message, "Decoded error response from builder");
+                        ForwarderMetrics::increment_rpc_call_failures(self.name.clone(), code);
+                    }
+                },
+                Err(e) => {
+                    warn!(target: FORWARDER,  ?e, name = %self.name, url = %self.url, %status, "Received client error from builder, but failed decode body into a JSON-RPC response");
+                }
+            }
         }
     }
 }
