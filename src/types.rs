@@ -28,7 +28,7 @@ use time::UtcDateTime;
 use uuid::Uuid;
 
 use crate::{
-    consts::{ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
+    consts::{DEFAULT_BUNDLE_VERSION, ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
     priority::Priority,
 };
 
@@ -205,6 +205,9 @@ impl SystemBundle {
         priority: Priority,
     ) -> Result<Self, RawBundleConvertError> {
         bundle.signing_address = Some(signer);
+        if bundle.version.is_none() {
+            bundle.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
+        }
 
         let bundle_hash = bundle.bundle_hash();
 
