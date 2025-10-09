@@ -1,8 +1,107 @@
 use std::time::{Duration, Instant};
 
-use metrics::{counter, gauge, histogram};
+use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 
 use crate::{forwarder::ForwardingDirection, priority::Priority};
+
+#[rustfmt::skip]
+mod name {
+    pub(crate) const BUILDERHUB_PEER_COUNT: &str = "builderhub_peer_count";
+    pub(crate) const BUILDERHUB_PEER_REQUEST_FAILURES: &str = "builderhub_peer_request_failures";
+    pub(crate) const FORWARDER_HTTP_CALL_FAILURES: &str = "forwarder_http_call_failures";
+    pub(crate) const FORWARDER_JSON_RPC_DECODING_FAILURES: &str = "forwarder_json_rpc_decoding_failures";
+    pub(crate) const FORWARDER_REQUEST_PROCESSING_FAILURES: &str = "forwarder_request_processing_failures";
+    pub(crate) const FORWARDER_RPC_CALL_DURATION_S: &str = "forwarder_rpc_call_duration_s";
+    pub(crate) const FORWARDER_RPC_CALL_FAILURES: &str = "forwarder_rpc_call_failures";
+    pub(crate) const INDEXER_BUNDLE_INDEXING_FAILURES: &str = "indexer_bundle_indexing_failures";
+    pub(crate) const INDEXER_BUNDLE_RECEIPT_INDEXING_FAILURES: &str = "indexer_bundle_receipt_indexing_failures";
+    pub(crate) const INDEXER_CLICKHOUSE_COMMIT_FAILURES: &str = "indexer_clickhouse_commit_failures";
+    pub(crate) const INDEXER_CLICKHOUSE_QUEUE_SIZE: &str = "indexer_clickhouse_queue_size";
+    pub(crate) const INDEXER_CLICKHOUSE_WRITE_FAILURES: &str = "indexer_clickhouse_write_failures";
+    pub(crate) const INDEXER_PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
+    pub(crate) const INGRESS_E2E_BUNDLE_PROCESSING_TIME_S: &str = "ingress_e2e_bundle_processing_time_s";
+    pub(crate) const INGRESS_E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME_S: &str = "ingress_e2e_mev_share_bundle_processing_time_s";
+    pub(crate) const INGRESS_E2E_RAW_ORDER_PROCESSING_TIME_S: &str = "ingress_e2e_raw_order_processing_time_s";
+    pub(crate) const INGRESS_E2E_TRANSACTION_PROCESSING_TIME_S: &str = "ingress_e2e_transaction_processing_time_s";
+    pub(crate) const INGRESS_ENTITY_COUNT: &str = "ingress_entity_count";
+    pub(crate) const INGRESS_HTTP_REQUEST_DURATION_S: &str = "ingress_http_request_duration_s";
+    pub(crate) const INGRESS_JSON_RPC_PARSE_ERRORS: &str = "ingress_json_rpc_parse_errors";
+    pub(crate) const INGRESS_JSON_RPC_UNKNOWN_METHOD: &str = "ingress_json_rpc_unknown_method";
+    pub(crate) const INGRESS_ORDER_CACHE_HIT: &str = "ingress_order_cache_hit";
+    pub(crate) const INGRESS_REQUESTS_RATE_LIMITED: &str = "ingress_requests_rate_limited";
+    pub(crate) const INGRESS_SEND_BUNDLE_REQUESTS_TOTAL: &str = "ingress_send_bundle_requests_total";
+    pub(crate) const INGRESS_SEND_BUNDLE_REQUEST_DURATION_S: &str = "ingress_send_bundle_request_duration_s";
+    pub(crate) const INGRESS_SEND_MEV_SHARE_BUNDLE_REQUESTS_TOTAL: &str = "ingress_send_mev_share_bundle_requests_total";
+    pub(crate) const INGRESS_SEND_TRANSACTION_REQUESTS_TOTAL: &str = "ingress_send_transaction_requests_total";
+    pub(crate) const INGRESS_SEND_TRANSACTION_REQUEST_DURATION_S: &str = "ingress_send_transaction_request_duration_s";
+    pub(crate) const INGRESS_VALIDATION_ERRORS: &str = "ingress_validation_errors";
+    pub(crate) const PRIORITY_QUEUE_SIZE: &str = "priority_queue_size";
+}
+
+use name::*;
+
+pub struct MetricsDescriber;
+
+impl MetricsDescriber {
+    pub fn describe() {
+        // Forwarder metrics
+        describe_histogram!(
+            "forwarder_rpc_call_duration_s",
+            "The duration of the RPC call to a peer."
+        );
+        describe_counter!(
+            "forwarder_request_processing_failures",
+            "The number of request processing failures."
+        );
+        describe_counter!(FORWARDER_HTTP_CALL_FAILURES, "The number of HTTP call failures.");
+        describe_counter!(FORWARDER_RPC_CALL_FAILURES, "The number of RPC call failures.");
+        describe_counter!(
+            "forwarder_json_rpc_decoding_failures",
+            "The number of JSON-RPC decoding failures."
+        );
+
+        // Priority queue metrics
+        describe_gauge!(PRIORITY_QUEUE_SIZE, "The size of the priority queue.");
+
+        // Ingress handler metrics
+        describe_counter!(
+            "ingress_requests_rate_limited",
+            "The number of requests that were rate limited."
+        );
+        describe_counter!(INGRESS_JSON_RPC_PARSE_ERRORS, "The number of JSON-RPC parse errors.");
+        describe_counter!(
+            "ingress_json_rpc_unknown_method",
+            "The number of JSON-RPC unknown method errors."
+        );
+        describe_counter!(INGRESS_VALIDATION_ERRORS, "The number of validation errors.");
+        describe_counter!(INGRESS_ORDER_CACHE_HIT, "The number of order cache hits.");
+        describe_histogram!(INGRESS_HTTP_REQUEST_DURATION_S, "The duration of HTTP requests.");
+        describe_counter!(
+            "ingress_send_bundle_requests_total",
+            "The total number of eth_sendBundle requests received."
+        );
+        describe_histogram!(
+            "ingress_send_bundle_request_duration_s",
+            "The duration of eth_sendBundle RPC calls."
+        );
+        describe_counter!(
+            "ingress_send_mev_share_bundle_requests_total",
+            "The total number of mev_share bundle requests received."
+        );
+        describe_histogram!(
+            "ingress_send_mev_share_bundle_request_duration_s",
+            "The duration of mev_share bundle RPC calls."
+        );
+        describe_counter!(
+            "ingress_send_transaction_requests_total",
+            "The total number of eth_sendRawTransaction requests received."
+        );
+        describe_histogram!(
+            "ingress_send_transaction_request_duration_s",
+            "The duration of eth_sendRawTransaction RPC calls."
+        );
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ForwarderMetrics;
@@ -11,23 +110,23 @@ impl ForwarderMetrics {
     /// The duration of the RPC call to a peer.
     #[inline]
     pub fn record_rpc_call(url: String, duration: Duration, big_request: bool) {
-        histogram!("forwarder_rpc_call_duration_s", "url" => url, "big_request" => big_request.to_string()).record(duration.as_secs_f64());
+        histogram!(FORWARDER_RPC_CALL_DURATION_S, "url" => url, "big_request" => big_request.to_string()).record(duration.as_secs_f64());
     }
 
     pub fn increment_request_processing_failures(peer_name: String) {
-        counter!("forwarder_request_processing_failures", "peer_name" => peer_name).increment(1);
+        counter!(FORWARDER_REQUEST_PROCESSING_FAILURES, "peer_name" => peer_name).increment(1);
     }
 
     pub fn increment_http_call_failures(peer_name: String, status_code: String) {
-        counter!("forwarder_http_call_failures", "peer_name" => peer_name, "status_code" => status_code).increment(1);
+        counter!(FORWARDER_HTTP_CALL_FAILURES, "peer_name" => peer_name, "status_code" => status_code).increment(1);
     }
 
     pub fn increment_rpc_call_failures(peer_name: String, rpc_code: i32) {
-        counter!("forwarder_rpc_call_failures", "peer_name" => peer_name, "rpc_code" => rpc_code.to_string()).increment(1);
+        counter!(FORWARDER_RPC_CALL_FAILURES, "peer_name" => peer_name, "rpc_code" => rpc_code.to_string()).increment(1);
     }
 
     pub fn increment_json_rpc_decoding_failures(peer_name: String) {
-        counter!("forwarder_json_rpc_decoding_failures", "peer_name" => peer_name).increment(1);
+        counter!(FORWARDER_JSON_RPC_DECODING_FAILURES, "peer_name" => peer_name).increment(1);
     }
 }
 
@@ -37,7 +136,7 @@ pub struct PriorityQueueMetrics;
 impl PriorityQueueMetrics {
     #[inline]
     pub fn set_queue_size(size: usize, priority: &'static str) {
-        gauge!("priority_queue_size", "priority" => priority).set(size as f64);
+        gauge!(PRIORITY_QUEUE_SIZE, "priority" => priority).set(size as f64);
     }
 }
 
@@ -48,27 +147,27 @@ pub trait IngressHandlerMetricsExt {
 
     #[inline]
     fn increment_requests_rate_limited() {
-        counter!("ingress_requests_rate_limited", "handler" => Self::HANDLER).increment(1);
+        counter!(INGRESS_REQUESTS_RATE_LIMITED, "handler" => Self::HANDLER).increment(1);
     }
 
     #[inline]
     fn increment_json_rpc_parse_errors() {
-        counter!("ingress_json_rpc_parse_errors", "handler" => Self::HANDLER).increment(1);
+        counter!(INGRESS_JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER).increment(1);
     }
 
     #[inline]
     fn increment_json_rpc_unknown_method() {
-        counter!("ingress_json_rpc_unknown_method", "handler" => Self::HANDLER).increment(1);
+        counter!(INGRESS_JSON_RPC_UNKNOWN_METHOD, "handler" => Self::HANDLER).increment(1);
     }
 
     #[inline]
     fn increment_validation_errors<E: std::error::Error>(error: &E) {
-        counter!("ingress_validation_errors", "handler" => Self::HANDLER, "error" => error.to_string()).increment(1);
+        counter!(INGRESS_VALIDATION_ERRORS, "handler" => Self::HANDLER, "error" => error.to_string()).increment(1);
     }
 
     #[inline]
     fn increment_order_cache_hit() {
-        counter!("ingress_order_cache_hit", "handler" => Self::HANDLER).increment(1);
+        counter!(INGRESS_ORDER_CACHE_HIT, "handler" => Self::HANDLER).increment(1);
     }
 
     #[inline]
@@ -80,25 +179,25 @@ pub trait IngressHandlerMetricsExt {
             ("status", status),
         ];
 
-        histogram!("ingress_http_request_duration_s", &labels).record(duration.as_secs_f64());
+        histogram!(INGRESS_HTTP_REQUEST_DURATION_S, &labels).record(duration.as_secs_f64());
     }
 
     // BUNDLES
 
     #[inline]
     fn increment_bundles_received(priority: Priority) {
-        counter!("ingress_send_bundle_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
+        counter!(INGRESS_SEND_BUNDLE_REQUESTS_TOTAL, "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
     #[inline]
     fn increment_mev_share_bundles_received(priority: Priority) {
-        counter!("ingress_send_mev_share_bundle_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
+        counter!(INGRESS_SEND_MEV_SHARE_BUNDLE_REQUESTS_TOTAL, "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
     /// The duration of the `eth_sendBundle` RPC call.
     #[inline]
     fn record_bundle_rpc_duration(duration: Duration) {
-        histogram!("ingress_send_bundle_request_duration_s", "handler" => Self::HANDLER)
+        histogram!(INGRESS_SEND_BUNDLE_REQUEST_DURATION_S, "handler" => Self::HANDLER)
             .record(duration.as_secs_f64());
     }
 
@@ -106,13 +205,13 @@ pub trait IngressHandlerMetricsExt {
 
     #[inline]
     fn increment_transactions_received(priority: Priority) {
-        counter!("ingress_send_transaction_requests_total", "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
+        counter!(INGRESS_SEND_TRANSACTION_REQUESTS_TOTAL, "handler" => Self::HANDLER, "priority" => priority.to_string()).increment(1);
     }
 
     /// The duration of the `eth_sendRawTransaction` RPC call.
     #[inline]
     fn record_transaction_rpc_duration(duration: Duration) {
-        histogram!("ingress_send_transaction_request_duration_s", "handler" => Self::HANDLER)
+        histogram!(INGRESS_SEND_TRANSACTION_REQUEST_DURATION_S, "handler" => Self::HANDLER)
             .record(duration.as_secs_f64());
     }
 }
@@ -139,7 +238,7 @@ pub struct SystemMetrics;
 impl SystemMetrics {
     #[inline]
     pub fn entity_count(count: usize) {
-        gauge!("ingress_entity_count").set(count as f64);
+        gauge!(INGRESS_ENTITY_COUNT).set(count as f64);
     }
 
     #[inline]
@@ -154,7 +253,7 @@ impl SystemMetrics {
             ("direction", direction.to_string()),
             ("big_request", big_request.to_string()),
         ];
-        histogram!("ingress_e2e_bundle_processing_time_s", &labels).record(duration.as_secs_f64());
+        histogram!(INGRESS_E2E_BUNDLE_PROCESSING_TIME_S, &labels).record(duration.as_secs_f64());
     }
 
     #[inline]
@@ -169,7 +268,7 @@ impl SystemMetrics {
             ("direction", direction.to_string()),
             ("big_request", big_request.to_string()),
         ];
-        histogram!("ingress_e2e_mev_share_bundle_processing_time_s", &labels)
+        histogram!(INGRESS_E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME_S, &labels)
             .record(duration.as_secs_f64());
     }
 
@@ -185,7 +284,7 @@ impl SystemMetrics {
             ("direction", direction.to_string()),
             ("big_request", big_request.to_string()),
         ];
-        histogram!("ingress_e2e_transaction_processing_time_s", &labels)
+        histogram!(INGRESS_E2E_TRANSACTION_PROCESSING_TIME_S, &labels)
             .record(duration.as_secs_f64());
     }
 
@@ -200,8 +299,7 @@ impl SystemMetrics {
             ("direction", direction.to_string()),
             ("big_request", big_request.to_string()),
         ];
-        histogram!("ingress_e2e_raw_order_processing_time_s", &labels)
-            .record(duration.as_secs_f64());
+        histogram!(INGRESS_E2E_RAW_ORDER_PROCESSING_TIME_S, &labels).record(duration.as_secs_f64());
     }
 }
 
@@ -212,12 +310,12 @@ pub struct BuilderHubMetrics;
 impl BuilderHubMetrics {
     #[inline]
     pub fn increment_builderhub_peer_request_failures(err: String) {
-        counter!("builderhub_peer_request_failures", "error" => err).increment(1);
+        counter!(BUILDERHUB_PEER_REQUEST_FAILURES, "error" => err).increment(1);
     }
 
     #[inline]
     pub fn builderhub_peer_count(count: usize) {
-        gauge!("builderhub_peer_count").set(count as f64);
+        gauge!(BUILDERHUB_PEER_COUNT).set(count as f64);
     }
 }
 
@@ -228,32 +326,32 @@ pub struct IndexerMetrics;
 impl IndexerMetrics {
     #[inline]
     pub fn increment_bundle_indexing_failures(err: String) {
-        counter!("indexer_bundle_indexing_failures", "error" => err).increment(1);
+        counter!(INDEXER_BUNDLE_INDEXING_FAILURES, "error" => err).increment(1);
     }
 
     #[inline]
     pub fn increment_bundle_receipt_indexing_failures(err: String) {
-        counter!("indexer_bundle_receipt_indexing_failures", "error" => err).increment(1);
+        counter!(INDEXER_BUNDLE_RECEIPT_INDEXING_FAILURES, "error" => err).increment(1);
     }
 
     #[inline]
     pub fn increment_clickhouse_write_failures(err: String) {
-        counter!("indexer_clickhouse_write_failures", "error" => err).increment(1);
+        counter!(INDEXER_CLICKHOUSE_WRITE_FAILURES, "error" => err).increment(1);
     }
 
     #[inline]
     pub fn increment_clickhouse_commit_failures(err: String) {
-        counter!("indexer_clickhouse_commit_failures", "error" => err).increment(1);
+        counter!(INDEXER_CLICKHOUSE_COMMIT_FAILURES, "error" => err).increment(1);
     }
 
     #[inline]
     pub fn set_clickhouse_queue_size(size: usize, order: &'static str) {
-        gauge!("indexer_clickhouse_queue_size", "order" => order).set(size as f64);
+        gauge!(INDEXER_CLICKHOUSE_QUEUE_SIZE, "order" => order).set(size as f64);
     }
 
     #[inline]
     pub fn set_parquet_queue_size(size: usize, order: &'static str) {
-        gauge!("indexer_parquet_queue_size", "order" => order).set(size as f64);
+        gauge!(INDEXER_PARQUET_QUEUE_SIZE, "order" => order).set(size as f64);
     }
 }
 
