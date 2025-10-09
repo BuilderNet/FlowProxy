@@ -72,7 +72,7 @@ async fn ingress_http_e2e() {
     });
     let response = client.send_json(&unknown_method).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert::jsonrpc_error(response, JsonRpcError::MethodNotFound).await;
+    assert::jsonrpc_error(response, JsonRpcError::MethodNotFound("someMethod".to_string())).await;
 
     let empty_params = json!({
         "id": 0,
