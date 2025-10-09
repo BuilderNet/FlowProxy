@@ -178,7 +178,9 @@ impl FromStr for JsonRpcError {
             "Internal error" => Self::Internal,
             s => {
                 if s.starts_with("Method not found: ") {
-                    Self::MethodNotFound(s.split(':').nth(1).unwrap_or("").trim().to_string())
+                    Self::MethodNotFound(
+                        s.split(':').nth(1).unwrap_or("Unknown").trim().to_string(),
+                    )
                 } else {
                     Self::Unknown(s.to_string())
                 }
