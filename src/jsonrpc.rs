@@ -153,8 +153,8 @@ pub enum JsonRpcError {
     InvalidRequest,
     #[error("Invalid signature")]
     InvalidSignature,
-    #[error("Method not found")]
-    MethodNotFound,
+    #[error("Method not found: {0}")]
+    MethodNotFound(String),
     #[error("Invalid params")]
     InvalidParams,
     #[error("Rate limited")]
@@ -173,11 +173,18 @@ impl FromStr for JsonRpcError {
             "Parse error" => Self::ParseError,
             "Invalid Request" => Self::InvalidRequest,
             "Invalid signature" => Self::InvalidSignature,
-            "Method not found" => Self::MethodNotFound,
             "Invalid params" => Self::InvalidParams,
             "Rate limited" => Self::RateLimited,
             "Internal error" => Self::Internal,
-            s => Self::Unknown(s.to_string()),
+            s => {
+                if s.starts_with("Method not found: ") {
+                    Self::MethodNotFound(
+                        s.split(':').nth(1).unwrap_or("Unknown").trim().to_string(),
+                    )
+                } else {
+                    Self::Unknown(s.to_string())
+                }
+            }
         };
         Ok(error)
     }
@@ -214,7 +221,7 @@ impl JsonRpcError {
         match self {
             Self::ParseError => -32700,
             Self::InvalidRequest => -32600,
-            Self::MethodNotFound => -32601,
+            Self::MethodNotFound(_) => -32601,
             Self::InvalidParams => -32602,
             Self::RateLimited | Self::Internal | Self::Unknown(_) | Self::InvalidSignature => {
                 -32603
@@ -229,7 +236,7 @@ impl JsonRpcError {
             Self::InvalidRequest |
             Self::InvalidParams |
             Self::InvalidSignature => StatusCode::BAD_REQUEST,
-            Self::MethodNotFound => StatusCode::NOT_FOUND,
+            Self::MethodNotFound(_) => StatusCode::NOT_FOUND,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Internal | Self::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -245,7 +252,7 @@ mod tests {
         let errors = [
             JsonRpcError::ParseError,
             JsonRpcError::InvalidRequest,
-            JsonRpcError::MethodNotFound,
+            JsonRpcError::MethodNotFound("eth_sendBundle".to_string()),
             JsonRpcError::InvalidParams,
             JsonRpcError::RateLimited,
             JsonRpcError::Internal,

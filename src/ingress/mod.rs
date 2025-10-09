@@ -202,9 +202,13 @@ impl OrderflowIngress {
                     .await
                     .map(EthResponse::BundleHash)
             }
-            _ => {
+            other => {
+                error!(target: "ingress", %other, "Method not supported");
                 IngressUserMetrics::increment_json_rpc_unknown_method();
-                return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound);
+                return JsonRpcResponse::error(
+                    Some(request.id),
+                    JsonRpcError::MethodNotFound(other.to_string()),
+                )
             }
         };
 
@@ -408,7 +412,14 @@ impl OrderflowIngress {
 
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
-            _ => return JsonRpcResponse::error(Some(request.id), JsonRpcError::MethodNotFound),
+            other => {
+                error!(target: "ingress", %other, "Method not supported");
+                IngressSystemMetrics::increment_json_rpc_unknown_method();
+                return JsonRpcResponse::error(
+                    Some(request.id),
+                    JsonRpcError::MethodNotFound(other.to_string()),
+                )
+            }
         };
 
         // Send request only to the local builder forwarder.
