@@ -91,49 +91,65 @@ impl BundleHash for RawBundle {
                 refund_tx_hashes,
                 uuid,
                 replacement_nonce,
+                refund_identity,
                 signing_address: _,
-                version: _,
+                version,
                 min_timestamp: _,
                 max_timestamp: _,
                 delayed_refund: _,
-                first_seen_at: _,
             } = bundle;
 
-            block_number.hash(state);
-            txs.hash(state);
+            if let Some(block_number) = block_number {
+                block_number.hash(state);
+            }
 
-            let reverting_tx_hashes = if !reverting_tx_hashes.is_empty() {
-                Some(reverting_tx_hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>())
-            } else {
-                None
-            };
+            if !txs.is_empty() {
+                txs.hash(state);
+            }
 
-            reverting_tx_hashes.hash(state);
+            if !reverting_tx_hashes.is_empty() {
+                reverting_tx_hashes.hash(state);
+            }
 
-            let dropping_tx_hashes = if !dropping_tx_hashes.is_empty() {
-                Some(dropping_tx_hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>())
-            } else {
-                None
-            };
-
-            dropping_tx_hashes.hash(state);
+            if !dropping_tx_hashes.is_empty() {
+                dropping_tx_hashes.hash(state);
+            }
 
             // NOTE: Use uuid field if it is set, otherwise use replacement_uuid.
             let replacement_uuid = uuid.or(*replacement_uuid).map(|uuid| uuid.to_string());
-            replacement_uuid.hash(state);
+            if let Some(replacement_uuid) = replacement_uuid {
+                replacement_uuid.hash(state);
+                if let Some(replacement_nonce) = replacement_nonce {
+                    // NOTE: By the time this is called, we expect the replacement nonce to be set
+                    // at least on the user endpoint. We have no guarantees however on the system
+                    // endpoint.
+                    replacement_nonce.hash(state);
+                } else {
+                    tracing::warn!("Expected replacement_nonce along with uuid/replacement_uuid for calculating bundle hash");
+                }
+            }
 
-            // NOTE: By the time this is called, we expect the replacement nonce to be set.
-            replacement_nonce.hash(state);
+            if let Some(refund_percent) = refund_percent.map(|percent| percent as u64) {
+                refund_percent.hash(state);
+            }
 
-            let refund_percent = refund_percent.map(|percent| percent as u64);
-            refund_percent.hash(state);
+            if let Some(refund_recipient) = refund_recipient {
+                refund_recipient.hash(state);
+            }
 
-            refund_recipient.hash(state);
+            if let Some(refund_tx_hashes) = refund_tx_hashes {
+                if !refund_tx_hashes.is_empty() {
+                    refund_tx_hashes.hash(state);
+                }
+            }
 
-            let refund_tx_hashes = refund_tx_hashes
-                .as_ref()
-                .map(|hashes| hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>());
-            refund_tx_hashes.hash(state);
+            if let Some(refund_identity) = refund_identity {
+                refund_identity.hash(state);
+            }
+
+            if let Some(version) = version {
+                version.hash(state);
+            }
         }
 
         let mut hasher = wyhash::WyHash::default();

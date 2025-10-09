@@ -32,6 +32,7 @@ CREATE TABLE bundles (
   `replacement_nonce` Nullable(UInt64),
   `refund_percent` Nullable(UInt8),
   `refund_recipient` Nullable(FixedString(20)),
+  `delayed_refund` Nullable(Bool),
   `refund_identity` Nullable(FixedString(20)),
 
   `signer_address` Nullable(FixedString(20)),

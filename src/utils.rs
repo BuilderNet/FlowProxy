@@ -246,13 +246,13 @@ pub mod testutils {
                 version: Some("v2".to_string()),
                 block_number: None,
                 replacement_uuid: None,
+                refund_identity: None,
                 uuid: None,
                 min_timestamp: None,
                 max_timestamp: None,
                 replacement_nonce: Some(rng.random()),
                 refund_percent: Some(rng.random_range(0..100)),
                 refund_recipient: Some(Address::random_with(rng)),
-                first_seen_at: None,
                 delayed_refund: None,
             }
         }
