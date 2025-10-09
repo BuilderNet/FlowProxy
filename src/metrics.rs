@@ -14,17 +14,20 @@ impl ForwarderMetrics {
         histogram!("forwarder_rpc_call_duration_s", "url" => url, "big_request" => big_request.to_string()).record(duration.as_secs_f64());
     }
 
-    pub fn increment_request_processing_failures(builder_name: String) {
-        counter!("forwarder_request_processing_failures", "builder_name" => builder_name)
-            .increment(1);
+    pub fn increment_request_processing_failures(peer_name: String) {
+        counter!("forwarder_request_processing_failures", "peer_name" => peer_name).increment(1);
     }
 
-    pub fn increment_http_call_failures(builder_name: String, status_code: String) {
-        counter!("forwarder_http_call_failures", "builder_name" => builder_name, "status_code" => status_code).increment(1);
+    pub fn increment_http_call_failures(peer_name: String, status_code: String) {
+        counter!("forwarder_http_call_failures", "peer_name" => peer_name, "status_code" => status_code).increment(1);
     }
 
-    pub fn increment_rpc_call_failures(builder_name: String, rpc_code: i32) {
-        counter!("forwarder_rpc_call_failures", "builder_name" => builder_name, "rpc_code" => rpc_code.to_string()).increment(1);
+    pub fn increment_rpc_call_failures(peer_name: String, rpc_code: i32) {
+        counter!("forwarder_rpc_call_failures", "peer_name" => peer_name, "rpc_code" => rpc_code.to_string()).increment(1);
+    }
+
+    pub fn increment_json_rpc_decoding_failures(peer_name: String) {
+        counter!("forwarder_json_rpc_decoding_failures", "peer_name" => peer_name).increment(1);
     }
 }
 
