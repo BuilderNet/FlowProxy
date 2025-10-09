@@ -89,14 +89,14 @@ impl BundleHash for RawBundle {
                 refund_percent,
                 refund_recipient,
                 refund_tx_hashes,
-                first_seen_at: _,
+                uuid,
+                replacement_nonce,
                 signing_address: _,
-                uuid: _,
                 version: _,
                 min_timestamp: _,
                 max_timestamp: _,
-                replacement_nonce: _,
                 delayed_refund: _,
+                first_seen_at: _,
             } = bundle;
 
             block_number.hash(state);
@@ -118,8 +118,12 @@ impl BundleHash for RawBundle {
 
             dropping_tx_hashes.hash(state);
 
-            let replacement_uuid = replacement_uuid.map(|uuid| uuid.to_string());
+            // NOTE: Use uuid field if it is set, otherwise use replacement_uuid.
+            let replacement_uuid = uuid.or(*replacement_uuid).map(|uuid| uuid.to_string());
             replacement_uuid.hash(state);
+
+            // NOTE: By the time this is called, we expect the replacement nonce to be set.
+            replacement_nonce.hash(state);
 
             let refund_percent = refund_percent.map(|percent| percent as u64);
             refund_percent.hash(state);
