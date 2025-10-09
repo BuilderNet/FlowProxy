@@ -438,7 +438,8 @@ impl OrderflowIngress {
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
         if (bundle.replacement_uuid.is_some() || bundle.uuid.is_some()) &&
-            bundle.replacement_nonce.is_none()
+            bundle.replacement_nonce.is_none() &&
+            bundle.first_seen_at.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.replacement_nonce = Some(timestamp.try_into().expect("Timestamp too large"));
