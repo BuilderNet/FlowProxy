@@ -307,7 +307,7 @@ impl OrderflowIngress {
         if let Some(priority_) = maybe_buildernet_priority(&headers) {
             priority = priority_;
         } else {
-            debug!(target: "ingress", %peer, "Error retrieving priority from system request, defaulting to {priority}");
+            trace!(target: "ingress", %peer, "Error retrieving priority from system request, defaulting to {priority}");
         }
 
         trace!(target: "ingress", %peer, id = request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");
