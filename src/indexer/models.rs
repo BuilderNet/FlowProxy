@@ -340,7 +340,11 @@ pub(crate) mod tests {
                 refund_percent: value.refund_percent,
                 refund_recipient: value.refund_recipient,
                 first_seen_at: None,
-                version: None,
+                version: if value.version == 1 {
+                    Some("v1".to_string())
+                } else {
+                    Some("v2".to_string())
+                },
                 signing_address: value.signer_address,
                 delayed_refund: None,
             }
