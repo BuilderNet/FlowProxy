@@ -1,4 +1,5 @@
 //! Extra serde serialization/deserialization helpers for `Vec<alloy_primitives::U256>`
+#[allow(dead_code)]
 pub(super) mod u256 {
     use alloy_primitives::U256;
     use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};
@@ -138,6 +139,7 @@ pub(super) mod hash {
     }
 }
 
+#[allow(dead_code)]
 pub(super) mod address {
     use alloy_primitives::Address;
     use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};

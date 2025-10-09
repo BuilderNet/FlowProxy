@@ -1,9 +1,7 @@
 use std::{
-    future::Future,
     hash::{Hash as _, Hasher as _},
-    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
+    time::{Duration, Instant},
 };
 
 use alloy_consensus::{
@@ -17,8 +15,11 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes};
 use derive_more::Deref;
 use rbuilder_primitives::{
-    serialize::{RawBundle, RawBundleConvertError, RawBundleDecodeResult, TxEncoding},
-    Bundle, BundleReplacementData,
+    serialize::{
+        CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult, RawShareBundle,
+        RawShareBundleConvertError, RawShareBundleDecodeResult, TxEncoding,
+    },
+    Bundle, BundleReplacementData, ShareBundle,
 };
 use revm_primitives::B256;
 use serde::Serialize;
@@ -26,30 +27,27 @@ use serde_json::json;
 use time::UtcDateTime;
 use uuid::Uuid;
 
-use crate::priority::Priority;
+use crate::{
+    consts::{DEFAULT_BUNDLE_VERSION, ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
+    priority::Priority,
+};
 
 /// Bundle type that is used for the system API. It contains the verified signer with the original
 /// bundle.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct SystemBundle {
-    #[serde(rename = "signingAddress")]
     pub signer: Address,
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
-    #[serde(flatten)]
     pub raw_bundle: Arc<RawBundle>,
-
     /// The decoded bundle.
-    #[serde(skip)]
     pub decoded_bundle: Arc<DecodedBundle>,
-
     /// The bundle hash.
-    #[serde(skip)]
     pub bundle_hash: B256,
 
-    /// The timestamp at which the bundle has first been seen from the local operator.
-    #[serde(skip)]
-    pub received_at: UtcDateTime,
+    /// The time at which the bundle has first been seen from the local operator.
+    pub received_at: UtcInstant,
+    /// The priority of the bundle.
+    pub priority: Priority,
 }
 
 /// Decoded bundle type. Either a new, full bundle or a replacement bundle.
@@ -146,15 +144,70 @@ impl BundleHash for RawBundle {
     }
 }
 
+impl BundleHash for RawShareBundle {
+    fn bundle_hash(&self) -> B256 {
+        fn hash(bundle: &RawShareBundle, state: &mut wyhash::WyHash) {
+            let RawShareBundle { version, inclusion, body, validity, metadata, replacement_uuid } =
+                bundle;
+
+            version.hash(state);
+
+            inclusion.block.to::<u64>().hash(state);
+            if let Some(max_block) = &inclusion.max_block {
+                max_block.to::<u64>().hash(state);
+            }
+
+            for entry in body {
+                if let Some(tx) = &entry.tx {
+                    tx.hash(state);
+                }
+                entry.can_revert.hash(state);
+                if let Some(mode) = &entry.revert_mode {
+                    mode.hash(state);
+                }
+                if let Some(bundle) = &entry.bundle {
+                    bundle.hash(state);
+                }
+            }
+
+            if let Some(validity) = validity {
+                validity.hash(state);
+            }
+
+            if let Some(metadata) = metadata {
+                metadata.hash(state);
+            }
+
+            if let Some(uuid) = replacement_uuid {
+                uuid.hash(state);
+            }
+        }
+
+        let mut hasher = wyhash::WyHash::default();
+        let mut bytes = [0u8; 32];
+        for i in 0..4 {
+            hash(self, &mut hasher);
+            let hash = hasher.finish();
+            bytes[(i * 8)..((i + 1) * 8)].copy_from_slice(&hash.to_be_bytes());
+        }
+
+        B256::from(bytes)
+    }
+}
+
 impl SystemBundle {
-    /// Create a new system bundle from a raw bundle and a signer.
-    /// Returns an error if the bundle fails to decode.
-    pub fn try_from_bundle_and_signer(
+    /// Create a new system bundle from a raw bundle and additional data.
+    /// Returns an error if the raw bundle fails to decode.
+    pub fn try_from_raw_bundle(
         mut bundle: RawBundle,
         signer: Address,
-        received_at: UtcDateTime,
+        received_at: UtcInstant,
+        priority: Priority,
     ) -> Result<Self, RawBundleConvertError> {
         bundle.signing_address = Some(signer);
+        if bundle.version.is_none() {
+            bundle.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
+        }
 
         let bundle_hash = bundle.bundle_hash();
 
@@ -170,6 +223,7 @@ impl SystemBundle {
             decoded_bundle: Arc::new(decoded),
             bundle_hash,
             received_at,
+            priority,
         })
     }
 
@@ -207,28 +261,109 @@ impl SystemBundle {
         }
     }
 
-    /// Encode the inner bundle (no signer).
-    pub fn encode_local(self) -> Vec<u8> {
+    /// Encode the system bundle in a JSON-RPC payload with params EIP-2718 encoded bytes.
+    pub fn encode(self) -> WithEncoding<Self> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
-            "method": "eth_sendBundle",
+            "method": ETH_SEND_BUNDLE_METHOD,
             "params": [self.raw_bundle]
         });
 
-        serde_json::to_vec(&json).unwrap()
+        let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
+        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Metadata about a raw order received from the system endpoint.
+pub struct RawOrderMetadata {
+    pub priority: Priority,
+    pub received_at: UtcInstant,
+}
+
+/// Decoded MEV Share bundle.
+#[allow(clippy::large_enum_variant)]
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum DecodedShareBundle {
+    /// New bundle.
+    New(ShareBundle),
+    /// Bundle cancellation.
+    Cancel(CancelShareBundle),
+}
+
+impl DecodedShareBundle {
+    /// Create new decoded share bundle from [`RawShareBundleDecodeResult`].
+    pub fn from_result(bundle: RawShareBundleDecodeResult) -> Self {
+        match bundle {
+            RawShareBundleDecodeResult::NewShareBundle(bundle) => Self::New(*bundle),
+            RawShareBundleDecodeResult::CancelShareBundle(bundle) => Self::Cancel(bundle),
+        }
+    }
+}
+
+/// A wrapper around MEV share bundle.
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct SystemMevShareBundle {
+    /// The decoded MEV Share bundle.
+    pub decoded: Arc<DecodedShareBundle>,
+
+    /// The raw bundle.
+    pub raw: Arc<RawShareBundle>,
+
+    /// Signer address.
+    pub signer: Address,
+
+    /// The bundle hash.
+    pub bundle_hash: B256,
+
+    /// The priority of the bundle.
+    pub priority: Priority,
+
+    /// The timestamp at which the bundle has first been seen from the local operator.
+    pub received_at: UtcInstant,
+}
+
+impl SystemMevShareBundle {
+    /// Create a new system bundle from a raw bundle and a signer.
+    /// Returns an error if the bundle fails to decode.
+    pub fn try_from_bundle_and_signer(
+        raw: RawShareBundle,
+        signer: Address,
+        received_at: UtcInstant,
+        priority: Priority,
+    ) -> Result<Self, RawShareBundleConvertError> {
+        let decoded =
+            DecodedShareBundle::from_result(raw.clone().decode(TxEncoding::WithBlobData)?);
+        let bundle_hash = raw.bundle_hash();
+        Ok(Self {
+            decoded: Arc::new(decoded),
+            raw: Arc::new(raw),
+            signer,
+            bundle_hash,
+            received_at,
+            priority,
+        })
     }
 
-    /// Encode the full system bundle.
-    pub fn encode(self) -> Vec<u8> {
+    /// Returns the bundle hash.
+    pub fn bundle_hash(&self) -> B256 {
+        self.bundle_hash
+    }
+}
+
+impl SystemMevShareBundle {
+    /// Encode the inner bundle (no signer).
+    pub fn encode(self) -> WithEncoding<Self> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
-            "method": "eth_sendBundle",
-            "params": [self]
+            "method": MEV_SEND_BUNDLE_METHOD,
+            "params": [self.raw]
         });
 
-        serde_json::to_vec(&json).unwrap()
+        let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
+        WithEncoding { inner: self, encoding: Arc::new(encoding) }
     }
 }
 
@@ -258,30 +393,34 @@ pub struct SystemTransaction {
     pub transaction: Arc<EthereumTransaction>,
     /// The original transaction signer.
     pub signer: Address,
+
     /// The timestamp at which the bundle has first been seen from the local operator.
-    pub received_at: UtcDateTime,
+    pub received_at: UtcInstant,
+    pub priority: Priority,
 }
 
 impl SystemTransaction {
-    /// Create a new system transaction from a transaction and a signer.
-    pub fn from_transaction_and_signer(
+    /// Create a new system transaction from a transaction and additional context data.
+    pub fn from_transaction(
         transaction: EthereumTransaction,
         signer: Address,
-        received_at: UtcDateTime,
+        received_at: UtcInstant,
+        priority: Priority,
     ) -> Self {
-        Self { transaction: Arc::new(transaction), signer, received_at }
+        Self { transaction: Arc::new(transaction), signer, received_at, priority }
     }
 
-    /// Encode the transaction as EIP-2718 encoded bytes.
-    pub fn encode(&self) -> Vec<u8> {
+    /// Encode the system transaction in a JSON-RPC payload with params EIP-2718 encoded bytes.
+    pub fn encode(self) -> WithEncoding<SystemTransaction> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
             "method": "eth_sendRawTransaction",
-            "params": [&self.transaction.raw]
+            "params": [self.transaction.raw]
         });
 
-        serde_json::to_vec(&json).unwrap()
+        let encoding = serde_json::to_vec(&json).expect("to JSON serialize transaction");
+        WithEncoding { inner: self, encoding: Arc::new(encoding) }
     }
 
     pub fn tx_hash(&self) -> B256 {
@@ -335,32 +474,103 @@ pub enum EthResponse {
     TxHash(B256),
 }
 
-/// A long-lived task, with its name for logging purposes.
-#[derive(Debug)]
-pub struct LongLivedTask {
-    pub handle: tokio::task::JoinHandle<()>,
-    pub name: &'static str,
+/// A UTC timestamp along with a monotonic `Instant` to measure elapsed time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UtcInstant {
+    pub instant: Instant,
+    pub utc: UtcDateTime,
 }
 
-/// Error returned when a long-lived task fails.
-#[derive(Debug)]
-pub struct LongLivedTaskFailure {
-    pub err: tokio::task::JoinError,
-    pub name: &'static str,
+impl UtcInstant {
+    /// Create a new `UtcInstant` from an `Instant` and a `UtcDateTime`.
+    pub fn now() -> Self {
+        Self { instant: Instant::now(), utc: UtcDateTime::now() }
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        self.instant.elapsed()
+    }
 }
 
-impl Future for LongLivedTask {
-    type Output = Result<(), LongLivedTaskFailure>;
+impl From<UtcInstant> for UtcDateTime {
+    fn from(value: UtcInstant) -> Self {
+        value.utc
+    }
+}
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let LongLivedTask { handle, name } = self.get_mut();
-        match Pin::new(handle).poll(cx) {
-            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(err)) => {
-                std::task::Poll::Ready(Err(LongLivedTaskFailure { err, name }))
-            }
-            Poll::Pending => std::task::Poll::Pending,
+impl From<UtcInstant> for Instant {
+    fn from(value: UtcInstant) -> Self {
+        value.instant
+    }
+}
+
+/// A wrapper around a type `T` that includes its encoding (e.g. JSON-RPC) as bytes.
+#[derive(Debug, Clone)]
+pub struct WithEncoding<T> {
+    pub inner: T,
+    pub encoding: Arc<Vec<u8>>,
+}
+
+/// An order that can be either a bundle or a transaction, along with its JSON-RPC encoding, ready
+/// to be sent on the wire.
+#[derive(Debug, Clone)]
+pub enum EncodedOrder {
+    /// Raw order bytes received from the system endpoint, already ready to be forwarded.
+    RawOrder(WithEncoding<RawOrderMetadata>),
+    /// A bundle along with its JSON-RPC encoding.
+    Bundle(WithEncoding<SystemBundle>),
+    /// A MEV Share bundle along with its JSON-RPC encoding.
+    MevShareBundle(WithEncoding<SystemMevShareBundle>),
+    /// A transaction along with its JSON-RPC encoding.
+    Transaction(WithEncoding<SystemTransaction>),
+}
+
+impl EncodedOrder {
+    /// Returns the JSON-RPC encoding of the order.
+    pub fn encoding(&self) -> &[u8] {
+        match self {
+            EncodedOrder::RawOrder(order) => &order.encoding,
+            EncodedOrder::Bundle(bundle) => &bundle.encoding,
+            EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
+            EncodedOrder::Transaction(tx) => &tx.encoding,
         }
+    }
+
+    /// Returns the priority of the order.
+    pub fn priority(&self) -> Priority {
+        match self {
+            EncodedOrder::RawOrder(order) => order.inner.priority,
+            EncodedOrder::Bundle(bundle) => bundle.inner.priority,
+            EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
+            EncodedOrder::Transaction(tx) => tx.inner.priority,
+        }
+    }
+
+    pub fn received_at(&self) -> UtcInstant {
+        match self {
+            EncodedOrder::RawOrder(order) => order.inner.received_at,
+            EncodedOrder::Bundle(bundle) => bundle.inner.received_at,
+            EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
+            EncodedOrder::Transaction(tx) => tx.inner.received_at,
+        }
+    }
+}
+
+impl From<WithEncoding<SystemBundle>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemBundle>) -> Self {
+        Self::Bundle(value)
+    }
+}
+
+impl From<WithEncoding<SystemMevShareBundle>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemMevShareBundle>) -> Self {
+        Self::MevShareBundle(value)
+    }
+}
+
+impl From<WithEncoding<SystemTransaction>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemTransaction>) -> Self {
+        Self::Transaction(value)
     }
 }
 

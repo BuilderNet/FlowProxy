@@ -1,11 +1,16 @@
 use crate::{
     builderhub::BuilderHubBuilder,
-    ingress::{
-        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, ETH_SEND_BUNDLE_METHOD,
-        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
+    consts::{
+        BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
+        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
+        MEV_SEND_BUNDLE_METHOD,
     },
+    metrics::{ForwarderMetrics, SystemMetrics},
     priority::{pchannel, Priority},
-    types::{SystemBundle, SystemTransaction},
+    types::{
+        EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
+        UtcInstant, WithEncoding,
+    },
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;
@@ -19,6 +24,7 @@ use reqwest::Url;
 use revm_primitives::keccak256;
 use serde_json::json;
 use std::{
+    fmt::Display,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -33,7 +39,7 @@ pub struct IngressForwarders {
     /// The orderflow signer.
     signer: PrivateKeySigner,
     /// The sender to the local builder forwarder.
-    local: pchannel::UnboundedSender<Arc<BuilderRequest>>,
+    local: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
     /// The senders to peer ingresses. Continuously updated from builderhub configuration.
     peers: Arc<DashMap<String, PeerHandle>>,
 }
@@ -41,34 +47,11 @@ pub struct IngressForwarders {
 impl IngressForwarders {
     /// Create new ingress forwards.
     pub fn new(
-        local: pchannel::UnboundedSender<Arc<BuilderRequest>>,
+        local: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
         peers: Arc<DashMap<String, PeerHandle>>,
         signer: PrivateKeySigner,
     ) -> Self {
         Self { local, peers, signer }
-    }
-
-    /// Create a new builder request. The [`BUILDERNET_SENT_AT_HEADER`] is formatted as a UNIX
-    /// timestamp in nanoseconds.
-    fn create_request(
-        priority: Priority,
-        body: Vec<u8>,
-        signature_header: Option<String>,
-        sent_at_header: Option<UtcDateTime>,
-    ) -> Arc<BuilderRequest> {
-        let mut headers = HeaderMap::new();
-        headers.insert(BUILDERNET_PRIORITY_HEADER, priority.to_string().parse().unwrap());
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-        if let Some(signature_header) = signature_header {
-            headers.insert(FLASHBOTS_SIGNATURE_HEADER, signature_header.parse().unwrap());
-        }
-
-        if let Some(sent_at) = sent_at_header {
-            headers.insert(BUILDERNET_SENT_AT_HEADER, sent_at.format_header());
-        }
-
-        Arc::new(BuilderRequest::new(body).with_headers(headers))
     }
 
     /// Find peer name by address.
@@ -80,51 +63,88 @@ impl IngressForwarders {
     }
 
     /// Broadcast bundle to all forwarders.
-    pub fn broadcast_bundle(&self, priority: Priority, bundle: SystemBundle) {
+    pub fn broadcast_bundle(&self, bundle: SystemBundle) {
+        let encoded_bundle = bundle.encode();
+
         // Create local request first
-        let local = Self::create_request(priority, bundle.clone().encode_local(), None, None);
-        let _ = self.local.send(priority, local);
+        let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
+        let _ = self.local.send(local.priority(), local);
 
-        let body = bundle.encode();
+        let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
 
-        let body_hash = keccak256(&body);
-        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
-        let header = format!("{:?}:{}", self.signer.address(), signature);
-
-        // Difference: we encode the whole bundle (including the signer), and we
-        // add the signature header.
-        let forward = Self::create_request(priority, body, Some(header), Some(UtcDateTime::now()));
+        // Difference: we add the signature header.
+        let forward = ForwardingRequest::user_to_system(
+            encoded_bundle.into(),
+            signature_header,
+            UtcDateTime::now(),
+        );
 
         debug!(target: "ingress::forwarder", name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        self.broadcast(forward);
+    }
 
-        for entry in self.peers.iter() {
-            let _ = entry.value().sender.send(priority, forward.clone());
-        }
+    /// Broadcast MEV share bundle to all forwarders.
+    pub fn broadcast_mev_share_bundle(&self, priority: Priority, bundle: SystemMevShareBundle) {
+        let encoded_bundle = bundle.encode();
+        // Create local request first
+        let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
+        let _ = self.local.send(priority, local);
+
+        let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
+
+        // Difference: we add the signature header.
+        let forward = ForwardingRequest::user_to_system(
+            encoded_bundle.into(),
+            signature_header,
+            UtcDateTime::now(),
+        );
+
+        debug!(target: "ingress::forwarder", name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        self.broadcast(forward);
     }
 
     /// Broadcast transaction to all forwarders.
-    pub fn broadcast_transaction(&self, priority: Priority, transaction: SystemTransaction) {
-        let body = transaction.encode();
+    pub fn broadcast_transaction(&self, transaction: SystemTransaction) {
+        let encoded_transaction = transaction.encode();
 
-        let local = Self::create_request(priority, body.clone(), None, None);
-        let _ = self.local.send(priority, local);
+        let local = ForwardingRequest::user_to_local(encoded_transaction.clone().into());
+        let _ = self.local.send(local.priority(), local);
 
-        let body_hash = keccak256(&body);
-        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
-        let header = format!("{:?}:{}", self.signer.address(), signature);
+        let signature_header = self.build_signature_header(encoded_transaction.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = Self::create_request(priority, body, Some(header), Some(UtcDateTime::now()));
+        let forward = ForwardingRequest::user_to_system(
+            encoded_transaction.into(),
+            signature_header,
+            UtcDateTime::now(),
+        );
 
         debug!(target: "ingress::forwarder", name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        self.broadcast(forward);
+    }
 
+    /// Sign and build the signature header in the form of `signer_address:signature`.
+    fn build_signature_header(&self, body: &[u8]) -> String {
+        let body_hash = keccak256(body);
+        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
+        format!("{:?}:{}", self.signer.address(), signature)
+    }
+
+    /// Broadcast request to all peers.
+    fn broadcast(&self, forward: Arc<ForwardingRequest>) {
         for entry in self.peers.iter() {
-            let _ = entry.value().sender.send(priority, forward.clone());
+            let _ = entry.value().sender.send(forward.priority(), forward.clone());
         }
     }
 
     /// Send request only to local forwarder.
-    pub fn send_to_local(&self, priority: Priority, method: &str, param: serde_json::Value) {
+    pub fn send_to_local(
+        &self,
+        priority: Priority,
+        method: &str,
+        param: serde_json::Value,
+        received_at: UtcInstant,
+    ) {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
@@ -132,9 +152,14 @@ impl IngressForwarders {
             "params": [param]
         });
 
-        let body = serde_json::to_vec(&json).unwrap();
-        let request = Self::create_request(priority, body, None, None);
-        let _ = self.local.send(priority, request);
+        let body = serde_json::to_vec(&json).expect("to JSON serialize request");
+        // TODO: raw orders have no priority, but this will change, assume medium for now
+        let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at };
+        let order =
+            EncodedOrder::RawOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
+
+        let local = ForwardingRequest::system_to_local(order);
+        let _ = self.local.send(priority, local);
     }
 }
 
@@ -143,14 +168,14 @@ pub struct PeerHandle {
     /// Peer info.
     pub info: BuilderHubBuilder,
     /// Sender to the peer forwarder.
-    pub sender: pchannel::UnboundedSender<Arc<BuilderRequest>>,
+    pub sender: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
 }
 
 pub fn spawn_forwarder(
     name: String,
     url: String,
     client: reqwest::Client, // request client to be reused for http senders
-) -> eyre::Result<pchannel::UnboundedSender<Arc<BuilderRequest>>> {
+) -> eyre::Result<pchannel::UnboundedSender<Arc<ForwardingRequest>>> {
     let (request_tx, request_rx) = pchannel::unbounded_channel();
     match Url::parse(&url)?.scheme() {
         "http" | "https" => {
@@ -166,22 +191,95 @@ pub fn spawn_forwarder(
     Ok(request_tx)
 }
 
-#[derive(Debug)]
-pub struct BuilderRequest {
-    pub body: Vec<u8>,
-    pub headers: reqwest::header::HeaderMap,
+/// The direction of the forwarding request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForwardingDirection {
+    UserToLocal,
+    UserToSystem,
+    SystemToLocal,
 }
 
-impl BuilderRequest {
-    /// Create new builder request.
-    pub fn new(body: Vec<u8>) -> Self {
-        Self { body, headers: Default::default() }
+impl Display for ForwardingDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UserToLocal => write!(f, "user_to_local"),
+            Self::UserToSystem => write!(f, "user_to_system"),
+            Self::SystemToLocal => write!(f, "system_to_local"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ForwardingRequest {
+    /// The data to be forwarded.
+    pub encoded_order: EncodedOrder,
+    /// The headers of the request.
+    pub headers: reqwest::header::HeaderMap,
+
+    /// The direction of the forwarding request.
+    pub direction: ForwardingDirection,
+}
+
+impl ForwardingRequest {
+    pub fn user_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
+        let headers =
+            Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
+        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::UserToLocal })
     }
 
-    /// Set headers on the request.
-    pub fn with_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
-        self.headers = headers;
-        self
+    pub fn user_to_system(
+        encoded_order: EncodedOrder,
+        signature_header: String,
+        sent_at_header: UtcDateTime,
+    ) -> Arc<Self> {
+        let headers = Self::create_headers(
+            encoded_order.priority(),
+            Some(signature_header),
+            Some(sent_at_header),
+        );
+        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::UserToSystem })
+    }
+
+    pub fn system_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
+        let headers =
+            Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
+        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::SystemToLocal })
+    }
+
+    /// Create a new forwarding request to a builder. The [`BUILDERNET_SENT_AT_HEADER`] is formatted
+    /// as a UNIX timestamp in nanoseconds.
+    fn create_headers(
+        priority: Priority,
+        signature_header: Option<String>,
+        sent_at_header: Option<UtcDateTime>,
+    ) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            BUILDERNET_PRIORITY_HEADER,
+            priority.to_string().parse().expect("to parse priority string"),
+        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        if let Some(signature_header) = signature_header {
+            headers.insert(
+                FLASHBOTS_SIGNATURE_HEADER,
+                signature_header.parse().expect("to parse signature header"),
+            );
+        }
+
+        if let Some(sent_at) = sent_at_header {
+            headers.insert(BUILDERNET_SENT_AT_HEADER, sent_at.format_header());
+        }
+
+        headers
+    }
+
+    pub fn priority(&self) -> Priority {
+        self.encoded_order.priority()
+    }
+
+    pub fn is_big(&self) -> bool {
+        self.encoded_order.encoding().len() > BIG_REQUEST_SIZE_THRESHOLD_KB
     }
 }
 
@@ -199,7 +297,7 @@ struct HttpForwarder {
     client: reqwest::Client,
     name: String,
     url: String,
-    request_rx: pchannel::UnboundedReceiver<Arc<BuilderRequest>>,
+    request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
 }
 
@@ -208,7 +306,7 @@ impl HttpForwarder {
         client: reqwest::Client,
         name: String,
         url: String,
-        request_rx: pchannel::UnboundedReceiver<Arc<BuilderRequest>>,
+        request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> Self {
         Self { client, name, url, request_rx, pending: FuturesUnordered::new() }
     }
@@ -258,18 +356,59 @@ impl Future for HttpForwarder {
 fn send_http_request(
     client: reqwest::Client,
     url: String,
-    request: Arc<BuilderRequest>,
+    request: Arc<ForwardingRequest>,
 ) -> RequestFut<reqwest::Response, reqwest::Error> {
     Box::pin(async move {
-        let start_time = Instant::now();
+        let direction = request.direction;
+        let is_big = request.is_big();
 
-        let response = client
-            .post(url)
-            // TODO(mempirate): Anything to do about this clone?
-            .body(request.body.clone())
-            .headers(request.headers.clone())
-            .send()
-            .await;
+        // Try to avoid cloning the body and headers if there is only one reference.
+        let (order, headers) = Arc::try_unwrap(request).map_or_else(
+            |req| (req.encoded_order.clone(), req.headers.clone()),
+            |inner| (inner.encoded_order, inner.headers),
+        );
+
+        match order {
+            EncodedOrder::Bundle(_) => {
+                SystemMetrics::record_e2e_bundle_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+            EncodedOrder::MevShareBundle(_) => {
+                SystemMetrics::record_e2e_mev_share_bundle_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+            EncodedOrder::Transaction(_) => {
+                SystemMetrics::record_e2e_transaction_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+            EncodedOrder::RawOrder(_) => {
+                SystemMetrics::record_e2e_raw_order_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+        }
+
+        let start_time = Instant::now();
+        let response =
+            client.post(&url).body(order.encoding().to_vec()).headers(headers).send().await;
+        if response.is_ok() {
+            ForwarderMetrics::record_rpc_call(url, start_time.elapsed(), is_big);
+        }
 
         BuilderResponse { start_time, response }
     })

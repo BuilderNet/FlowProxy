@@ -9,11 +9,13 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::{extract::State, routing::post, Router};
 use buildernet_orderflow_proxy::{
     cli::OrderflowIngressArgs,
-    ingress::{maybe_decompress, FLASHBOTS_SIGNATURE_HEADER},
+    consts::FLASHBOTS_SIGNATURE_HEADER,
+    ingress::maybe_decompress,
     jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
+    runner::CliContext,
 };
 use hyper::{header, HeaderMap};
-use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -31,8 +33,10 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     args.builder_url = builder_url;
     let user_listener = TcpListener::bind(&args.user_listen_url).await.unwrap();
     let system_listener = TcpListener::bind(&args.system_listen_url).await.unwrap();
-    let builder_listener = TcpListener::bind(&args.builder_listen_url).await.unwrap();
+    let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
+
+    let task_manager = buildernet_orderflow_proxy::tasks::TaskManager::current();
 
     tokio::spawn(
         async move {
@@ -41,6 +45,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
                 user_listener,
                 system_listener,
                 builder_listener,
+                CliContext { task_executor: task_manager.executor() },
             )
             .await
             .unwrap();
@@ -93,6 +98,16 @@ impl<S: Signer + Sync> IngressClient<S> {
             "id": 0,
             "jsonrpc": JSONRPC_VERSION_2,
             "method": "eth_sendBundle",
+            "params": [bundle]
+        });
+        self.send_json(&request).await
+    }
+
+    pub(crate) async fn send_mev_share_bundle(&self, bundle: &RawShareBundle) -> reqwest::Response {
+        let request = json!({
+            "id": 0,
+            "jsonrpc": JSONRPC_VERSION_2,
+            "method": "mev_sendBundle",
             "params": [bundle]
         });
         self.send_json(&request).await
@@ -153,7 +168,7 @@ impl BuilderReceiver {
             Ok(decompressed) => decompressed,
             Err(error) => {
                 tracing::error!("Error decompressing body: {:?}", error);
-                return JsonRpcResponse::error(None, error)
+                return JsonRpcResponse::error(None, error);
             }
         };
 
