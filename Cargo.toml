@@ -87,6 +87,7 @@ derive_more = { version = "2", features = ["deref"] }
 
 # Manually override cc version (conflict between alloy-consensus and rbuilder)
 cc = "=1.2.15"
+libc = "0.2.177"
 
 [dev-dependencies]
 tempfile = { version = "3.23.0" }
