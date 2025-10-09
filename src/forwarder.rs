@@ -37,7 +37,7 @@ use time::UtcDateTime;
 use tokio::sync::mpsc;
 use tracing::*;
 
-const FORWARDER_TARGET: &str = "ingress::forwarder";
+const FORWARDER: &str = "ingress::forwarder";
 
 #[derive(Debug)]
 pub struct IngressForwarders {
@@ -84,7 +84,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: FORWARDER_TARGET, name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(target: FORWARDER, name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -104,7 +104,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: FORWARDER_TARGET, name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(target: FORWARDER, name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -124,7 +124,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: FORWARDER_TARGET, name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        debug!(target: FORWARDER, name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
         self.broadcast(forward);
     }
 
@@ -351,17 +351,17 @@ impl HttpForwarder {
             Ok(response) => {
                 let status = response.status();
                 if status.is_client_error() {
-                    error!(target: FORWARDER_TARGET, name = %self.name, %status, ?elapsed, "Client error from builder");
+                    error!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Client error from builder");
                     // `response.json` is async, so we send it to the decoder.
                     if let Err(e) = self.error_decoder_tx.try_send(response) {
-                        error!(target: FORWARDER_TARGET, name = %self.name, ?e, "Failed to send error response to decoder");
+                        error!(target: FORWARDER, name = %self.name, ?e, "Failed to send error response to decoder");
                     }
                     ForwarderMetrics::increment_http_call_failures(
                         self.name.clone(),
                         status.to_string(),
                     );
                 } else if status.is_server_error() {
-                    warn!(target: FORWARDER_TARGET, name = %self.name, %status, ?elapsed, "Server error from builder");
+                    warn!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Server error from builder");
                     ForwarderMetrics::increment_http_call_failures(
                         self.name.clone(),
                         status.to_string(),
@@ -369,7 +369,7 @@ impl HttpForwarder {
                 }
             }
             Err(error) => {
-                error!(target: FORWARDER_TARGET, name = %self.name, ?error, ?elapsed, "Error forwarding request");
+                error!(target: FORWARDER, name = %self.name, ?error, ?elapsed, "Error forwarding request");
                 ForwarderMetrics::increment_request_processing_failures(self.name.clone());
             }
         }
@@ -385,10 +385,10 @@ impl Future for HttpForwarder {
         loop {
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
-                    info!(target: FORWARDER_TARGET, name = %this.name, "Terminating forwarder");
+                    info!(target: FORWARDER, name = %this.name, "Terminating forwarder");
                     return Poll::Ready(());
                 };
-                trace!(target: FORWARDER_TARGET, name = %this.name, ?request, "Sending request");
+                trace!(target: FORWARDER, name = %this.name, ?request, "Sending request");
                 this.pending.push(send_http_request(
                     this.client.clone(),
                     this.url.clone(),
@@ -424,21 +424,21 @@ impl ResponseErrorDecoder {
         while let Some(response) = self.rx.recv().await {
             let status = response.status();
             if !status.is_client_error() {
-                warn!(target: FORWARDER_TARGET, name = %self.name, url = %self.url, %status, "Ignoring non-client-error response in error decoder");
+                warn!(target: FORWARDER, name = %self.name, url = %self.url, %status, "Ignoring non-client-error response in error decoder");
             }
 
             match response.json::<JsonRpcResponse<()>>().await {
                 Ok(body) => match body.result_or_error {
                     JsonRpcResponseTy::Result(res) => {
-                        warn!(target: FORWARDER_TARGET, name = %self.name, url = %self.url, %status, ?res, "Unexpected success response from builder on error status code");
+                        warn!(target: FORWARDER, name = %self.name, url = %self.url, %status, ?res, "Unexpected success response from builder on error status code");
                     }
                     JsonRpcResponseTy::Error { code, message } => {
-                        error!(target: FORWARDER_TARGET, name = %self.name, url = %self.url, %status, %code, %message, "Decoded error response from builder");
+                        error!(target: FORWARDER, name = %self.name, url = %self.url, %status, %code, %message, "Decoded error response from builder");
                         ForwarderMetrics::increment_rpc_call_failures(self.name.clone(), code);
                     }
                 },
                 Err(e) => {
-                    warn!(target: FORWARDER_TARGET,  ?e, name = %self.name, url = %self.url, %status, "Received client error from builder, but failed decode body into a JSON-RPC response");
+                    warn!(target: FORWARDER,  ?e, name = %self.name, url = %self.url, %status, "Received client error from builder, but failed decode body into a JSON-RPC response");
                 }
             }
         }
