@@ -574,6 +574,16 @@ impl EncodedOrder {
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
         }
     }
+
+    /// Returns the type of the order.
+    pub fn order_type(&self) -> &'static str {
+        match self {
+            EncodedOrder::RawOrder(_) => "raw",
+            EncodedOrder::Bundle(_) => "bundle",
+            EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
+            EncodedOrder::Transaction(_) => "transaction",
+        }
+    }
 }
 
 impl From<WithEncoding<SystemBundle>> for EncodedOrder {
