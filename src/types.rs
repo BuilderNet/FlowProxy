@@ -91,12 +91,12 @@ impl BundleHash for RawBundle {
                 refund_tx_hashes,
                 uuid,
                 replacement_nonce,
+                refund_identity: _,
                 signing_address: _,
                 version: _,
                 min_timestamp: _,
                 max_timestamp: _,
                 delayed_refund: _,
-                first_seen_at: _,
             } = bundle;
 
             block_number.hash(state);
