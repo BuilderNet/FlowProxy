@@ -100,6 +100,8 @@ pub(crate) struct BundleRow {
     /// Bundle refund recipient.
     #[serde(with = "address::option")]
     pub refund_recipient: Option<Address>,
+    /// Whether the bundle has a delayed refund.
+    pub delayed_refund: Option<bool>,
     /// For 2nd price refunds done by buildernet
     #[serde(with = "address::option")]
     pub refund_identity: Option<Address>,
@@ -228,6 +230,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     max_timestamp: bundle.raw_bundle.max_timestamp,
                     reverting_tx_hashes: bundle.raw_bundle.reverting_tx_hashes.clone(),
                     dropping_tx_hashes: bundle.raw_bundle.dropping_tx_hashes.clone(),
+                    delayed_refund: bundle.raw_bundle.delayed_refund,
                     refund_tx_hashes: bundle
                         .raw_bundle
                         .refund_tx_hashes
@@ -241,7 +244,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     builder_name,
                     refund_percent: bundle.raw_bundle.refund_percent,
                     refund_recipient: bundle.raw_bundle.refund_recipient,
-                    refund_identity: None,
+                    refund_identity: bundle.raw_bundle.refund_identity,
                     hash: decoded.hash,
                     version: match decoded.version {
                         BundleVersion::V1 => 1,
@@ -292,9 +295,10 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     replacement_nonce: bundle.raw_bundle.replacement_nonce,
                     signer_address: Some(bundle.signer),
                     builder_name,
+                    delayed_refund: bundle.raw_bundle.delayed_refund,
                     refund_percent: bundle.raw_bundle.refund_percent,
                     refund_recipient: bundle.raw_bundle.refund_recipient,
-                    refund_identity: None,
+                    refund_identity: bundle.raw_bundle.refund_identity,
                     hash: bundle.bundle_hash,
                     // NOTE: For now, replacement bundles don't have a version, so we set v2.
                     version: 2,
@@ -339,7 +343,7 @@ pub(crate) mod tests {
                 replacement_nonce: value.replacement_nonce,
                 refund_percent: value.refund_percent,
                 refund_recipient: value.refund_recipient,
-                first_seen_at: None,
+                refund_identity: value.refund_identity,
                 version: if value.version == 1 {
                     Some("v1".to_string())
                 } else {

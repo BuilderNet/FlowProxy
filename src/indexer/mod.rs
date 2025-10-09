@@ -165,7 +165,9 @@ pub(crate) mod tests {
     "replacementNonce": 0,
     "refundPercent": 0,
     "refundRecipient": "0x0000000000000000000000000000000000000000",
-    "refundTxHashes": ["0x0000000000000000000000000000000000000000000000000000000000000000"]
+    "refundTxHashes": ["0x0000000000000000000000000000000000000000000000000000000000000000"],
+    "refund_identity": "0x0000000000000000000000000000000000000000",
+    "delayed_refund": "true"
 }"#;
 
     /// An example replacement bundle with no transactions, a.k.a. a cancel bundle.
