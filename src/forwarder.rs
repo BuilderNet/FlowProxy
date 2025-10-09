@@ -428,7 +428,7 @@ impl ResponseErrorDecoder {
                 continue;
             }
 
-            match response.json::<JsonRpcResponse<()>>().await {
+            match response.json::<JsonRpcResponse<serde_json::Value>>().await {
                 Ok(body) => {
                     if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
                         error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, "Decoded error response from builder");
