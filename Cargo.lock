@@ -1620,11 +1620,11 @@ dependencies = [
  "derive_more 2.0.1",
  "dyn-clone",
  "eyre",
+ "fdlimit",
  "flate2",
  "futures",
  "futures-util",
  "hyper",
- "libc",
  "metrics",
  "metrics-derive",
  "metrics-exporter-prometheus",
@@ -2759,6 +2759,16 @@ dependencies = [
  "arrayvec",
  "auto_impl",
  "bytes",
+]
+
+[[package]]
+name = "fdlimit"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e182f7dbc2ef73d9ef67351c5fbbea084729c48362d3ce9dd44c28e32e277fe5"
+dependencies = [
+ "libc",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

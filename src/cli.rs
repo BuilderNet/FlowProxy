@@ -160,12 +160,6 @@ pub struct OrderflowIngressArgs {
 
     #[command(flatten)]
     pub indexing: IndexerArgs,
-
-    /// The number of file descriptors to use. This will attempt to raise the soft limit to this
-    /// value only if lower. In such case, the value is capped by the hard limit, and a max value
-    /// of 8192.
-    #[clap(long, default_value_t = 4096)]
-    pub file_descriptors: u64,
 }
 
 impl Default for OrderflowIngressArgs {
@@ -192,7 +186,6 @@ impl Default for OrderflowIngressArgs {
             gzip_enabled: false,
             cache_ttl: 60,
             cache_size: 4096,
-            file_descriptors: 4096,
 
             indexing: IndexerArgs { clickhouse: None, parquet: None },
         }

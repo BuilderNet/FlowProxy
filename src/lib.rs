@@ -4,7 +4,6 @@ use crate::{
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
     },
-    rlimits::ensure_max_file_descriptors,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
     tasks::TaskExecutor,
@@ -41,8 +40,6 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-pub mod rlimits;
-
 use crate::{builderhub::PeerStore, cache::OrderCache, indexer::Indexer};
 
 pub mod builderhub;
@@ -77,7 +74,7 @@ pub fn init_tracing(log_json: bool) {
 }
 
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
-    ensure_max_file_descriptors(args.file_descriptors).map_err(|e| eyre::eyre!(e))?;
+    fdlimit::raise_fd_limit()?;
 
     if let Some(ref metrics_addr) = args.metrics {
         spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
