@@ -40,66 +40,42 @@ mod name {
 
 use name::*;
 
+#[derive(Debug)]
 pub struct MetricsDescriber;
 
 impl MetricsDescriber {
+    #[rustfmt::skip]
     pub fn describe() {
-        // Forwarder metrics
-        describe_histogram!(
-            "forwarder_rpc_call_duration_s",
-            "The duration of the RPC call to a peer."
-        );
-        describe_counter!(
-            "forwarder_request_processing_failures",
-            "The number of request processing failures."
-        );
-        describe_counter!(FORWARDER_HTTP_CALL_FAILURES, "The number of HTTP call failures.");
-        describe_counter!(FORWARDER_RPC_CALL_FAILURES, "The number of RPC call failures.");
-        describe_counter!(
-            "forwarder_json_rpc_decoding_failures",
-            "The number of JSON-RPC decoding failures."
-        );
-
-        // Priority queue metrics
-        describe_gauge!(PRIORITY_QUEUE_SIZE, "The size of the priority queue.");
-
-        // Ingress handler metrics
-        describe_counter!(
-            "ingress_requests_rate_limited",
-            "The number of requests that were rate limited."
-        );
-        describe_counter!(INGRESS_JSON_RPC_PARSE_ERRORS, "The number of JSON-RPC parse errors.");
-        describe_counter!(
-            "ingress_json_rpc_unknown_method",
-            "The number of JSON-RPC unknown method errors."
-        );
-        describe_counter!(INGRESS_VALIDATION_ERRORS, "The number of validation errors.");
-        describe_counter!(INGRESS_ORDER_CACHE_HIT, "The number of order cache hits.");
-        describe_histogram!(INGRESS_HTTP_REQUEST_DURATION_S, "The duration of HTTP requests.");
-        describe_counter!(
-            "ingress_send_bundle_requests_total",
-            "The total number of eth_sendBundle requests received."
-        );
-        describe_histogram!(
-            "ingress_send_bundle_request_duration_s",
-            "The duration of eth_sendBundle RPC calls."
-        );
-        describe_counter!(
-            "ingress_send_mev_share_bundle_requests_total",
-            "The total number of mev_share bundle requests received."
-        );
-        describe_histogram!(
-            "ingress_send_mev_share_bundle_request_duration_s",
-            "The duration of mev_share bundle RPC calls."
-        );
-        describe_counter!(
-            "ingress_send_transaction_requests_total",
-            "The total number of eth_sendRawTransaction requests received."
-        );
-        describe_histogram!(
-            "ingress_send_transaction_request_duration_s",
-            "The duration of eth_sendRawTransaction RPC calls."
-        );
+        describe_counter!(BUILDERHUB_PEER_COUNT,"builderhub_peer_count");
+        describe_counter!(BUILDERHUB_PEER_REQUEST_FAILURES, "builderhub_peer_request_failures");
+        describe_counter!(FORWARDER_HTTP_CALL_FAILURES, "forwarder_http_call_failures");
+        describe_counter!(FORWARDER_JSON_RPC_DECODING_FAILURES, "forwarder_json_rpc_decoding_failures");
+        describe_counter!(FORWARDER_REQUEST_PROCESSING_FAILURES, "forwarder_request_processing_failures");
+        describe_counter!(FORWARDER_RPC_CALL_DURATION_S, "forwarder_rpc_call_duration_s");
+        describe_counter!(FORWARDER_RPC_CALL_FAILURES, "forwarder_rpc_call_failures");
+        describe_counter!(INDEXER_BUNDLE_INDEXING_FAILURES, "indexer_bundle_indexing_failures");
+        describe_counter!(INDEXER_BUNDLE_RECEIPT_INDEXING_FAILURES, "indexer_bundle_receipt_indexing_failures");
+        describe_counter!(INDEXER_CLICKHOUSE_COMMIT_FAILURES, "indexer_clickhouse_commit_failures");
+        describe_counter!(INDEXER_CLICKHOUSE_QUEUE_SIZE, "indexer_clickhouse_queue_size");
+        describe_counter!(INDEXER_CLICKHOUSE_WRITE_FAILURES, "indexer_clickhouse_write_failures");
+        describe_counter!(INDEXER_PARQUET_QUEUE_SIZE, "indexer_parquet_queue_size");
+        describe_counter!(INGRESS_E2E_BUNDLE_PROCESSING_TIME_S, "ingress_e2e_bundle_processing_time_s");
+        describe_counter!(INGRESS_E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME_S, "ingress_e2e_mev_share_bundle_processing_time_s");
+        describe_counter!(INGRESS_E2E_RAW_ORDER_PROCESSING_TIME_S, "ingress_e2e_raw_order_processing_time_s");
+        describe_counter!(INGRESS_E2E_TRANSACTION_PROCESSING_TIME_S, "ingress_e2e_transaction_processing_time_s");
+        describe_counter!(INGRESS_ENTITY_COUNT, "ingress_entity_count");
+        describe_counter!(INGRESS_HTTP_REQUEST_DURATION_S, "ingress_http_request_duration_s");
+        describe_counter!(INGRESS_JSON_RPC_PARSE_ERRORS, "ingress_json_rpc_parse_errors");
+        describe_counter!(INGRESS_JSON_RPC_UNKNOWN_METHOD, "ingress_json_rpc_unknown_method");
+        describe_counter!(INGRESS_ORDER_CACHE_HIT, "ingress_order_cache_hit");
+        describe_counter!(INGRESS_REQUESTS_RATE_LIMITED, "ingress_requests_rate_limited");
+        describe_counter!(INGRESS_SEND_BUNDLE_REQUESTS_TOTAL, "ingress_send_bundle_requests_total");
+        describe_counter!(INGRESS_SEND_BUNDLE_REQUEST_DURATION_S, "ingress_send_bundle_request_duration_s");
+        describe_counter!(INGRESS_SEND_MEV_SHARE_BUNDLE_REQUESTS_TOTAL, "ingress_send_mev_share_bundle_requests_total");
+        describe_counter!(INGRESS_SEND_TRANSACTION_REQUESTS_TOTAL, "ingress_send_transaction_requests_total");
+        describe_counter!(INGRESS_SEND_TRANSACTION_REQUEST_DURATION_S, "ingress_send_transaction_request_duration_s");
+        describe_counter!(INGRESS_VALIDATION_ERRORS, "ingress_validation_errors");
+        describe_counter!(PRIORITY_QUEUE_SIZE, "priority_queue_size");
     }
 }
 
