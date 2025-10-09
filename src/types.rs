@@ -91,7 +91,7 @@ impl BundleHash for RawBundle {
                 refund_tx_hashes,
                 uuid,
                 replacement_nonce,
-                refund_identity: _,
+                refund_identity,
                 signing_address: _,
                 version: _,
                 min_timestamp: _,
@@ -134,6 +134,8 @@ impl BundleHash for RawBundle {
                 .as_ref()
                 .map(|hashes| hashes.iter().map(|hash| format!("{hash:?}")).collect::<Vec<_>>());
             refund_tx_hashes.hash(state);
+
+            refund_identity.hash(state);
         }
 
         let mut hasher = wyhash::WyHash::default();
