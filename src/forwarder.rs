@@ -494,11 +494,20 @@ fn send_http_request(
             }
         }
 
+        let order_type = order.order_type();
         let start_time = Instant::now();
         let response =
             client.post(&url).body(order.encoding().to_vec()).headers(headers).send().await;
+
         if response.is_ok() {
-            ForwarderMetrics::record_rpc_call(url, start_time.elapsed(), is_big);
+            let elapsed = start_time.elapsed();
+
+            // Print warning if the RPC call took more than 1 second.
+            if elapsed > Duration::from_secs(1) {
+                warn!(target: FORWARDER, name = %url, ?elapsed, is_big, size = order.encoding().len(), order_type, "Long RPC call");
+            }
+
+            ForwarderMetrics::record_rpc_call(url, elapsed, is_big);
         }
 
         BuilderResponse { start_time, response }
