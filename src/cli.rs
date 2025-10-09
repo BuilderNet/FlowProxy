@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
 
@@ -105,6 +106,14 @@ pub struct OrderflowIngressArgs {
     #[clap(long, env = "FLASHBOTS_ORDERFLOW_SIGNER", id = "FLASHBOTS_ORDERFLOW_SIGNER")]
     pub orderflow_signer: Option<PrivateKeySigner>,
 
+    /// The flashbots signer of this proxy.
+    #[clap(
+        long,
+        env = "FLASHBOTS_ORDERFLOW_SIGNER_ADDRESS",
+        id = "FLASHBOTS_ORDERFLOW_SIGNER_ADDRESS"
+    )]
+    pub flashbots_signer: Option<Address>,
+
     /// The maximum request size in bytes.
     #[clap(long, default_value_t = MAX_REQUEST_SIZE_BYTES)]
     pub max_request_size: usize,
@@ -163,6 +172,7 @@ impl Default for OrderflowIngressArgs {
             builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),
             builder_hub_url: None,
+            flashbots_signer: None,
             enable_rate_limiting: false,
             metrics: None,
             orderflow_signer: None,

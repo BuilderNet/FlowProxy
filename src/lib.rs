@@ -178,6 +178,7 @@ pub async fn run_with_listeners(
         score_lookback_s: args.score_lookback_s,
         score_bucket_s: args.score_bucket_s,
         spam_thresholds: SpamThresholds::default(),
+        flashbots_signer: args.flashbots_signer,
         pqueues: Default::default(),
         entities: DashMap::default(),
         order_cache,

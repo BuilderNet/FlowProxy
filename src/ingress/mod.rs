@@ -62,6 +62,7 @@ pub struct OrderflowIngress {
     pub entities: DashMap<Entity, EntityData>,
     pub order_cache: OrderCache,
     pub forwarders: IngressForwarders,
+    pub flashbots_signer: Option<Address>,
     /// The URL of the local builder. Used to send readyz requests.
     /// Optional for testing.
     pub local_builder_url: Option<Url>,
@@ -271,6 +272,10 @@ impl OrderflowIngress {
 
         let peer = 'peer: {
             if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
+                if ingress.flashbots_signer.is_some_and(|addr| addr == address) {
+                    break 'peer "flashbots".to_string();
+                }
+
                 if let Some(peer) = ingress.forwarders.find_peer(address) {
                     break 'peer peer;
                 }
