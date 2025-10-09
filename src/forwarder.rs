@@ -31,7 +31,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use time::UtcDateTime;
 use tokio::sync::mpsc;
@@ -312,7 +312,7 @@ struct HttpForwarder {
     /// The receiver of forwarding requests.
     request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The sender to decode [`reqwest::Response`] errors.
-    error_decoder_tx: mpsc::Sender<reqwest::Response>,
+    error_decoder_tx: mpsc::Sender<(reqwest::Response, Duration)>,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
 }
@@ -324,7 +324,7 @@ impl HttpForwarder {
         url: String,
         request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> (Self, ResponseErrorDecoder) {
-        let (error_decoder_tx, error_decoder_rx) = mpsc::channel(1024);
+        let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
         let decoder =
             ResponseErrorDecoder { name: name.clone(), url: url.clone(), rx: error_decoder_rx };
         (
@@ -349,23 +349,8 @@ impl HttpForwarder {
 
         match response_result {
             Ok(response) => {
-                let status = response.status();
-                if status.is_client_error() {
-                    error!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Client error from builder");
-                    // `response.json` is async, so we send it to the decoder.
-                    if let Err(e) = self.error_decoder_tx.try_send(response) {
-                        error!(target: FORWARDER, name = %self.name, ?e, "Failed to send error response to decoder");
-                    }
-                    ForwarderMetrics::increment_http_call_failures(
-                        self.name.clone(),
-                        status.to_string(),
-                    );
-                } else if status.is_server_error() {
-                    warn!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Server error from builder");
-                    ForwarderMetrics::increment_http_call_failures(
-                        self.name.clone(),
-                        status.to_string(),
-                    );
+                if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
+                    error!(target: FORWARDER, name = %self.name, ?e, "Failed to send error response to decoder");
                 }
             }
             Err(error) => {
@@ -416,29 +401,40 @@ pub struct ResponseErrorDecoder {
     /// The url of the builder
     pub url: String,
     /// The receiver of the error responses.
-    pub rx: mpsc::Receiver<reqwest::Response>,
+    pub rx: mpsc::Receiver<(reqwest::Response, Duration)>,
 }
 
 impl ResponseErrorDecoder {
     pub async fn run(mut self) {
-        while let Some(response) = self.rx.recv().await {
+        while let Some((response, elapsed)) = self.rx.recv().await {
             let status = response.status();
-            if !status.is_client_error() {
-                warn!(target: FORWARDER, name = %self.name, url = %self.url, %status, "Ignoring non-client-error response in error decoder");
+
+            if status.is_client_error() {
+                error!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Client error from builder");
+                ForwarderMetrics::increment_http_call_failures(
+                    self.name.clone(),
+                    status.to_string(),
+                );
+                continue;
+            } else if status.is_server_error() {
+                warn!(target: FORWARDER, name = %self.name, %status, ?elapsed, "Server error from builder");
+                ForwarderMetrics::increment_http_call_failures(
+                    self.name.clone(),
+                    status.to_string(),
+                );
+                continue;
             }
 
             match response.json::<JsonRpcResponse<()>>().await {
-                Ok(body) => match body.result_or_error {
-                    JsonRpcResponseTy::Result(res) => {
-                        warn!(target: FORWARDER, name = %self.name, url = %self.url, %status, ?res, "Unexpected success response from builder on error status code");
-                    }
-                    JsonRpcResponseTy::Error { code, message } => {
-                        error!(target: FORWARDER, name = %self.name, url = %self.url, %status, %code, %message, "Decoded error response from builder");
+                Ok(body) => {
+                    if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
+                        error!(target: FORWARDER, name = %self.name, url = %self.url, %code, %message, "Decoded error response from builder");
                         ForwarderMetrics::increment_rpc_call_failures(self.name.clone(), code);
                     }
-                },
+                }
                 Err(e) => {
-                    warn!(target: FORWARDER,  ?e, name = %self.name, url = %self.url, %status, "Received client error from builder, but failed decode body into a JSON-RPC response");
+                    warn!(target: FORWARDER,  ?e, name = %self.name, url = %self.url, %status, "Failed decode response into JSON-RPC");
+                    ForwarderMetrics::increment_json_rpc_decoding_failures(self.name.clone());
                 }
             }
         }

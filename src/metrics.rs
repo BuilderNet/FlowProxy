@@ -26,6 +26,11 @@ impl ForwarderMetrics {
     pub fn increment_rpc_call_failures(builder_name: String, rpc_code: i32) {
         counter!("forwarder_rpc_call_failures", "builder_name" => builder_name, "rpc_code" => rpc_code.to_string()).increment(1);
     }
+
+    pub fn increment_json_rpc_decoding_failures(builder_name: String) {
+        counter!("forwarder_json_rpc_decoding_failures", "builder_name" => builder_name)
+            .increment(1);
+    }
 }
 
 #[derive(Debug, Clone)]
