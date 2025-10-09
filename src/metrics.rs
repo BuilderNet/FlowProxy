@@ -238,12 +238,12 @@ impl IndexerMetrics {
 
     #[inline]
     pub fn increment_clickhouse_write_failures(err: String) {
-        counter!("indexer_clickhouse_writing_failures", "error" => err).increment(1);
+        counter!("indexer_clickhouse_write_failures", "error" => err).increment(1);
     }
 
     #[inline]
     pub fn increment_clickhouse_commit_failures(err: String) {
-        counter!("indexer_clickhouse_writing_failures", "error" => err).increment(1);
+        counter!("indexer_clickhouse_commit_failures", "error" => err).increment(1);
     }
 
     #[inline]
