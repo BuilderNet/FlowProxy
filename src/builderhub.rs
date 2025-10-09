@@ -6,7 +6,7 @@ use revm_primitives::Address;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::DEFAULT_SYSTEM_PORT;
+use crate::{consts::DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SYSTEM_PORT};
 
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubOrderflowProxyCredentials {
@@ -90,7 +90,10 @@ pub struct BuilderHub {
 impl BuilderHub {
     /// Create a new BuilderHub client with a default HTTP timeout of 2 seconds.
     pub fn new(url: String) -> Self {
-        let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+            .build()
+            .unwrap();
         Self { client, url }
     }
 

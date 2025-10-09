@@ -2,8 +2,8 @@ use crate::{
     cache::OrderCache,
     consts::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
-        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
-        MEV_SEND_BUNDLE_METHOD, USE_LEGACY_SIGNATURE,
+        DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD,
+        FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -227,8 +227,10 @@ impl OrderflowIngress {
     /// returns 200 if the local builder is not configured.
     pub async fn ready_handler(State(ingress): State<Arc<Self>>) -> Response {
         if let Some(ref url) = ingress.builder_ready_endpoint {
-            let client =
-                reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                .build()
+                .unwrap();
             let url = url.join("readyz").unwrap();
 
             let Ok(response) = client.get(url.clone()).send().await else {
@@ -305,7 +307,7 @@ impl OrderflowIngress {
         if let Some(priority_) = maybe_buildernet_priority(&headers) {
             priority = priority_;
         } else {
-            debug!(target: "ingress", %peer, "Error retrieving priority from system request, defaulting to {priority}");
+            trace!(target: "ingress", %peer, "Error retrieving priority from system request, defaulting to {priority}");
         }
 
         trace!(target: "ingress", %peer, id = request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");

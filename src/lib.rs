@@ -1,6 +1,7 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
+    consts::DEFAULT_HTTP_TIMEOUT_SECS,
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
     },
@@ -106,7 +107,9 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()?;
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
         debug!(url = builder_hub_url, "Running with BuilderHub");
@@ -251,7 +254,10 @@ async fn run_update_peers(
     disable_forwarding: bool,
     task_executor: TaskExecutor,
 ) {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()
+        .unwrap();
     let delay = Duration::from_secs(30);
 
     loop {
@@ -299,6 +305,7 @@ async fn run_update_peers(
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
                     client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .https_only(true)
                         .add_root_certificate(tls_cert.clone())
                         .build()
