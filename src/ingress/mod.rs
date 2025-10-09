@@ -429,7 +429,18 @@ impl OrderflowIngress {
 
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
+        // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
+        // needed to decode the replacement data correctly in
+        // [`SystemBundle::try_from_bundle_and_signer`].
+        if (bundle.uuid.or(bundle.replacement_uuid).is_some()) && bundle.replacement_nonce.is_none()
+        {
+            let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
+            bundle.replacement_nonce = Some(timestamp.try_into().expect("Timestamp too large"));
+        }
+
         // Deduplicate bundles.
+        // IMPORTANT: For correct cancellation deduplication, the replacement nonce must be set (see
+        // above).
         let bundle_hash = bundle.bundle_hash();
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
@@ -438,16 +449,6 @@ impl OrderflowIngress {
         }
 
         self.order_cache.insert(bundle_hash);
-
-        // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
-        // needed to decode the replacement data correctly in
-        // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.replacement_uuid.is_some() || bundle.uuid.is_some()) &&
-            bundle.replacement_nonce.is_none()
-        {
-            let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
-            bundle.replacement_nonce = Some(timestamp.try_into().expect("Timestamp too large"));
-        }
 
         // Decode and validate the bundle.
         let bundle = self
