@@ -23,9 +23,9 @@ use std::{
 use crate::{
     cli::ParquetArgs,
     indexer::{BuilderName, OrderReceivers, TRACING_TARGET},
-    metrics::{IndexerMetrics, Sampler},
+    metrics::IndexerMetrics,
     tasks::TaskExecutor,
-    types::BundleReceipt,
+    types::{BundleReceipt, Sampler},
 };
 
 /// The Arrow schema for bundle receipts.

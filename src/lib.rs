@@ -79,6 +79,7 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
 
     if let Some(ref metrics_addr) = args.metrics {
         spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
+        metrics::describe();
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
@@ -232,6 +233,7 @@ pub async fn run_with_listeners(
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
         .layer(DefaultBodyLimit::max(args.max_request_size))
+        // TODO: After mTLS, we can probably take this out.
         .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
@@ -378,14 +380,14 @@ async fn track_server_metrics<T: IngressHandlerMetricsExt>(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    let method = request.method().to_string();
+    let method = request.method().clone();
 
     let start = Instant::now();
     let response = next.run(request).await;
     let latency = start.elapsed();
-    let status = response.status().as_u16().to_string();
+    let status = response.status();
 
-    T::record_http_request(path, method, status, latency);
+    T::record_http_request(&method, path, status, latency);
 
     response
 }

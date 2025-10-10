@@ -9,9 +9,7 @@ use crate::{
     forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
-    metrics::{
-        IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics, SystemMetrics,
-    },
+    metrics::{IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics},
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
     types::{
@@ -112,7 +110,7 @@ impl OrderflowIngress {
             let len_after = self.entities.len();
             let num_removed = len_before.saturating_sub(len_after);
 
-            SystemMetrics::entity_count(len_after);
+            IngressUserMetrics::set_entity_count(len_after);
             info!(target: "ingress::state", entries = len_after, num_removed, "Finished state maintenance");
         }
     }
@@ -204,10 +202,10 @@ impl OrderflowIngress {
             }
             other => {
                 error!(target: "ingress", %other, "Method not supported");
-                IngressUserMetrics::increment_json_rpc_unknown_method();
+                IngressUserMetrics::increment_json_rpc_unknown_method(other.to_owned());
                 return JsonRpcResponse::error(
                     Some(request.id),
-                    JsonRpcError::MethodNotFound(other.to_string()),
+                    JsonRpcError::MethodNotFound(other.to_owned()),
                 )
             }
         };
@@ -333,7 +331,7 @@ impl OrderflowIngress {
                 let bundle_hash = bundle.bundle_hash();
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
-                    IngressSystemMetrics::increment_order_cache_hit();
+                    IngressSystemMetrics::increment_order_cache_hit("bundle");
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -354,7 +352,8 @@ impl OrderflowIngress {
 
                 ingress.indexer_handle.index_bundle_receipt(receipt);
 
-                IngressSystemMetrics::record_bundle_rpc_duration(received_at.elapsed());
+                IngressSystemMetrics::record_bundle_rpc_duration(priority, received_at.elapsed());
+                IngressSystemMetrics::record_txs_per_bundle(bundle.txs.len());
 
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
@@ -374,7 +373,7 @@ impl OrderflowIngress {
                 let tx_hash = *tx.tx_hash();
                 if ingress.order_cache.contains(&tx_hash) {
                     trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
-                    IngressSystemMetrics::increment_order_cache_hit();
+                    IngressSystemMetrics::increment_order_cache_hit("transaction");
                     return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
                 }
 
@@ -383,7 +382,10 @@ impl OrderflowIngress {
                 // TODO: Index transaction receipt
                 _ = sent_at;
 
-                IngressSystemMetrics::record_transaction_rpc_duration(received_at.elapsed());
+                IngressSystemMetrics::record_transaction_rpc_duration(
+                    priority,
+                    received_at.elapsed(),
+                );
 
                 (raw, EthResponse::TxHash(tx_hash))
             }
@@ -401,7 +403,7 @@ impl OrderflowIngress {
                 let bundle_hash = bundle.bundle_hash();
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Share bundle already processed");
-                    IngressSystemMetrics::increment_order_cache_hit();
+                    IngressSystemMetrics::increment_order_cache_hit("mev_share_bundle");
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -410,14 +412,20 @@ impl OrderflowIngress {
 
                 ingress.order_cache.insert(bundle_hash);
 
+                IngressSystemMetrics::record_txs_per_mev_share_bundle(bundle.body.len());
+                IngressSystemMetrics::record_mev_share_bundle_rpc_duration(
+                    priority,
+                    received_at.elapsed(),
+                );
+
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
             other => {
                 error!(target: "ingress", %other, "Method not supported");
-                IngressSystemMetrics::increment_json_rpc_unknown_method();
+                IngressSystemMetrics::increment_json_rpc_unknown_method(other.to_owned());
                 return JsonRpcResponse::error(
                     Some(request.id),
-                    JsonRpcError::MethodNotFound(other.to_string()),
+                    JsonRpcError::MethodNotFound(other.to_owned()),
                 )
             }
         };
@@ -457,7 +465,7 @@ impl OrderflowIngress {
         let bundle_hash = bundle.bundle_hash();
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
-            IngressUserMetrics::increment_order_cache_hit();
+            IngressUserMetrics::increment_order_cache_hit("bundle");
             return Ok(bundle_hash);
         }
 
@@ -479,12 +487,16 @@ impl OrderflowIngress {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
             }
-            DecodedBundle::Replacement(replacement_data) => {
+            DecodedBundle::EmptyReplacement(replacement_data) => {
                 debug!(target: "ingress", ?replacement_data, "Replacement bundle decoded");
             }
         }
 
-        IngressUserMetrics::increment_bundles_received(priority);
+        if bundle.is_empty() {
+            IngressUserMetrics::increment_empty_bundles();
+        } else {
+            IngressUserMetrics::record_txs_per_bundle(bundle.raw_bundle.txs.len());
+        }
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), ?elapsed, "Bundle validated");
@@ -512,7 +524,7 @@ impl OrderflowIngress {
         let bundle_hash = bundle.bundle_hash();
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
-            IngressUserMetrics::increment_order_cache_hit();
+            IngressUserMetrics::increment_order_cache_hit("mev_share_bundle");
             return Ok(bundle_hash);
         }
 
@@ -544,7 +556,7 @@ impl OrderflowIngress {
             }
         }
 
-        IngressUserMetrics::increment_mev_share_bundles_received(priority);
+        IngressUserMetrics::record_txs_per_mev_share_bundle(bundle.raw.body.len());
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", %bundle_hash, ?elapsed, "MEV Share bundle validated");
@@ -584,7 +596,7 @@ impl OrderflowIngress {
         // Deduplicate transactions.
         if self.order_cache.contains(&tx_hash) {
             trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
-            IngressUserMetrics::increment_order_cache_hit();
+            IngressUserMetrics::increment_order_cache_hit("transaction");
             return Ok(tx_hash);
         }
 
@@ -595,9 +607,6 @@ impl OrderflowIngress {
 
         let system_transaction =
             SystemTransaction::from_transaction(transaction, signer, received_at, priority);
-
-        // Determine priority for processing given request.
-        IngressUserMetrics::increment_transactions_received(priority);
 
         let tx = system_transaction.transaction.clone();
 

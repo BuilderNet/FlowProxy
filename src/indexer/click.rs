@@ -14,9 +14,9 @@ use tracing::info;
 use crate::{
     cli::ClickhouseArgs,
     indexer::{models::BundleRow, BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET},
-    metrics::{IndexerMetrics, Sampler},
+    metrics::IndexerMetrics,
     tasks::TaskExecutor,
-    types::SystemBundle,
+    types::{Sampler, SystemBundle},
 };
 
 /// An high-level order type that can be indexed in clickhouse.
@@ -162,10 +162,6 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
                 )
             }
 
-            // TODO(thedevbirb): current clickhouse code doesn't let me know if this calls
-            // `force_commit` or not. It kinda sucks. I should fork it and make a PR
-            // eventually.
-            //
             // TODO(thedevbirb): implement a file-based backup in case this call fails due to
             // connection timeouts or whatever.
             match self.inserter.commit().await {
@@ -173,7 +169,8 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
                     if quantities == Quantities::ZERO {
                         tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
                     } else {
-                        tracing::debug!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE)
+                        tracing::debug!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE);
+                        IndexerMetrics::process_clickhouse_quantities(&quantities);
                     }
                 }
                 Err(e) => {

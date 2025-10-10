@@ -50,14 +50,14 @@ pub struct SystemBundle {
     pub priority: Priority,
 }
 
-/// Decoded bundle type. Either a new, full bundle or a replacement bundle.
+/// Decoded bundle type. Either a new, full bundle or an empty replacement bundle.
 #[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DecodedBundle {
     /// A new, full bundle.
     Bundle(Bundle),
     /// A replacement bundle.
-    Replacement(BundleReplacementData),
+    EmptyReplacement(BundleReplacementData),
 }
 
 impl From<RawBundleDecodeResult> for DecodedBundle {
@@ -65,7 +65,7 @@ impl From<RawBundleDecodeResult> for DecodedBundle {
         match value {
             RawBundleDecodeResult::NewBundle(bundle) => Self::Bundle(bundle),
             RawBundleDecodeResult::CancelBundle(replacement_data) => {
-                Self::Replacement(replacement_data)
+                Self::EmptyReplacement(replacement_data)
             }
         }
     }
@@ -249,14 +249,14 @@ impl SystemBundle {
 
     /// Returns `true` if the bundle is a replacement.
     pub fn is_replacement(&self) -> bool {
-        matches!(self.decoded_bundle.as_ref(), DecodedBundle::Replacement(_))
+        matches!(self.decoded_bundle.as_ref(), DecodedBundle::EmptyReplacement(_))
     }
 
     /// Returns the bundle UUID if it is a bundle, otherwise the replacement UUID.
     pub fn uuid(&self) -> Uuid {
         match self.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => bundle.uuid,
-            DecodedBundle::Replacement(replacement_data) => replacement_data.key.key().id,
+            DecodedBundle::EmptyReplacement(replacement_data) => replacement_data.key.key().id,
         }
     }
 
@@ -269,16 +269,21 @@ impl SystemBundle {
     pub fn bundle(&self) -> Option<&Bundle> {
         match self.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => Some(bundle),
-            DecodedBundle::Replacement(_) => None,
+            DecodedBundle::EmptyReplacement(_) => None,
         }
     }
 
     /// Returns the replacement data if it is a replacement bundle.
     pub fn replacement_data(&self) -> Option<&BundleReplacementData> {
         match self.decoded_bundle.as_ref() {
-            DecodedBundle::Replacement(replacement_data) => Some(replacement_data),
+            DecodedBundle::EmptyReplacement(replacement_data) => Some(replacement_data),
             DecodedBundle::Bundle(_) => None,
         }
+    }
+
+    /// Returns `true` if the bundle is an empty replacement bundle.
+    pub fn is_empty(&self) -> bool {
+        matches!(self.decoded_bundle.as_ref(), DecodedBundle::EmptyReplacement(_))
     }
 
     /// Encode the system bundle in a JSON-RPC payload with params EIP-2718 encoded bytes.
@@ -536,7 +541,7 @@ pub struct WithEncoding<T> {
 #[derive(Debug, Clone)]
 pub enum EncodedOrder {
     /// Raw order bytes received from the system endpoint, already ready to be forwarded.
-    RawOrder(WithEncoding<RawOrderMetadata>),
+    SystemOrder(WithEncoding<RawOrderMetadata>),
     /// A bundle along with its JSON-RPC encoding.
     Bundle(WithEncoding<SystemBundle>),
     /// A MEV Share bundle along with its JSON-RPC encoding.
@@ -549,7 +554,7 @@ impl EncodedOrder {
     /// Returns the JSON-RPC encoding of the order.
     pub fn encoding(&self) -> &[u8] {
         match self {
-            EncodedOrder::RawOrder(order) => &order.encoding,
+            EncodedOrder::SystemOrder(order) => &order.encoding,
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
             EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
@@ -559,7 +564,7 @@ impl EncodedOrder {
     /// Returns the priority of the order.
     pub fn priority(&self) -> Priority {
         match self {
-            EncodedOrder::RawOrder(order) => order.inner.priority,
+            EncodedOrder::SystemOrder(order) => order.inner.priority,
             EncodedOrder::Bundle(bundle) => bundle.inner.priority,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
@@ -568,7 +573,7 @@ impl EncodedOrder {
 
     pub fn received_at(&self) -> UtcInstant {
         match self {
-            EncodedOrder::RawOrder(order) => order.inner.received_at,
+            EncodedOrder::SystemOrder(order) => order.inner.received_at,
             EncodedOrder::Bundle(bundle) => bundle.inner.received_at,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
@@ -578,7 +583,7 @@ impl EncodedOrder {
     /// Returns the type of the order.
     pub fn order_type(&self) -> &'static str {
         match self {
-            EncodedOrder::RawOrder(_) => "raw",
+            EncodedOrder::SystemOrder(_) => "system",
             EncodedOrder::Bundle(_) => "bundle",
             EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
             EncodedOrder::Transaction(_) => "transaction",
@@ -601,6 +606,51 @@ impl From<WithEncoding<SystemMevShareBundle>> for EncodedOrder {
 impl From<WithEncoding<SystemTransaction>> for EncodedOrder {
     fn from(value: WithEncoding<SystemTransaction>) -> Self {
         Self::Transaction(value)
+    }
+}
+
+/// A simple sampler that executes a closure every `sample_size` calls, or if a certain amount of
+/// time has passed since last sampling call.
+#[derive(Debug, Clone)]
+pub struct Sampler {
+    sample_size: usize,
+    counter: usize,
+    start: Instant,
+    interval: Duration,
+}
+
+impl Default for Sampler {
+    fn default() -> Self {
+        Self {
+            sample_size: 4096,
+            counter: 0,
+            start: Instant::now(),
+            interval: Duration::from_secs(10),
+        }
+    }
+}
+
+impl Sampler {
+    pub fn with_sample_size(mut self, sample_size: usize) -> Self {
+        self.sample_size = sample_size;
+        self
+    }
+
+    pub fn with_interval(mut self, interval: Duration) -> Self {
+        self.start = Instant::now() - interval;
+        self
+    }
+
+    /// Call this function to potentially execute the sample closure if we have reached the sample
+    /// size, or enough time has passed. Otherwise, it increments the internal counter.
+    pub fn sample(&mut self, f: impl FnOnce()) {
+        if self.counter >= self.sample_size || self.start.elapsed() >= self.interval {
+            self.counter = 0;
+            self.start = Instant::now();
+            f();
+        } else {
+            self.counter += 1;
+        }
     }
 }
 
