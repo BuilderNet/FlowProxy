@@ -254,10 +254,10 @@ pub trait IngressHandlerMetricsExt {
 
     #[inline]
     fn record_http_request(method: &Method, path: String, status: StatusCode, duration: Duration) {
-        let method = match method {
-            &Method::GET => "GET",
-            &Method::POST => "POST",
-            &Method::PUT => "PUT",
+        let method = match *method {
+            Method::GET => "GET",
+            Method::POST => "POST",
+            Method::PUT => "PUT",
             _ => "Unhandled",
         };
 
@@ -454,8 +454,8 @@ impl IndexerMetrics {
             return;
         }
 
-        Self::increment_clickhouse_rows_committed(quantities.rows as u64);
-        Self::increment_clickhouse_bytes_committed(quantities.bytes as u64);
+        Self::increment_clickhouse_rows_committed(quantities.rows);
+        Self::increment_clickhouse_bytes_committed(quantities.bytes);
         Self::increment_clickhouse_batches_committed();
     }
 

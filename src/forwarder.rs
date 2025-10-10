@@ -373,8 +373,7 @@ impl HttpForwarder {
                 // None.
                 let reason = error
                     .status()
-                    .map(|s| s.canonical_reason().map(|s| s.to_owned()))
-                    .flatten()
+                    .and_then(|s| s.canonical_reason().map(|s| s.to_owned()))
                     .unwrap_or(error.to_string());
 
                 ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
