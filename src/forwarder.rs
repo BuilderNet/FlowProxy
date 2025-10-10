@@ -161,7 +161,7 @@ impl IngressForwarders {
         // TODO: raw orders have no priority, but this will change, assume medium for now
         let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at };
         let order =
-            EncodedOrder::RawOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
+            EncodedOrder::SystemOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
 
         let local = ForwardingRequest::system_to_local(order);
         let _ = self.local.send(priority, local);
@@ -214,6 +214,16 @@ impl Display for ForwardingDirection {
             Self::UserToLocal => write!(f, "user_to_local"),
             Self::UserToSystem => write!(f, "user_to_system"),
             Self::SystemToLocal => write!(f, "system_to_local"),
+        }
+    }
+}
+
+impl ForwardingDirection {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::UserToLocal => "user_to_local",
+            Self::UserToSystem => "user_to_system",
+            Self::SystemToLocal => "system_to_local",
         }
     }
 }
@@ -293,14 +303,14 @@ impl ForwardingRequest {
 }
 
 #[derive(Debug)]
-struct BuilderResponse<Ok, Err> {
+struct Response<Ok, Err> {
     /// The instant at which request was sent.
     start_time: Instant,
     /// Builder response.
     response: Result<Ok, Err>,
 }
 
-type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = BuilderResponse<Ok, Err>> + Send>>;
+type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = Response<Ok, Err>> + Send>>;
 
 /// An HTTP forwarder that forwards requests to a builder.
 struct HttpForwarder {
@@ -343,11 +353,8 @@ impl HttpForwarder {
         )
     }
 
-    fn on_builder_response(
-        &mut self,
-        response: BuilderResponse<reqwest::Response, reqwest::Error>,
-    ) {
-        let BuilderResponse { start_time, response: response_result, .. } = response;
+    fn on_response(&mut self, response: Response<reqwest::Response, reqwest::Error>) {
+        let Response { start_time, response: response_result, .. } = response;
         let elapsed = start_time.elapsed();
 
         match response_result {
@@ -358,7 +365,16 @@ impl HttpForwarder {
             }
             Err(error) => {
                 error!(target: FORWARDER, peer_name = %self.peer_name, ?error, ?elapsed, "Error forwarding request");
-                ForwarderMetrics::increment_request_processing_failures(self.peer_name.clone());
+
+                // Parse the reason, which is either the status code reason of the error message
+                // itself. If the request fails for non-network reasons, the status code may be
+                // None.
+                let reason = error
+                    .status()
+                    .and_then(|s| s.canonical_reason().map(|s| s.to_owned()))
+                    .unwrap_or(error.to_string());
+
+                ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
             }
         }
     }
@@ -379,14 +395,17 @@ impl Future for HttpForwarder {
                 trace!(target: FORWARDER, name = %this.peer_name, ?request, "Sending request");
                 this.pending.push(send_http_request(
                     this.client.clone(),
+                    this.peer_name.clone(),
                     this.peer_url.clone(),
                     request,
                 ));
+
+                ForwarderMetrics::set_inflight_requests(this.pending.len());
                 continue;
             }
 
             if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
-                this.on_builder_response(response);
+                this.on_response(response);
                 continue;
             }
 
@@ -412,31 +431,15 @@ impl ResponseErrorDecoder {
         while let Some((response, elapsed)) = self.rx.recv().await {
             let status = response.status();
 
-            if status.is_client_error() {
-                error!(target: FORWARDER, name = %self.peer_name, %status, ?elapsed, "Client error from builder");
-                ForwarderMetrics::increment_http_call_failures(
-                    self.peer_name.clone(),
-                    status.to_string(),
-                );
-                continue;
-            } else if status.is_server_error() {
-                warn!(target: FORWARDER, name = %self.peer_name, %status, ?elapsed, "Server error from builder");
-                ForwarderMetrics::increment_http_call_failures(
-                    self.peer_name.clone(),
-                    status.to_string(),
-                );
-                continue;
-            }
-
             match response.json::<JsonRpcResponse<serde_json::Value>>().await {
                 Ok(body) => {
                     if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                        error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, "Decoded error response from builder");
+                        error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
                         ForwarderMetrics::increment_rpc_call_failures(self.peer_name.clone(), code);
                     }
                 }
                 Err(e) => {
-                    warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, "Failed decode response into JSON-RPC");
+                    warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
                     ForwarderMetrics::increment_json_rpc_decoding_failures(self.peer_name.clone());
                 }
             }
@@ -446,6 +449,7 @@ impl ResponseErrorDecoder {
 
 fn send_http_request(
     client: reqwest::Client,
+    peer_name: String,
     url: String,
     request: Arc<ForwardingRequest>,
 ) -> RequestFut<reqwest::Response, reqwest::Error> {
@@ -458,6 +462,8 @@ fn send_http_request(
             |req| (req.encoded_order.clone(), req.headers.clone()),
             |inner| (inner.encoded_order, inner.headers),
         );
+
+        let order_type = order.order_type();
 
         match order {
             EncodedOrder::Bundle(_) => {
@@ -484,11 +490,12 @@ fn send_http_request(
                     is_big,
                 );
             }
-            EncodedOrder::RawOrder(_) => {
-                SystemMetrics::record_e2e_raw_order_processing_time(
+            EncodedOrder::SystemOrder(_) => {
+                SystemMetrics::record_e2e_system_order_processing_time(
                     order.received_at().elapsed(),
                     order.priority(),
                     direction,
+                    order_type,
                     is_big,
                 );
             }
@@ -507,10 +514,10 @@ fn send_http_request(
                 warn!(target: FORWARDER, name = %url, ?elapsed, is_big, size = order.encoding().len(), order_type, "Long RPC call");
             }
 
-            ForwarderMetrics::record_rpc_call(url, elapsed, is_big);
+            ForwarderMetrics::record_rpc_call(peer_name, order_type, elapsed, is_big);
         }
 
-        BuilderResponse { start_time, response }
+        Response { start_time, response }
     })
 }
 
