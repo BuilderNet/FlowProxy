@@ -16,8 +16,9 @@ use alloy_primitives::{Address, Bytes};
 use derive_more::Deref;
 use rbuilder_primitives::{
     serialize::{
-        CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult, RawShareBundle,
-        RawShareBundleConvertError, RawShareBundleDecodeResult, TxEncoding,
+        CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult,
+        RawBundleMetadata, RawShareBundle, RawShareBundleConvertError, RawShareBundleDecodeResult,
+        TxEncoding,
     },
     Bundle, BundleReplacementData, ShareBundle,
 };
@@ -28,26 +29,32 @@ use time::UtcDateTime;
 use uuid::Uuid;
 
 use crate::{
-    consts::{DEFAULT_BUNDLE_VERSION, ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
+    consts::{ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
     priority::Priority,
 };
+
+/// Metadata about a [`SystemBundle`].
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct SystemBundleMetadata {
+    pub signer: Address,
+    /// The time at which the bundle has first been seen from the local operator.
+    pub received_at: UtcInstant,
+    /// The priority of the bundle.
+    pub priority: Priority,
+}
 
 /// Bundle type that is used for the system API. It contains the verified signer with the original
 /// bundle.
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct SystemBundle {
-    pub signer: Address,
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
     pub raw_bundle: Arc<RawBundle>,
+    /// The bundle hash.
+    pub raw_bundle_hash: B256,
     /// The decoded bundle.
     pub decoded_bundle: Arc<DecodedBundle>,
-    /// The bundle hash.
-    pub bundle_hash: B256,
-
-    /// The time at which the bundle has first been seen from the local operator.
-    pub received_at: UtcInstant,
-    /// The priority of the bundle.
-    pub priority: Priority,
+    /// Metadata about the bundle.
+    pub metadata: SystemBundleMetadata,
 }
 
 /// Decoded bundle type. Either a new, full bundle or an empty replacement bundle.
@@ -81,22 +88,25 @@ impl BundleHash for RawBundle {
             // We destructure here so we never miss any fields if new fields are added in the
             // future.
             let RawBundle {
-                block_number,
                 txs,
-                reverting_tx_hashes,
-                dropping_tx_hashes,
-                replacement_uuid,
-                refund_percent,
-                refund_recipient,
-                refund_tx_hashes,
-                uuid,
-                replacement_nonce,
-                refund_identity,
-                signing_address: _,
-                version,
-                min_timestamp: _,
-                max_timestamp: _,
-                delayed_refund: _,
+                metadata:
+                    RawBundleMetadata {
+                        reverting_tx_hashes,
+                        dropping_tx_hashes,
+                        replacement_uuid,
+                        refund_percent,
+                        refund_recipient,
+                        refund_tx_hashes,
+                        uuid,
+                        replacement_nonce,
+                        refund_identity,
+                        signing_address: _,
+                        version,
+                        min_timestamp: _,
+                        max_timestamp: _,
+                        delayed_refund: _,
+                        block_number,
+                    },
             } = bundle;
 
             if let Some(block_number) = block_number {
@@ -218,32 +228,43 @@ impl BundleHash for RawShareBundle {
 impl SystemBundle {
     /// Create a new system bundle from a raw bundle and additional data.
     /// Returns an error if the raw bundle fails to decode.
-    pub fn try_from_raw_bundle(
-        mut bundle: RawBundle,
-        signer: Address,
-        received_at: UtcInstant,
-        priority: Priority,
+    pub fn try_decode(
+        bundle: RawBundle,
+        metadata: SystemBundleMetadata,
     ) -> Result<Self, RawBundleConvertError> {
-        bundle.signing_address = Some(signer);
-        if bundle.version.is_none() {
-            bundle.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
-        }
+        Self::try_decode_inner(bundle, metadata, None::<fn(B256) -> Option<Address>>)
+    }
 
-        let bundle_hash = bundle.bundle_hash();
+    pub fn try_decode_with_lookup(
+        bundle: RawBundle,
+        metadata: SystemBundleMetadata,
+        lookup: impl Fn(B256) -> Option<Address>,
+    ) -> Result<Self, RawBundleConvertError> {
+        Self::try_decode_inner(bundle, metadata, Some(lookup))
+    }
 
-        let mut decoded = bundle.clone().decode(TxEncoding::WithBlobData)?.into();
+    fn try_decode_inner(
+        bundle: RawBundle,
+        metadata: SystemBundleMetadata,
+        lookup: Option<impl Fn(B256) -> Option<Address>>,
+    ) -> Result<Self, RawBundleConvertError> {
+        let raw_bundle_hash = bundle.bundle_hash();
+
+        let mut decoded = if let Some(lookup) = lookup {
+            bundle.clone().decode_with_signer_lookup(TxEncoding::WithBlobData, lookup)?.into()
+        } else {
+            bundle.clone().decode(TxEncoding::WithBlobData)?.into()
+        };
 
         if let DecodedBundle::Bundle(bundle) = &mut decoded {
-            bundle.signer = Some(signer);
+            bundle.signer = Some(metadata.signer);
         }
 
         Ok(Self {
-            signer,
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded),
-            bundle_hash,
-            received_at,
-            priority,
+            raw_bundle_hash,
+            metadata,
         })
     }
 
@@ -262,7 +283,7 @@ impl SystemBundle {
 
     /// Returns the bundle hash.
     pub fn bundle_hash(&self) -> B256 {
-        self.bundle_hash
+        self.raw_bundle_hash
     }
 
     /// Returns the bundle if it is a new bundle.
@@ -565,7 +586,7 @@ impl EncodedOrder {
     pub fn priority(&self) -> Priority {
         match self {
             EncodedOrder::SystemOrder(order) => order.inner.priority,
-            EncodedOrder::Bundle(bundle) => bundle.inner.priority,
+            EncodedOrder::Bundle(bundle) => bundle.inner.metadata.priority,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
         }
@@ -574,7 +595,7 @@ impl EncodedOrder {
     pub fn received_at(&self) -> UtcInstant {
         match self {
             EncodedOrder::SystemOrder(order) => order.inner.received_at,
-            EncodedOrder::Bundle(bundle) => bundle.inner.received_at,
+            EncodedOrder::Bundle(bundle) => bundle.inner.metadata.received_at,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
         }

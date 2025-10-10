@@ -87,7 +87,7 @@ pub fn bench_validation(c: &mut Criterion) {
             || generate_bundles_with_signer(size, &mut rng),
             |inputs| {
                 for input in inputs {
-                    let result = SystemBundle::try_from_raw_bundle(
+                    let result = SystemBundle::try_decode(
                         input.raw_bundle,
                         input.signer,
                         input.received_at,

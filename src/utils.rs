@@ -70,7 +70,7 @@ pub mod testutils {
     use alloy_signer_local::PrivateKeySigner;
     use rand::Rng;
     use rbuilder_primitives::serialize::{
-        RawBundle, RawShareBundle, RawShareBundleBody, RawShareBundleInclusion,
+        RawBundle, RawBundleMetadata, RawShareBundle, RawShareBundleBody, RawShareBundleInclusion,
     };
 
     /// A trait for types that can be randomly generated.
@@ -239,21 +239,23 @@ pub mod testutils {
 
             Self {
                 txs,
-                reverting_tx_hashes: vec![],
-                dropping_tx_hashes: vec![],
-                refund_tx_hashes: None,
-                signing_address: None,
-                version: Some("v2".to_string()),
-                block_number: None,
-                replacement_uuid: None,
-                refund_identity: None,
-                uuid: None,
-                min_timestamp: None,
-                max_timestamp: None,
-                replacement_nonce: Some(rng.random()),
-                refund_percent: Some(rng.random_range(0..100)),
-                refund_recipient: Some(Address::random_with(rng)),
-                delayed_refund: None,
+                metadata: RawBundleMetadata {
+                    reverting_tx_hashes: vec![],
+                    dropping_tx_hashes: vec![],
+                    refund_tx_hashes: None,
+                    signing_address: None,
+                    version: Some("v2".to_string()),
+                    block_number: None,
+                    replacement_uuid: None,
+                    refund_identity: None,
+                    uuid: None,
+                    min_timestamp: None,
+                    max_timestamp: None,
+                    replacement_nonce: Some(rng.random()),
+                    refund_percent: Some(rng.random_range(0..100)),
+                    refund_recipient: Some(Address::random_with(rng)),
+                    delayed_refund: None,
+                },
             }
         }
     }

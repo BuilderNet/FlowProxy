@@ -365,7 +365,7 @@ pub(crate) mod tests {
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
 
-        let mut system_bundle_round_trip = SystemBundle::try_from_raw_bundle(
+        let mut system_bundle_round_trip = SystemBundle::try_decode(
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,
@@ -387,7 +387,7 @@ pub(crate) mod tests {
         let raw_bundle_round_trip: RawBundle = bundle_row.into();
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
-        let mut system_bundle_round_trip = SystemBundle::try_from_raw_bundle(
+        let mut system_bundle_round_trip = SystemBundle::try_decode(
             raw_bundle_round_trip,
             signer,
             system_bundle.received_at,

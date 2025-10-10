@@ -137,8 +137,8 @@ impl EntityScores {
 
     pub fn calculate(&mut self) -> f64 {
         self.cleanup();
-        self.entries.values().map(|score| score.calculate()).sum::<f64>() /
-            self.entries.len() as f64
+        self.entries.values().map(|score| score.calculate()).sum::<f64>()
+            / self.entries.len() as f64
     }
 }
 
@@ -256,7 +256,7 @@ impl EntityRequest<'_> {
     fn is_replacement(&self) -> bool {
         match self {
             Self::PrivateTx(_) => false,
-            Self::Bundle(bundle) => bundle.replacement_uuid.is_some(),
+            Self::Bundle(bundle) => bundle.metadata.replacement_uuid.is_some(),
             Self::MevShareBundle(bundle) => bundle.replacement_uuid.is_some(),
         }
     }
@@ -266,9 +266,10 @@ impl EntityRequest<'_> {
     fn is_non_revertible(&self) -> bool {
         match self {
             Self::PrivateTx(_) => true,
-            Self::Bundle(bundle) => {
-                bundle.txs.iter().all(|tx| bundle.reverting_tx_hashes.contains(&keccak256(tx)))
-            }
+            Self::Bundle(bundle) => bundle
+                .txs
+                .iter()
+                .all(|tx| bundle.metadata.reverting_tx_hashes.contains(&keccak256(tx))),
             Self::MevShareBundle(_) => false,
         }
     }

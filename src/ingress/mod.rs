@@ -2,8 +2,9 @@ use crate::{
     cache::{OrderCache, SignerCache},
     consts::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
-        DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD,
-        FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD, USE_LEGACY_SIGNATURE,
+        DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD,
+        USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -14,8 +15,8 @@ use crate::{
     rate_limit::CounterOverTime,
     types::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, SystemBundle, SystemMevShareBundle, SystemTransaction,
-        UtcInstant,
+        EthResponse, EthereumTransaction, SystemBundle, SystemBundleMetadata, SystemMevShareBundle,
+        SystemTransaction, UtcInstant,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -448,16 +449,19 @@ impl OrderflowIngress {
         trace!(target: "ingress", ?entity, "Processing bundle");
         // Convert to system bundle.
         let Entity::Signer(signer) = entity else { unreachable!() };
+        bundle.metadata.signing_address = Some(signer);
 
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.uuid.or(bundle.replacement_uuid).is_some()) && bundle.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
+            && bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
-            bundle.replacement_nonce = Some(timestamp.try_into().expect("Timestamp too large"));
+            bundle.metadata.replacement_nonce =
+                Some(timestamp.try_into().expect("Timestamp too large"));
         }
 
         // Deduplicate bundles.
@@ -478,11 +482,16 @@ impl OrderflowIngress {
                 .inspect(|a| debug!(target: "signer-cache", "cache hit for hash: {hash} -- {a}"))
         };
 
+        if bundle.metadata.version.is_none() {
+            bundle.metadata.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
+        }
+
         // Decode and validate the bundle.
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
-                SystemBundle::try_from_raw_bundle(bundle, signer, received_at, priority)
+                let metadata = SystemBundleMetadata { signer, received_at, priority };
+                SystemBundle::try_decode_with_lookup(bundle, metadata, lookup)
             })
             .await
             .inspect_err(|e| {
