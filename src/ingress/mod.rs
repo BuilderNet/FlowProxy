@@ -487,7 +487,7 @@ impl OrderflowIngress {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
             }
-            DecodedBundle::Cancellation(replacement_data) => {
+            DecodedBundle::EmptyReplacement(replacement_data) => {
                 debug!(target: "ingress", ?replacement_data, "Replacement bundle decoded");
             }
         }

@@ -254,7 +254,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
             }
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
             // transactions.
-            DecodedBundle::Cancellation(ref replacement) => {
+            DecodedBundle::EmptyReplacement(ref replacement) => {
                 let micros = bundle.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle

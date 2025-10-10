@@ -50,14 +50,14 @@ pub struct SystemBundle {
     pub priority: Priority,
 }
 
-/// Decoded bundle type. Either a new, full bundle or a cancellation bundle.
+/// Decoded bundle type. Either a new, full bundle or an empty replacement bundle.
 #[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum DecodedBundle {
     /// A new, full bundle.
     Bundle(Bundle),
-    /// A cancellation bundle.
-    Cancellation(BundleReplacementData),
+    /// A replacement bundle.
+    EmptyReplacement(BundleReplacementData),
 }
 
 impl From<RawBundleDecodeResult> for DecodedBundle {
@@ -65,7 +65,7 @@ impl From<RawBundleDecodeResult> for DecodedBundle {
         match value {
             RawBundleDecodeResult::NewBundle(bundle) => Self::Bundle(bundle),
             RawBundleDecodeResult::CancelBundle(replacement_data) => {
-                Self::Cancellation(replacement_data)
+                Self::EmptyReplacement(replacement_data)
             }
         }
     }
@@ -249,14 +249,14 @@ impl SystemBundle {
 
     /// Returns `true` if the bundle is a replacement.
     pub fn is_replacement(&self) -> bool {
-        matches!(self.decoded_bundle.as_ref(), DecodedBundle::Cancellation(_))
+        matches!(self.decoded_bundle.as_ref(), DecodedBundle::EmptyReplacement(_))
     }
 
     /// Returns the bundle UUID if it is a bundle, otherwise the replacement UUID.
     pub fn uuid(&self) -> Uuid {
         match self.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => bundle.uuid,
-            DecodedBundle::Cancellation(replacement_data) => replacement_data.key.key().id,
+            DecodedBundle::EmptyReplacement(replacement_data) => replacement_data.key.key().id,
         }
     }
 
@@ -269,21 +269,21 @@ impl SystemBundle {
     pub fn bundle(&self) -> Option<&Bundle> {
         match self.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => Some(bundle),
-            DecodedBundle::Cancellation(_) => None,
+            DecodedBundle::EmptyReplacement(_) => None,
         }
     }
 
     /// Returns the replacement data if it is a replacement bundle.
     pub fn replacement_data(&self) -> Option<&BundleReplacementData> {
         match self.decoded_bundle.as_ref() {
-            DecodedBundle::Cancellation(replacement_data) => Some(replacement_data),
+            DecodedBundle::EmptyReplacement(replacement_data) => Some(replacement_data),
             DecodedBundle::Bundle(_) => None,
         }
     }
 
-    /// Returns `true` if the bundle is a cancellation bundle.
-    pub fn is_cancellation(&self) -> bool {
-        matches!(self.decoded_bundle.as_ref(), DecodedBundle::Cancellation(_))
+    /// Returns `true` if the bundle is an empty replacement bundle.
+    pub fn is_empty(&self) -> bool {
+        matches!(self.decoded_bundle.as_ref(), DecodedBundle::EmptyReplacement(_))
     }
 
     /// Encode the system bundle in a JSON-RPC payload with params EIP-2718 encoded bytes.

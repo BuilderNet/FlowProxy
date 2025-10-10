@@ -8,7 +8,6 @@ use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gau
 
 use crate::{forwarder::ForwardingDirection, priority::Priority};
 
-#[rustfmt::skip]
 mod name {
     /// BuilderHub metrics.
     pub(crate) mod builderhub {
@@ -29,14 +28,16 @@ mod name {
     /// Indexer metrics.
     pub(crate) mod indexer {
         pub(crate) const BUNDLE_INDEXING_FAILURES: &str = "indexer_bundle_indexing_failures";
-        pub(crate) const BUNDLE_RECEIPT_INDEXING_FAILURES: &str = "indexer_bundle_receipt_indexing_failures";
+        pub(crate) const BUNDLE_RECEIPT_INDEXING_FAILURES: &str =
+            "indexer_bundle_receipt_indexing_failures";
 
         pub(crate) const CLICKHOUSE_COMMIT_FAILURES: &str = "indexer_clickhouse_commit_failures";
         pub(crate) const CLICKHOUSE_QUEUE_SIZE: &str = "indexer_clickhouse_queue_size";
         pub(crate) const CLICKHOUSE_WRITE_FAILURES: &str = "indexer_clickhouse_write_failures";
         pub(crate) const CLICKHOUSE_ROWS_COMMITTED: &str = "indexer_clickhouse_rows_committed";
         pub(crate) const CLICKHOUSE_BYTES_COMMITTED: &str = "indexer_clickhouse_bytes_committed";
-        pub(crate) const CLICKHOUSE_BATCHES_COMMITTED: &str = "indexer_clickhouse_batches_committed";
+        pub(crate) const CLICKHOUSE_BATCHES_COMMITTED: &str =
+            "indexer_clickhouse_batches_committed";
 
         pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
     }
@@ -49,9 +50,12 @@ mod name {
         pub(crate) const JSON_RPC_UNKNOWN_METHOD: &str = "ingress_json_rpc_unknown_method";
         pub(crate) const ORDER_CACHE_HIT: &str = "ingress_order_cache_hit";
         pub(crate) const REQUESTS_RATE_LIMITED: &str = "ingress_requests_rate_limited";
-        pub(crate) const SEND_BUNDLE_REQUEST_DURATION: &str = "ingress_eth_sendBundle_request_duration";
-        pub(crate) const SEND_TRANSACTION_REQUEST_DURATION: &str = "ingress_eth_sendRawTransaction_request_duration";
-        pub(crate) const SEND_MEV_SHARE_BUNDLE_REQUEST_DURATION: &str = "ingress_mev_sendBundle_request_duration";
+        pub(crate) const SEND_BUNDLE_REQUEST_DURATION: &str =
+            "ingress_eth_sendBundle_request_duration";
+        pub(crate) const SEND_TRANSACTION_REQUEST_DURATION: &str =
+            "ingress_eth_sendRawTransaction_request_duration";
+        pub(crate) const SEND_MEV_SHARE_BUNDLE_REQUEST_DURATION: &str =
+            "ingress_mev_sendBundle_request_duration";
         pub(crate) const VALIDATION_ERRORS: &str = "ingress_validation_errors";
 
         pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
@@ -62,12 +66,13 @@ mod name {
     /// System processing metrics.
     pub(crate) mod system {
         pub(crate) const E2E_BUNDLE_PROCESSING_TIME: &str = "system_e2e_bundle_processing_time";
-        pub(crate) const E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME: &str = "system_e2e_mev_share_bundle_processing_time";
-        pub(crate) const E2E_TRANSACTION_PROCESSING_TIME: &str = "system_e2e_transaction_processing_time";
-        pub(crate) const E2E_SYSTEM_ORDER_PROCESSING_TIME: &str = "system_e2e_system_order_processing_time";
+        pub(crate) const E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME: &str =
+            "system_e2e_mev_share_bundle_processing_time";
+        pub(crate) const E2E_TRANSACTION_PROCESSING_TIME: &str =
+            "system_e2e_transaction_processing_time";
+        pub(crate) const E2E_SYSTEM_ORDER_PROCESSING_TIME: &str =
+            "system_e2e_system_order_processing_time";
     }
-
-
 }
 
 use name::*;
