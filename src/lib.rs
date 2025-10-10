@@ -2,12 +2,20 @@
 
 use crate::{
     cache::SignerCache,
-    statics::{LOCAL_PEER_STORE, SHUTDOWN_TOKEN},
+    consts::DEFAULT_HTTP_TIMEOUT_SECS,
+    metrics::{
+        BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
+    },
+    runner::CliContext,
+    statics::LOCAL_PEER_STORE,
+    tasks::TaskExecutor,
 };
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Request},
+    middleware::Next,
+    response::Response,
     routing::{get, post},
     Router,
 };
@@ -18,7 +26,12 @@ use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
-use std::{net::SocketAddr, str::FromStr as _, sync::Arc, time::Duration};
+use std::{
+    net::SocketAddr,
+    str::FromStr as _,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::net::TcpListener;
 use tracing::{level_filters::LevelFilter, *};
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
@@ -29,36 +42,63 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{
-    builderhub::PeerStore, cache::OrderCache, indexer::Indexer, ingress::OrderflowIngressMetrics,
-    statics::TASKS,
-};
+use crate::{builderhub::PeerStore, cache::OrderCache, indexer::Indexer};
 
 pub mod builderhub;
 mod cache;
+pub mod consts;
 pub mod entity;
 pub mod forwarder;
 pub mod indexer;
 pub mod jsonrpc;
+pub mod metrics;
 pub mod priority;
 pub mod rate_limit;
+pub mod runner;
 pub mod statics;
+pub mod tasks;
 pub mod types;
 pub mod utils;
 pub mod validation;
 
-pub async fn run(args: OrderflowIngressArgs) -> eyre::Result<()> {
+/// Default system port for proxy instances.
+const DEFAULT_SYSTEM_PORT: u16 = 5544;
+
+pub fn init_tracing(log_json: bool) {
+    let registry = tracing_subscriber::registry().with(
+        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy(),
+    );
+    if log_json {
+        let _ = registry.with(tracing_subscriber::fmt::layer().json()).try_init();
+    } else {
+        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+    }
+}
+
+pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
+    fdlimit::raise_fd_limit()?;
+
+    if let Some(ref metrics_addr) = args.metrics {
+        spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
+        metrics::describe();
+    }
+
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
     let system_listener = TcpListener::bind(&args.system_listen_url).await?;
-    let builder_listener = TcpListener::bind(&args.builder_listen_url).await?;
-    run_with_listeners(args, user_listener, system_listener, builder_listener).await
+    let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_url {
+        Some(TcpListener::bind(builder_listen_url).await?)
+    } else {
+        None
+    };
+    run_with_listeners(args, user_listener, system_listener, builder_listener, ctx).await
 }
 
 pub async fn run_with_listeners(
     args: OrderflowIngressArgs,
     user_listener: TcpListener,
     system_listener: TcpListener,
-    builder_listener: TcpListener,
+    builder_listener: Option<TcpListener>,
+    ctx: CliContext,
 ) -> eyre::Result<()> {
     // Initialize tracing.
     let registry = tracing_subscriber::registry().with(
@@ -70,13 +110,7 @@ pub async fn run_with_listeners(
         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
     }
 
-    if let Some(metrics_addr) = args.metrics {
-        spawn_prometheus_server(SocketAddr::from_str(&metrics_addr)?)?;
-    }
-
-    let (indexer_handle, tasks) =
-        Indexer::spawn(args.indexing, args.builder_name, SHUTDOWN_TOKEN.child_token());
-    TASKS.write().expect("not poisoned").extend(tasks.into_iter());
+    let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.task_executor.clone());
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
@@ -88,16 +122,26 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()?;
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
         debug!(url = builder_hub_url, "Running with BuilderHub");
         let builder_hub = builderhub::BuilderHub::new(builder_hub_url);
         builder_hub.register(local_signer, None).await?;
 
-        tokio::spawn({
-            let peers = peers.clone();
-            async move { run_update_peers(local_signer, builder_hub, peers).await }
+        let peers = peers.clone();
+        let task_executor = ctx.task_executor.clone();
+        ctx.task_executor.spawn_critical("run_update_peers", async move {
+            run_update_peers(
+                local_signer,
+                builder_hub,
+                peers,
+                args.disable_forwarding,
+                task_executor,
+            )
+            .await
         });
     } else {
         warn!("No BuilderHub URL provided, running with local peer store");
@@ -106,9 +150,19 @@ pub async fn run_with_listeners(
         let peer_store =
             local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
 
-        tokio::spawn({
-            let peers = peers.clone();
-            async move { run_update_peers(local_signer, peer_store, peers).await }
+        let peers = peers.clone();
+        let task_executor = ctx.task_executor.clone();
+        ctx.task_executor.spawn_critical("local_update_peers", {
+            async move {
+                run_update_peers(
+                    local_signer,
+                    peer_store,
+                    peers,
+                    args.disable_forwarding,
+                    task_executor.clone(),
+                )
+                .await
+            }
         });
     }
 
@@ -119,6 +173,7 @@ pub async fn run_with_listeners(
             String::from("local-builder"),
             builder_url.to_string(),
             client.clone(),
+            ctx.task_executor.clone(),
         )?;
 
         IngressForwarders::new(local_sender, peers, orderflow_signer)
@@ -128,23 +183,28 @@ pub async fn run_with_listeners(
         IngressForwarders::new(local_sender, peers, orderflow_signer)
     };
 
+    let builder_ready_endpoint =
+        args.builder_ready_endpoint.map(|url| Url::from_str(&url)).transpose()?;
+
     let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
     let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
+        rate_limiting_enabled: args.enable_rate_limiting,
         rate_limit_lookback_s: args.rate_limit_lookback_s,
         rate_limit_count: args.rate_limit_count,
         score_lookback_s: args.score_lookback_s,
         score_bucket_s: args.score_bucket_s,
         spam_thresholds: SpamThresholds::default(),
+        flashbots_signer: args.flashbots_signer,
         pqueues: Default::default(),
         entities: DashMap::default(),
         order_cache,
         signer_cache: Arc::new(signer_cache),
         forwarders,
         local_builder_url: builder_url,
-        metrics: OrderflowIngressMetrics::default(),
+        builder_ready_endpoint,
         indexer_handle,
     });
 
@@ -160,8 +220,10 @@ pub async fn run_with_listeners(
     let user_router = Router::new()
         .route("/", post(OrderflowIngress::user_handler))
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
+        .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
+        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressUserMetrics>))
         .with_state(ingress.clone());
     let addr = user_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting user ingress server");
@@ -170,23 +232,35 @@ pub async fn run_with_listeners(
     let system_router = Router::new()
         .route("/", post(OrderflowIngress::system_handler))
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
+        .route("/livez", get(|| async { Ok::<_, ()>(()) }))
+        .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
+        .layer(DefaultBodyLimit::max(args.max_request_size))
+        // TODO: After mTLS, we can probably take this out.
+        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting system ingress server");
 
-    let builder_router = Router::new()
-        .route("/", post(OrderflowIngress::builder_handler))
-        .route("/health", get(|| async { Ok::<_, ()>(()) }))
-        .with_state(ingress);
-    let addr = builder_listener.local_addr()?;
-    info!(target: "ingress", ?addr, "Starting builder server");
+    if let Some(builder_listener) = builder_listener {
+        let builder_router = Router::new()
+            .route("/", post(OrderflowIngress::builder_handler))
+            .route("/health", get(|| async { Ok::<_, ()>(()) }))
+            .with_state(ingress);
+        let addr = builder_listener.local_addr()?;
+        info!(target: "ingress", ?addr, "Starting builder server");
 
-    tokio::try_join!(
-        axum::serve(user_listener, user_router),
-        axum::serve(system_listener, system_router),
-        axum::serve(builder_listener, builder_router)
-    )?;
+        tokio::try_join!(
+            axum::serve(user_listener, user_router),
+            axum::serve(system_listener, system_router),
+            axum::serve(builder_listener, builder_router)
+        )?;
+    } else {
+        tokio::try_join!(
+            axum::serve(user_listener, user_router),
+            axum::serve(system_listener, system_router),
+        )?;
+    }
 
     Ok(())
 }
@@ -195,14 +269,20 @@ async fn run_update_peers(
     local_signer: Address,
     peer_store: impl PeerStore,
     peers: Arc<DashMap<String, PeerHandle>>,
+    disable_forwarding: bool,
+    task_executor: TaskExecutor,
 ) {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()
+        .unwrap();
     let delay = Duration::from_secs(30);
 
     loop {
         let builders = match peer_store.get_peers().await {
             Ok(builders) => builders,
             Err(error) => {
+                BuilderHubMetrics::increment_builderhub_peer_request_failures(error.to_string());
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
                 continue;
@@ -234,15 +314,41 @@ async fn run_update_peers(
 
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
+                let mut client = client.clone();
+
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
-                let sender =
-                    spawn_forwarder(builder.name.clone(), builder.ip.clone(), client.clone())
-                        .expect("malformed url");
+
+                // If the TLS certificate is present, use HTTPS and configure the client to use it.
+                if let Some(ref tls_cert) = builder.tls_certificate() {
+                    // SAFETY: We expect the certificate to be valid. It's added as a root
+                    // certificate.
+                    client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                        .https_only(true)
+                        .add_root_certificate(tls_cert.clone())
+                        .build()
+                        .expect("Valid root certificate");
+                }
+
+                if disable_forwarding {
+                    warn!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Skipped spawning forwarder (disabled forwarding)");
+                    continue;
+                }
+
+                let sender = spawn_forwarder(
+                    builder.name.clone(),
+                    builder.system_api(),
+                    client.clone(),
+                    task_executor.clone(),
+                )
+                .expect("malformed url");
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Inserting peer configuration");
                 entry.insert(PeerHandle { info: builder, sender });
             }
         }
+
+        BuilderHubMetrics::builderhub_peer_count(peers.len());
 
         tokio::time::sleep(delay).await;
     }
@@ -254,7 +360,7 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
 
     // Prefix all metrics with provider prefix
     Stack::new(recorder)
-        .push(PrefixLayer::new("orderflow_ingress"))
+        .push(PrefixLayer::new("orderflow_proxy"))
         .install()
         .wrap_err("unable to install metrics recorder")?;
 
@@ -269,4 +375,22 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
     });
 
     Ok(())
+}
+
+/// Middleware to track server metrics.
+async fn track_server_metrics<T: IngressHandlerMetricsExt>(
+    request: Request,
+    next: Next,
+) -> Response {
+    let path = request.uri().path().to_string();
+    let method = request.method().clone();
+
+    let start = Instant::now();
+    let response = next.run(request).await;
+    let latency = start.elapsed();
+    let status = response.status();
+
+    T::record_http_request(&method, path, status, latency);
+
+    response
 }

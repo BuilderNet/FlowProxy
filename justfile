@@ -15,6 +15,13 @@ fmt:
 test:
   cargo nextest run --lib --bins --no-tests=warn --retries 3
 
+build-reproducible:
+  RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $(pwd)=." \
+  LC_ALL=C \
+  TZ=UTC \
+  SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)" \
+  cargo build --profile reproducible --locked --target x86_64-unknown-linux-gnu
+
 # Provision the database and create the required tables.
 provision-db:
   # Create the database if it doesn't exist.

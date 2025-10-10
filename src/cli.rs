@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
 
@@ -8,19 +9,39 @@ const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Arguments required to create a clickhouse client.
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
-#[group(id = "clickhouse", requires_all = ["host", "username", "password", "database"])]
+#[group(id = "clickhouse", requires_all = ["CLICKHOUSE_HOST", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABASE"])]
 pub struct ClickhouseArgs {
-    #[arg(long = "indexer.clickhouse.host", env = "CLICKHOUSE_HOST")]
+    #[arg(long = "indexer.clickhouse.host", env = "CLICKHOUSE_HOST", id = "CLICKHOUSE_HOST")]
     pub host: Option<String>,
 
-    #[arg(long = "indexer.clickhouse.username", env = "CLICKHOUSE_USERNAME")]
+    #[arg(
+        long = "indexer.clickhouse.username",
+        env = "CLICKHOUSE_USERNAME",
+        id = "CLICKHOUSE_USERNAME"
+    )]
     pub username: Option<String>,
 
-    #[arg(long = "indexer.clickhouse.password", env = "CLICKHOUSE_PASSWORD")]
+    #[arg(
+        long = "indexer.clickhouse.password",
+        env = "CLICKHOUSE_PASSWORD",
+        id = "CLICKHOUSE_PASSWORD"
+    )]
     pub password: Option<String>,
 
-    #[arg(long = "indexer.clickhouse.database", env = "CLICKHOUSE_DATABASE")]
+    #[arg(
+        long = "indexer.clickhouse.database",
+        env = "CLICKHOUSE_DATABASE",
+        id = "CLICKHOUSE_DATABASE"
+    )]
     pub database: Option<String>,
+
+    /// The table name to store bundles data.
+    #[arg(
+        long = "indexer.clickhouse.bundles-table-name",
+        env = "CLICKHOUSE_BUNDLES_TABLE_NAME",
+        id = "CLICKHOUSE_BUNDLES_TABLE_NAME"
+    )]
+    pub bundles_table_name: Option<String>,
 }
 
 /// Arguments required to setup file-based parquet indexing.
@@ -31,6 +52,7 @@ pub struct ParquetArgs {
     #[arg(
         long = "indexer.parquet.bundle-receipts-file-path",
         env = "PARQUET_BUNDLE_RECEIPTS_FILE_PATH",
+        id = "PARQUET_BUNDLE_RECEIPTS_FILE_PATH",
         value_hint = ValueHint::FilePath,
     )]
     pub bundle_receipts_file_path: Option<PathBuf>,
@@ -68,41 +90,57 @@ pub struct CacheArgs {
 #[derive(Parser, Debug)]
 pub struct OrderflowIngressArgs {
     /// Listen URL for receiving user flow.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
     pub user_listen_url: String,
 
     /// Listen URL for receiving system flow.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
     pub system_listen_url: String,
 
     /// Listen URL for receiving builder stats.
-    #[clap(long, value_hint = ValueHint::Url)]
-    pub builder_listen_url: String,
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
+    pub builder_listen_url: Option<String>,
 
     /// The URL of the local builder. This should be set in production.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT", id = "BUILDER_ENDPOINT")]
     pub builder_url: Option<String>,
 
+    /// The endpoint to check if the local builder is ready.
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_READY_ENDPOINT", id = "BUILDER_READY_ENDPOINT", default_value = "http://127.0.0.1:6070")]
+    pub builder_ready_endpoint: Option<String>,
+
     /// The name of the local builder.
-    #[clap(long, default_value_t = String::from("buildernet"))]
+    #[clap(long, env = "BUILDERNET_NODE_NAME", id = "BUILDERNET_NODE_NAME")]
     pub builder_name: String,
 
     /// The URL of BuilderHub.
-    #[clap(long, value_hint = ValueHint::Url)]
+    #[clap(long, value_hint = ValueHint::Url, env = "BUILDERHUB_ENDPOINT", id = "BUILDERHUB_ENDPOINT")]
     pub builder_hub_url: Option<String>,
 
     /// Enable Prometheus metrics.
     /// The metrics will be served at the given interface and port.
-    #[arg(long)]
+    #[arg(long, env = "METRICS_ADDR", id = "METRICS_ADDR")]
     pub metrics: Option<String>,
 
     /// The orderflow signer of this proxy.
-    #[clap(long)]
+    #[clap(long, env = "FLASHBOTS_ORDERFLOW_SIGNER", id = "FLASHBOTS_ORDERFLOW_SIGNER")]
     pub orderflow_signer: Option<PrivateKeySigner>,
+
+    /// The flashbots signer of this proxy.
+    #[clap(
+        long,
+        env = "FLASHBOTS_ORDERFLOW_SIGNER_ADDRESS",
+        id = "FLASHBOTS_ORDERFLOW_SIGNER_ADDRESS"
+    )]
+    pub flashbots_signer: Option<Address>,
 
     /// The maximum request size in bytes.
     #[clap(long, default_value_t = MAX_REQUEST_SIZE_BYTES)]
     pub max_request_size: usize,
+
+    /// Enable rate limiting.
+    #[clap(long, default_value_t = false)]
+    pub enable_rate_limiting: bool,
 
     /// Number of seconds to look back for ratelimit computation.
     #[clap(long, default_value_t = 1)]
@@ -120,12 +158,16 @@ pub struct OrderflowIngressArgs {
     #[clap(long, default_value_t = 4)]
     pub score_bucket_s: u64,
 
+    /// Disable forwarding to peers (useful for testing).
+    #[clap(long, default_value_t = false)]
+    pub disable_forwarding: bool,
+
     /// Outputs logs in JSON format if enabled.
-    #[clap(long = "log.json")]
+    #[clap(long = "log.json", default_value_t = false, env = "LOG_JSON", id = "LOG_JSON")]
     pub log_json: bool,
 
     /// Flag indicating whether GZIP support is enabled.
-    #[clap(long = "http.enable-gzip")]
+    #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
     #[command(flatten)]
@@ -140,13 +182,17 @@ impl Default for OrderflowIngressArgs {
         Self {
             user_listen_url: String::from("127.0.0.1:0"),
             system_listen_url: String::from("127.0.0.1:0"),
-            builder_listen_url: String::from("127.0.0.1:0"),
+            builder_listen_url: Some(String::from("127.0.0.1:0")),
             builder_url: None,
+            builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),
             builder_hub_url: None,
+            flashbots_signer: None,
+            enable_rate_limiting: false,
             metrics: None,
             orderflow_signer: None,
             max_request_size: MAX_REQUEST_SIZE_BYTES,
+            disable_forwarding: false,
             rate_limit_lookback_s: 1,
             rate_limit_count: 500,
             score_lookback_s: 60,
@@ -201,8 +247,15 @@ impl OrderflowIngressArgs {
         self
     }
 
+    /// Disable the builder hub.
     pub fn disable_builder_hub(mut self) -> Self {
         self.builder_hub_url = None;
+        self
+    }
+
+    /// Disable forwarding to peers.
+    pub fn disable_forwarding(mut self) -> Self {
+        self.disable_forwarding = true;
         self
     }
 }
@@ -230,6 +283,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
         ];
 
         OrderflowIngressArgs::try_parse_from(args)
@@ -250,6 +305,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
         ];
@@ -276,6 +333,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
             "--indexer.clickhouse.database",
@@ -313,6 +372,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.parquet.bundle-receipts-file-path",
             "pronto.parquet",
         ];
@@ -341,6 +402,8 @@ mod tests {
             "http://0.0.0.0:2020",
             "--builder-hub-url",
             "http://localhost:3000",
+            "--builder-name",
+            "buildernet",
             "--indexer.parquet.bundle-receipts-file-path",
             "pronto.parquet",
             "--indexer.clickhouse.host",
@@ -356,6 +419,6 @@ mod tests {
         let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
         assert!(err
             .to_string()
-            .contains("the argument '--indexer.parquet.bundle-receipts-file-path <BUNDLE_RECEIPTS_FILE_PATH>' cannot be used with"), "Unexpected error: {err}");
+            .contains("the argument '--indexer.parquet.bundle-receipts-file-path <PARQUET_BUNDLE_RECEIPTS_FILE_PATH>' cannot be used with"), "Unexpected error: {err}");
     }
 }

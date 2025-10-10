@@ -19,6 +19,16 @@ pub enum Priority {
     Low,
 }
 
+impl Priority {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::High => "high",
+            Self::Medium => "medium",
+            Self::Low => "low",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -65,11 +65,13 @@ pub mod testutils {
         TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::Encodable2718 as _;
-    use alloy_primitives::{Address, Bytes, TxKind, U256};
+    use alloy_primitives::{Address, Bytes, TxKind, U256, U64};
     use alloy_signer::SignerSync as _;
     use alloy_signer_local::PrivateKeySigner;
     use rand::Rng;
-    use rbuilder_primitives::serialize::RawBundle;
+    use rbuilder_primitives::serialize::{
+        RawBundle, RawShareBundle, RawShareBundleBody, RawShareBundleInclusion,
+    };
 
     /// A trait for types that can be randomly generated.
     pub trait Random {
@@ -244,14 +246,49 @@ pub mod testutils {
                 version: Some("v2".to_string()),
                 block_number: None,
                 replacement_uuid: None,
+                refund_identity: None,
                 uuid: None,
                 min_timestamp: None,
                 max_timestamp: None,
                 replacement_nonce: Some(rng.random()),
                 refund_percent: Some(rng.random_range(0..100)),
                 refund_recipient: Some(Address::random_with(rng)),
-                first_seen_at: None,
                 delayed_refund: None,
+            }
+        }
+    }
+
+    impl Random for RawShareBundle {
+        fn random<R: Rng>(rng: &mut R) -> Self {
+            let txs_len = rng.random_range(1..=10);
+            // We only generate Eip1559 here.
+            let bodies = (0..txs_len)
+                .map(|_| {
+                    let signer = PrivateKeySigner::random();
+                    let tx = EthereumTypedTransaction::Eip1559(TxEip1559::random(rng));
+                    let sighash = tx.signature_hash();
+                    let signature = signer.sign_hash_sync(&sighash).unwrap();
+                    let bytes = TxEnvelope::new_unhashed(tx, signature).encoded_2718().into();
+
+                    RawShareBundleBody {
+                        tx: Some(bytes),
+                        can_revert: rng.random_range(0..=1) == 0,
+                        revert_mode: None,
+                        bundle: None,
+                    }
+                })
+                .collect();
+
+            Self {
+                version: "v0.1".to_string(),
+                inclusion: RawShareBundleInclusion {
+                    block: U64::random_with(rng),
+                    max_block: None,
+                },
+                body: bodies,
+                validity: None,
+                metadata: None,
+                replacement_uuid: None,
             }
         }
     }
