@@ -22,7 +22,6 @@ use dashmap::DashMap;
 use entity::SpamThresholds;
 use eyre::Context as _;
 use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
-use hyper::Method;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
@@ -388,17 +387,7 @@ async fn track_server_metrics<T: IngressHandlerMetricsExt>(
     let latency = start.elapsed();
     let status = response.status();
 
-    T::record_http_request(method_to_str(&method), path, status, latency);
+    T::record_http_request(&method, path, status, latency);
 
     response
-}
-
-fn method_to_str(method: &Method) -> &'static str {
-    if method == &Method::GET {
-        "GET"
-    } else if method == &Method::POST {
-        "POST"
-    } else {
-        "Unsupported"
-    }
 }

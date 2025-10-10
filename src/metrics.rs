@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use clickhouse::inserter::Quantities;
-use hyper::StatusCode;
+use hyper::{Method, StatusCode};
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 
 use crate::{forwarder::ForwardingDirection, priority::Priority};
@@ -253,12 +253,14 @@ pub trait IngressHandlerMetricsExt {
     }
 
     #[inline]
-    fn record_http_request(
-        method: &'static str,
-        path: String,
-        status: StatusCode,
-        duration: Duration,
-    ) {
+    fn record_http_request(method: &Method, path: String, status: StatusCode, duration: Duration) {
+        let method = match method {
+            &Method::GET => "GET",
+            &Method::POST => "POST",
+            &Method::PUT => "PUT",
+            _ => "Unhandled",
+        };
+
         let reason = status.canonical_reason().unwrap_or("unknown");
 
         histogram!(ingress::HTTP_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => method, "path" => path, "status" => reason).record(duration.as_secs_f64());
