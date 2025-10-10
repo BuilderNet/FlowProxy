@@ -487,12 +487,16 @@ impl OrderflowIngress {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
             }
-            DecodedBundle::Replacement(replacement_data) => {
+            DecodedBundle::Cancellation(replacement_data) => {
                 debug!(target: "ingress", ?replacement_data, "Replacement bundle decoded");
             }
         }
 
-        IngressUserMetrics::record_txs_per_bundle(bundle.raw_bundle.txs.len());
+        if bundle.is_cancellation() {
+            IngressUserMetrics::increment_total_cancellations();
+        } else {
+            IngressUserMetrics::record_txs_per_bundle(bundle.raw_bundle.txs.len());
+        }
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", bundle_uuid = %bundle.uuid(), ?elapsed, "Bundle validated");

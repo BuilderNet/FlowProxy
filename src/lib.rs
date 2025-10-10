@@ -78,8 +78,8 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     fdlimit::raise_fd_limit()?;
 
     if let Some(ref metrics_addr) = args.metrics {
-        metrics::describe();
         spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
+        metrics::describe();
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
