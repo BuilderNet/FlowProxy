@@ -1,3 +1,6 @@
+/// The default HTTP timeout in seconds.
+pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
+
 /// Header name for BuilderNet signature.
 pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
 

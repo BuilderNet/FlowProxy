@@ -1,6 +1,7 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
+    consts::DEFAULT_HTTP_TIMEOUT_SECS,
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
     },
@@ -63,7 +64,20 @@ pub mod validation;
 /// Default system port for proxy instances.
 const DEFAULT_SYSTEM_PORT: u16 = 5544;
 
+pub fn init_tracing(log_json: bool) {
+    let registry = tracing_subscriber::registry().with(
+        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy(),
+    );
+    if log_json {
+        let _ = registry.with(tracing_subscriber::fmt::layer().json()).try_init();
+    } else {
+        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+    }
+}
+
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
+    fdlimit::raise_fd_limit()?;
+
     if let Some(ref metrics_addr) = args.metrics {
         metrics::describe();
         spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
@@ -108,7 +122,9 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build()?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()?;
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
         debug!(url = builder_hub_url, "Running with BuilderHub");
@@ -254,7 +270,10 @@ async fn run_update_peers(
     disable_forwarding: bool,
     task_executor: TaskExecutor,
 ) {
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .build()
+        .unwrap();
     let delay = Duration::from_secs(30);
 
     loop {
@@ -302,6 +321,7 @@ async fn run_update_peers(
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
                     client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .https_only(true)
                         .add_root_certificate(tls_cert.clone())
                         .build()

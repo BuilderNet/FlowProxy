@@ -575,6 +575,7 @@ impl EncodedOrder {
         }
     }
 
+    /// Returns the type of the order.
     pub fn order_type(&self) -> &'static str {
         match self {
             EncodedOrder::SystemOrder(_) => "system",
