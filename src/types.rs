@@ -536,7 +536,7 @@ pub struct WithEncoding<T> {
 #[derive(Debug, Clone)]
 pub enum EncodedOrder {
     /// Raw order bytes received from the system endpoint, already ready to be forwarded.
-    RawOrder(WithEncoding<RawOrderMetadata>),
+    SystemOrder(WithEncoding<RawOrderMetadata>),
     /// A bundle along with its JSON-RPC encoding.
     Bundle(WithEncoding<SystemBundle>),
     /// A MEV Share bundle along with its JSON-RPC encoding.
@@ -549,7 +549,7 @@ impl EncodedOrder {
     /// Returns the JSON-RPC encoding of the order.
     pub fn encoding(&self) -> &[u8] {
         match self {
-            EncodedOrder::RawOrder(order) => &order.encoding,
+            EncodedOrder::SystemOrder(order) => &order.encoding,
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
             EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
@@ -559,7 +559,7 @@ impl EncodedOrder {
     /// Returns the priority of the order.
     pub fn priority(&self) -> Priority {
         match self {
-            EncodedOrder::RawOrder(order) => order.inner.priority,
+            EncodedOrder::SystemOrder(order) => order.inner.priority,
             EncodedOrder::Bundle(bundle) => bundle.inner.priority,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
@@ -568,10 +568,19 @@ impl EncodedOrder {
 
     pub fn received_at(&self) -> UtcInstant {
         match self {
-            EncodedOrder::RawOrder(order) => order.inner.received_at,
+            EncodedOrder::SystemOrder(order) => order.inner.received_at,
             EncodedOrder::Bundle(bundle) => bundle.inner.received_at,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
+        }
+    }
+
+    pub fn order_type(&self) -> &'static str {
+        match self {
+            EncodedOrder::SystemOrder(_) => "system",
+            EncodedOrder::Bundle(_) => "bundle",
+            EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
+            EncodedOrder::Transaction(_) => "transaction",
         }
     }
 }
@@ -591,6 +600,51 @@ impl From<WithEncoding<SystemMevShareBundle>> for EncodedOrder {
 impl From<WithEncoding<SystemTransaction>> for EncodedOrder {
     fn from(value: WithEncoding<SystemTransaction>) -> Self {
         Self::Transaction(value)
+    }
+}
+
+/// A simple sampler that executes a closure every `sample_size` calls, or if a certain amount of
+/// time has passed since last sampling call.
+#[derive(Debug, Clone)]
+pub struct Sampler {
+    sample_size: usize,
+    counter: usize,
+    start: Instant,
+    interval: Duration,
+}
+
+impl Default for Sampler {
+    fn default() -> Self {
+        Self {
+            sample_size: 4096,
+            counter: 0,
+            start: Instant::now(),
+            interval: Duration::from_secs(10),
+        }
+    }
+}
+
+impl Sampler {
+    pub fn with_sample_size(mut self, sample_size: usize) -> Self {
+        self.sample_size = sample_size;
+        self
+    }
+
+    pub fn with_interval(mut self, interval: Duration) -> Self {
+        self.start = Instant::now() - interval;
+        self
+    }
+
+    /// Call this function to potentially execute the sample closure if we have reached the sample
+    /// size, or enough time has passed. Otherwise, it increments the internal counter.
+    pub fn sample(&mut self, f: impl FnOnce()) {
+        if self.counter >= self.sample_size || self.start.elapsed() >= self.interval {
+            self.counter = 0;
+            self.start = Instant::now();
+            f();
+        } else {
+            self.counter += 1;
+        }
     }
 }
 

@@ -21,6 +21,7 @@ use dashmap::DashMap;
 use entity::SpamThresholds;
 use eyre::Context as _;
 use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use hyper::Method;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
@@ -64,6 +65,7 @@ const DEFAULT_SYSTEM_PORT: u16 = 5544;
 
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
     if let Some(ref metrics_addr) = args.metrics {
+        metrics::describe();
         spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
     }
 
@@ -216,6 +218,7 @@ pub async fn run_with_listeners(
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
         .layer(DefaultBodyLimit::max(args.max_request_size))
+        // TODO: After mTLS, we can probably take this out.
         .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
@@ -358,14 +361,24 @@ async fn track_server_metrics<T: IngressHandlerMetricsExt>(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    let method = request.method().to_string();
+    let method = request.method().clone();
 
     let start = Instant::now();
     let response = next.run(request).await;
     let latency = start.elapsed();
-    let status = response.status().as_u16().to_string();
+    let status = response.status();
 
-    T::record_http_request(path, method, status, latency);
+    T::record_http_request(method_to_str(&method), path, status, latency);
 
     response
+}
+
+fn method_to_str(method: &Method) -> &'static str {
+    if method == &Method::GET {
+        "GET"
+    } else if method == &Method::POST {
+        "POST"
+    } else {
+        "Unsupported"
+    }
 }
