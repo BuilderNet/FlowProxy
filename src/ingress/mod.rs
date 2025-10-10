@@ -492,8 +492,8 @@ impl OrderflowIngress {
             }
         }
 
-        if bundle.is_cancellation() {
-            IngressUserMetrics::increment_total_cancellations();
+        if bundle.is_empty() {
+            IngressUserMetrics::increment_empty_bundles();
         } else {
             IngressUserMetrics::record_txs_per_bundle(bundle.raw_bundle.txs.len());
         }

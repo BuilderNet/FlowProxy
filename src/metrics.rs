@@ -60,7 +60,7 @@ mod name {
 
         pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
         pub(crate) const TXS_PER_MEV_SHARE_BUNDLE: &str = "ingress_txs_per_mev_share_bundle";
-        pub(crate) const TOTAL_CANCELLATIONS: &str = "ingress_total_cancellations";
+        pub(crate) const TOTAL_EMPTY_BUNDLES: &str = "ingress_total_empty_bundles";
     }
 
     /// System processing metrics.
@@ -165,7 +165,7 @@ pub fn describe() {
         ingress::TXS_PER_MEV_SHARE_BUNDLE,
         "Number of transactions per MEV-share bundle"
     );
-    describe_counter!(ingress::TOTAL_CANCELLATIONS, "Total number of cancellation bundles");
+    describe_counter!(ingress::TOTAL_EMPTY_BUNDLES, "Total number of cancellation bundles");
 
     // System end-to-end processing metrics
     describe_histogram!(
@@ -307,8 +307,8 @@ pub trait IngressHandlerMetricsExt {
     }
 
     #[inline]
-    fn increment_total_cancellations() {
-        counter!(ingress::TOTAL_CANCELLATIONS, "handler" => Self::HANDLER).increment(1);
+    fn increment_empty_bundles() {
+        counter!(ingress::TOTAL_EMPTY_BUNDLES, "handler" => Self::HANDLER).increment(1);
     }
 }
 
