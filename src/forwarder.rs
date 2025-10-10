@@ -366,8 +366,6 @@ impl HttpForwarder {
             Err(error) => {
                 error!(target: FORWARDER, peer_name = %self.peer_name, ?error, ?elapsed, "Error forwarding request");
 
-                error!(target: FORWARDER, name = %self.peer_name, ?error, ?elapsed, "Error from builder");
-
                 // Parse the reason, which is either the status code reason of the error message
                 // itself. If the request fails for non-network reasons, the status code may be
                 // None.
