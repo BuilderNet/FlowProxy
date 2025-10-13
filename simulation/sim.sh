@@ -98,8 +98,6 @@ run() {
 
         echo \"Waiting for flamegraph generation to complete...\"
         wait
-
-        sleep 2
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
@@ -149,6 +147,7 @@ get-results() {
     [ -f "$svg" ] || continue
     svg_basename=$(basename "$svg")
     svg_name="${svg_basename%.svg}"
+    echo "Copying $svg to ./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
     cp "$svg" "./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
   done
 
