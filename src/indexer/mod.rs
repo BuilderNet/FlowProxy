@@ -17,6 +17,7 @@ mod click;
 mod models;
 mod parq;
 mod ser;
+mod time;
 
 /// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 4096;

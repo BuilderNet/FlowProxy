@@ -51,6 +51,7 @@ pub mod forwarder;
 pub mod indexer;
 pub mod jsonrpc;
 pub mod metrics;
+pub mod primitives;
 pub mod priority;
 pub mod rate_limit;
 pub mod runner;
