@@ -1,6 +1,9 @@
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 
+/// The default HTTP connection limit per host.
+pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 512;
+
 /// Header name for BuilderNet signature.
 pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
 
