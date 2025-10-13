@@ -1,6 +1,7 @@
 -- DDL to create a ClickHouse table for storing bundle receipts data.
 CREATE TABLE bundle_receipts (
   `bundle_hash` FixedString(32),
+  `double_bundle_hash` FixedString(32),
   `sent_at` Nullable(DateTime64(6, 'UTC')) COMMENT 'The time the bundle has been sent at, as present in the JSON-RPC header',
   `received_at` DateTime64(6, 'UTC') COMMENT 'The time the local operator has received the payload',
   `dst_builder_name` LowCardinality(String) COMMENT 'The operator that received the payload',
@@ -10,7 +11,7 @@ CREATE TABLE bundle_receipts (
 
   INDEX bundle_hash_bloom_filter bundle_hash TYPE bloom_filter GRANULARITY 10,
 )
-ENGINE = MergeTree()
+ENGINE = SharedMergeTree()
 PARTITION BY toYYYYMM(received_at)
 PRIMARY KEY (received_at)
 ORDER BY (received_at)
