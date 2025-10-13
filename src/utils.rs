@@ -58,6 +58,191 @@ impl UtcDateTimeHeader for UtcDateTime {
     }
 }
 
+/// A module for the concurrent connections limit layer.
+/// Adapted from [`tower::limit::concurrency`] but adds metrics.
+pub mod limit {
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::Arc,
+        task::{Context, Poll},
+    };
+
+    use pin_project_lite::pin_project;
+    use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+    use tokio_util::sync::PollSemaphore;
+    use tower::{Layer, Service};
+
+    use crate::metrics::ForwarderMetrics;
+
+    /// Enforces a limit on the concurrent number of requests the underlying
+    /// service can handle.
+    #[derive(Debug, Clone)]
+    pub struct ConnectionLimiterLayer {
+        max: usize,
+        id: String,
+    }
+
+    impl ConnectionLimiterLayer {
+        /// Create a new concurrency limit layer.
+        pub const fn new(max: usize, id: String) -> Self {
+            ConnectionLimiterLayer { max, id }
+        }
+    }
+
+    impl<S> Layer<S> for ConnectionLimiterLayer {
+        type Service = ConnectionLimiter<S>;
+
+        fn layer(&self, service: S) -> Self::Service {
+            ConnectionLimiter::new(service, self.max, self.id.clone())
+        }
+    }
+
+    /// Enforces a limit on the concurrent number of requests the underlying
+    /// service can handle.
+    #[derive(Debug)]
+    pub struct ConnectionLimiter<T> {
+        inner: T,
+        semaphore: PollSemaphore,
+        /// The currently acquired semaphore permit, if there is sufficient
+        /// concurrency to send a new request.
+        ///
+        /// The permit is acquired in `poll_ready`, and taken in `call` when sending
+        /// a new request.
+        permit: Option<OwnedSemaphorePermit>,
+        max: usize,
+        /// The ID of the connection limiter to identify the host.
+        id: String,
+    }
+
+    impl<T> ConnectionLimiter<T> {
+        /// Create a new concurrency limiter.
+        pub fn new(inner: T, max: usize, id: String) -> Self {
+            Self::with_semaphore(inner, Arc::new(Semaphore::new(max)), id)
+        }
+
+        /// Create a new concurrency limiter with a provided shared semaphore
+        pub fn with_semaphore(inner: T, semaphore: Arc<Semaphore>, id: String) -> Self {
+            let max = semaphore.available_permits();
+            ConnectionLimiter {
+                inner,
+                semaphore: PollSemaphore::new(semaphore),
+                permit: None,
+                max,
+                id,
+            }
+        }
+
+        /// Get a reference to the inner service
+        pub fn get_ref(&self) -> &T {
+            &self.inner
+        }
+
+        /// Get a mutable reference to the inner service
+        pub fn get_mut(&mut self) -> &mut T {
+            &mut self.inner
+        }
+
+        /// Consume `self`, returning the inner service
+        pub fn into_inner(self) -> T {
+            self.inner
+        }
+
+        pub fn current_connections(&self) -> usize {
+            self.max - self.semaphore.available_permits()
+        }
+    }
+
+    impl<S, Request> Service<Request> for ConnectionLimiter<S>
+    where
+        S: Service<Request>,
+    {
+        type Response = S::Response;
+        type Error = S::Error;
+        type Future = ResponseFuture<S::Future>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            // If we haven't already acquired a permit from the semaphore, try to
+            // acquire one first.
+            if self.permit.is_none() {
+                self.permit = futures::ready!(self.semaphore.poll_acquire(cx));
+                debug_assert!(
+                    self.permit.is_some(),
+                    "ConcurrencyLimit semaphore is never closed, so `poll_acquire` \
+                 should never fail",
+                );
+            }
+
+            ForwarderMetrics::set_open_http_connections(
+                self.current_connections(),
+                self.id.clone(),
+            );
+
+            // Once we've acquired a permit (or if we already had one), poll the
+            // inner service.
+            self.inner.poll_ready(cx)
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            // Take the permit
+            let permit = self
+                .permit
+                .take()
+                .expect("max requests in-flight; poll_ready must be called first");
+
+            // Call the inner service
+            let future = self.inner.call(request);
+
+            ResponseFuture::new(future, permit)
+        }
+    }
+
+    impl<T: Clone> Clone for ConnectionLimiter<T> {
+        fn clone(&self) -> Self {
+            // Since we hold an `OwnedSemaphorePermit`, we can't derive `Clone`.
+            // Instead, when cloning the service, create a new service with the
+            // same semaphore, but with the permit in the un-acquired state.
+            Self {
+                inner: self.inner.clone(),
+                semaphore: self.semaphore.clone(),
+                permit: None,
+                max: self.max,
+                id: self.id.clone(),
+            }
+        }
+    }
+
+    pin_project! {
+        /// Future for the [`ConcurrencyLimit`] service.
+        ///
+        /// [`ConcurrencyLimit`]: crate::limit::ConcurrencyLimit
+        #[derive(Debug)]
+        pub struct ResponseFuture<T> {
+            #[pin]
+            inner: T,
+            // Keep this around so that it is dropped when the future completes
+            _permit: OwnedSemaphorePermit,
+        }
+    }
+
+    impl<T> ResponseFuture<T> {
+        fn new(inner: T, _permit: OwnedSemaphorePermit) -> Self {
+            Self { inner, _permit }
+        }
+    }
+
+    impl<F, T, E> Future for ResponseFuture<F>
+    where
+        F: Future<Output = Result<T, E>>,
+    {
+        type Output = Result<T, E>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Ready(futures::ready!(self.project().inner.poll(cx)))
+        }
+    }
+}
+
 pub mod testutils {
     use alloy_consensus::{
         BlobTransactionSidecar, EthereumTypedTransaction, SidecarBuilder, SignableTransaction as _,

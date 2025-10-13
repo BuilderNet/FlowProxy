@@ -2,7 +2,7 @@
 
 use crate::{
     cache::SignerCache,
-    consts::DEFAULT_HTTP_TIMEOUT_SECS,
+    consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
     },
@@ -124,7 +124,14 @@ pub async fn run_with_listeners(
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
+        .pool_idle_timeout(Duration::from_secs(30))
+        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+            DEFAULT_CONNECTION_LIMIT_PER_HOST,
+            "local-builder".to_string(),
+        ))
         .build()?;
+
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
         debug!(url = builder_hub_url, "Running with BuilderHub");
