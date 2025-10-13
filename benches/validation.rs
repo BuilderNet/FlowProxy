@@ -7,7 +7,7 @@ use buildernet_orderflow_proxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_verify_signature,
     priority::Priority,
-    types::{SystemBundle, UtcInstant},
+    types::{SystemBundle, SystemBundleMetadata, UtcInstant},
     utils::testutils::Random,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
@@ -87,13 +87,12 @@ pub fn bench_validation(c: &mut Criterion) {
             || generate_bundles_with_signer(size, &mut rng),
             |inputs| {
                 for input in inputs {
-                    let result = SystemBundle::try_decode(
-                        input.raw_bundle,
-                        input.signer,
-                        input.received_at,
-                        Priority::Medium,
-                    )
-                    .unwrap();
+                    let metadata = SystemBundleMetadata {
+                        received_at: input.received_at,
+                        signer: input.signer,
+                        priority: Priority::Medium,
+                    };
+                    let result = SystemBundle::try_decode(input.raw_bundle, metadata).unwrap();
                     black_box(result);
                 }
             },

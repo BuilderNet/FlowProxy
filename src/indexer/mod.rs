@@ -145,7 +145,7 @@ pub(crate) mod tests {
 
     use crate::{
         priority::Priority,
-        types::{SystemBundle, UtcInstant},
+        types::{SystemBundle, SystemBundleMetadata, UtcInstant},
     };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
@@ -192,7 +192,10 @@ pub(crate) mod tests {
         let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
-        SystemBundle::try_decode(bundle, signer, received_at, Priority::Medium).unwrap()
+
+        let metadata = SystemBundleMetadata { signer, received_at, priority: Priority::Medium };
+
+        SystemBundle::try_decode(bundle, metadata).unwrap()
     }
 
     /// An example cancel bundle to use for testing.
@@ -200,6 +203,8 @@ pub(crate) mod tests {
         let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
-        SystemBundle::try_decode(bundle, signer, received_at, Priority::Medium).unwrap()
+
+        let metadata = SystemBundleMetadata { signer, received_at, priority: Priority::Medium };
+        SystemBundle::try_decode(bundle, metadata).unwrap()
     }
 }

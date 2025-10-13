@@ -128,9 +128,10 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
     fn from((bundle, builder_name): (SystemBundle, BuilderName)) -> Self {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
-                let micros = bundle.received_at.utc.microsecond();
+                let micros = bundle.metadata.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle
+                        .metadata
                         .received_at
                         .utc
                         // Needed so that the `BundleRow` created has the same timestamp precision
@@ -225,26 +226,31 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                         })
                         .collect(),
                     transactions_raw: bundle.raw_bundle.txs.iter().map(|tx| tx.to_vec()).collect(),
-                    block_number: bundle.raw_bundle.block_number.map_or(0, |b| b.to::<u64>()),
-                    min_timestamp: bundle.raw_bundle.min_timestamp,
-                    max_timestamp: bundle.raw_bundle.max_timestamp,
-                    reverting_tx_hashes: bundle.raw_bundle.reverting_tx_hashes.clone(),
-                    dropping_tx_hashes: bundle.raw_bundle.dropping_tx_hashes.clone(),
-                    delayed_refund: bundle.raw_bundle.delayed_refund,
+                    block_number: bundle
+                        .raw_bundle
+                        .metadata
+                        .block_number
+                        .map_or(0, |b| b.to::<u64>()),
+                    min_timestamp: bundle.raw_bundle.metadata.min_timestamp,
+                    max_timestamp: bundle.raw_bundle.metadata.max_timestamp,
+                    reverting_tx_hashes: bundle.raw_bundle.metadata.reverting_tx_hashes.clone(),
+                    dropping_tx_hashes: bundle.raw_bundle.metadata.dropping_tx_hashes.clone(),
+                    delayed_refund: bundle.raw_bundle.metadata.delayed_refund,
                     refund_tx_hashes: bundle
                         .raw_bundle
+                        .metadata
                         .refund_tx_hashes
                         .clone()
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
                     internal_uuid: decoded.uuid,
                     replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
-                    replacement_nonce: bundle.raw_bundle.replacement_nonce,
-                    signer_address: Some(bundle.signer),
+                    replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
+                    signer_address: Some(bundle.metadata.signer),
                     builder_name,
-                    refund_percent: bundle.raw_bundle.refund_percent,
-                    refund_recipient: bundle.raw_bundle.refund_recipient,
-                    refund_identity: bundle.raw_bundle.refund_identity,
+                    refund_percent: bundle.raw_bundle.metadata.refund_percent,
+                    refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
+                    refund_identity: bundle.raw_bundle.metadata.refund_identity,
                     hash: decoded.hash,
                     version: match decoded.version {
                         BundleVersion::V1 => 1,
@@ -255,9 +261,10 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
             // transactions.
             DecodedBundle::EmptyReplacement(ref replacement) => {
-                let micros = bundle.received_at.utc.microsecond();
+                let micros = bundle.metadata.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle
+                        .metadata
                         .received_at
                         .utc
                         // Needed so that the `BundleRow` created has the same timestamp precision
@@ -292,14 +299,14 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     // user-provided replacement-uuid instead.
                     internal_uuid: replacement.key.key().id,
                     replacement_uuid: Some(replacement.key.key().id),
-                    replacement_nonce: bundle.raw_bundle.replacement_nonce,
-                    signer_address: Some(bundle.signer),
+                    replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
+                    signer_address: Some(bundle.metadata.signer),
                     builder_name,
-                    delayed_refund: bundle.raw_bundle.delayed_refund,
-                    refund_percent: bundle.raw_bundle.refund_percent,
-                    refund_recipient: bundle.raw_bundle.refund_recipient,
-                    refund_identity: bundle.raw_bundle.refund_identity,
-                    hash: bundle.bundle_hash,
+                    delayed_refund: bundle.raw_bundle.metadata.delayed_refund,
+                    refund_percent: bundle.raw_bundle.metadata.refund_percent,
+                    refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
+                    refund_identity: bundle.raw_bundle.metadata.refund_identity,
+                    hash: bundle.raw_bundle_hash,
                     // NOTE: For now, replacement bundles don't have a version, so we set v2.
                     version: 2,
                 }
@@ -317,40 +324,41 @@ pub(crate) mod tests {
     use std::sync::Arc;
 
     use alloy_primitives::{Bytes, U64};
-    use rbuilder_primitives::serialize::RawBundle;
+    use rbuilder_primitives::serialize::{RawBundle, RawBundleMetadata};
 
     use crate::{
         indexer::{self, models::BundleRow},
-        priority::Priority,
         types::SystemBundle,
     };
 
     impl From<BundleRow> for RawBundle {
         fn from(value: BundleRow) -> Self {
             RawBundle {
-                block_number: Some(U64::from(value.block_number)),
-                min_timestamp: value.min_timestamp,
-                max_timestamp: value.max_timestamp,
                 txs: value.transactions_raw.into_iter().map(Bytes::from).collect(),
-                reverting_tx_hashes: value.reverting_tx_hashes.clone(),
-                dropping_tx_hashes: value.dropping_tx_hashes.clone(),
-                // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it was
-                // written, because in Clickhouse we cannot have `Nullable(Array(T))`.
-                refund_tx_hashes: Some(value.refund_tx_hashes.clone()),
-                // NOTE: we'll always consider this unset, and set the `replacement_uuid` instead.
-                uuid: None,
-                replacement_uuid: value.replacement_uuid,
-                replacement_nonce: value.replacement_nonce,
-                refund_percent: value.refund_percent,
-                refund_recipient: value.refund_recipient,
-                refund_identity: value.refund_identity,
-                version: if value.version == 1 {
-                    Some("v1".to_string())
-                } else {
-                    Some("v2".to_string())
+                metadata: RawBundleMetadata {
+                    block_number: Some(U64::from(value.block_number)),
+                    min_timestamp: value.min_timestamp,
+                    max_timestamp: value.max_timestamp,
+                    reverting_tx_hashes: value.reverting_tx_hashes.clone(),
+                    dropping_tx_hashes: value.dropping_tx_hashes.clone(),
+                    // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it was
+                    // written, because in Clickhouse we cannot have `Nullable(Array(T))`.
+                    refund_tx_hashes: Some(value.refund_tx_hashes.clone()),
+                    // NOTE: we'll always consider this unset, and set the `replacement_uuid` instead.
+                    uuid: None,
+                    replacement_uuid: value.replacement_uuid,
+                    replacement_nonce: value.replacement_nonce,
+                    refund_percent: value.refund_percent,
+                    refund_recipient: value.refund_recipient,
+                    refund_identity: value.refund_identity,
+                    version: if value.version == 1 {
+                        Some("v1".to_string())
+                    } else {
+                        Some("v2".to_string())
+                    },
+                    signing_address: value.signer_address,
+                    delayed_refund: None,
                 },
-                signing_address: value.signer_address,
-                delayed_refund: None,
             }
         }
     }
@@ -359,21 +367,15 @@ pub(crate) mod tests {
     fn clickhouse_bundle_row_conversion_round_trip_works() {
         let system_bundle = indexer::tests::system_bundle_example();
         let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
-        let signer = *bundle_row.signer_address.as_ref().unwrap();
 
-        let raw_bundle_round_trip: RawBundle = bundle_row.into();
+        let mut raw_bundle_round_trip: RawBundle = bundle_row.into();
+        raw_bundle_round_trip.metadata.signing_address = None;
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
 
-        let mut system_bundle_round_trip = SystemBundle::try_decode(
-            raw_bundle_round_trip,
-            signer,
-            system_bundle.received_at,
-            Priority::Medium,
-        )
-        .unwrap();
-
-        system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
+        let system_bundle_round_trip =
+            SystemBundle::try_decode(raw_bundle_round_trip, system_bundle.metadata.clone())
+                .unwrap();
 
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
@@ -382,20 +384,14 @@ pub(crate) mod tests {
     fn clickhouse_cancel_bundle_row_conversion_round_trip_works() {
         let system_bundle = indexer::tests::system_cancel_bundle_example();
         let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
-        let signer = *bundle_row.signer_address.as_ref().unwrap();
 
         let raw_bundle_round_trip: RawBundle = bundle_row.into();
 
         assert_eq!(system_bundle.raw_bundle, Arc::new(raw_bundle_round_trip.clone()));
-        let mut system_bundle_round_trip = SystemBundle::try_decode(
-            raw_bundle_round_trip,
-            signer,
-            system_bundle.received_at,
-            Priority::Medium,
-        )
-        .unwrap();
+        let system_bundle_round_trip =
+            SystemBundle::try_decode(raw_bundle_round_trip, system_bundle.metadata.clone())
+                .unwrap();
 
-        system_bundle_round_trip.received_at.instant = system_bundle.received_at.instant;
         assert_eq!(system_bundle, system_bundle_round_trip);
     }
 }
