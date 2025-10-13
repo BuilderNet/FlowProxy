@@ -62,6 +62,7 @@ mod name {
         pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
         pub(crate) const TXS_PER_MEV_SHARE_BUNDLE: &str = "ingress_txs_per_mev_share_bundle";
         pub(crate) const TOTAL_EMPTY_BUNDLES: &str = "ingress_total_empty_bundles";
+        pub(crate) const SIGNER_CACHE_HIT_RATIO: &str = "ingress_signer_cache_hit_ratio";
     }
 
     /// System processing metrics.
@@ -168,6 +169,10 @@ pub fn describe() {
         "Number of transactions per MEV-share bundle"
     );
     describe_counter!(ingress::TOTAL_EMPTY_BUNDLES, "Total number of cancellation bundles");
+    describe_gauge!(
+        ingress::SIGNER_CACHE_HIT_RATIO,
+        "Ratio of transaction signer cache hits (successful cache hits / total transactions)"
+    );
 
     // System end-to-end processing metrics
     describe_histogram!(
@@ -317,6 +322,11 @@ pub trait IngressHandlerMetricsExt {
     #[inline]
     fn increment_empty_bundles() {
         counter!(ingress::TOTAL_EMPTY_BUNDLES, "handler" => Self::HANDLER).increment(1);
+    }
+
+    #[inline]
+    fn set_signer_cache_hit_ratio(ratio: f64) {
+        gauge!(ingress::SIGNER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
     }
 }
 

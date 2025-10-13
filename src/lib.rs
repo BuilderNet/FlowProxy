@@ -208,7 +208,7 @@ pub async fn run_with_listeners(
         pqueues: Default::default(),
         entities: DashMap::default(),
         order_cache,
-        signer_cache: Arc::new(signer_cache),
+        signer_cache,
         forwarders,
         local_builder_url: builder_url,
         builder_ready_endpoint,

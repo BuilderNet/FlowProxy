@@ -60,7 +60,7 @@ pub struct OrderflowIngress {
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
     pub order_cache: OrderCache,
-    pub signer_cache: Arc<SignerCache>,
+    pub signer_cache: SignerCache,
     pub forwarders: IngressForwarders,
     pub flashbots_signer: Option<Address>,
     /// The URL of the local builder. Used to send readyz requests.
@@ -455,8 +455,8 @@ impl OrderflowIngress {
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
-            && bundle.metadata.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
+            bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
@@ -474,11 +474,12 @@ impl OrderflowIngress {
         }
 
         self.order_cache.insert(bundle_hash);
-        let sig_cache_clone = self.signer_cache.clone();
+        let signer_cache = self.signer_cache.clone();
         let lookup = move |hash: B256| {
-            sig_cache_clone
+            signer_cache
                 .get(&hash)
                 .inspect(|a| debug!(target: "signer-cache", "cache hit for hash: {hash} -- {a}"))
+                .map(|a| a.clone())
         };
 
         if bundle.metadata.version.is_none() {
