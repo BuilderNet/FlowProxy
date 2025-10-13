@@ -235,6 +235,8 @@ impl SystemBundle {
         Self::try_decode_inner(bundle, metadata, None::<fn(B256) -> Option<Address>>)
     }
 
+    /// Create a new system bundle from a raw bundle and additional data, using a signer lookup
+    /// function for the transaction signers.
     pub fn try_decode_with_lookup(
         bundle: RawBundle,
         metadata: SystemBundleMetadata,
@@ -243,6 +245,8 @@ impl SystemBundle {
         Self::try_decode_inner(bundle, metadata, Some(lookup))
     }
 
+    /// Create a new system bundle from a raw bundle and additional data, using a signer lookup
+    /// function for the transaction signers. Returns an error if the raw bundle fails to decode.
     fn try_decode_inner(
         bundle: RawBundle,
         metadata: SystemBundleMetadata,
