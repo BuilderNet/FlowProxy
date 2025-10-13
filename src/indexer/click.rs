@@ -1,30 +1,32 @@
 //! Indexing functionality powered by Clickhouse.
+//!
+//! TODO: update metrics
 
-use std::{
-    collections::{BTreeMap, VecDeque},
-    fmt::Debug,
-    time::{Duration, Instant, UNIX_EPOCH},
-};
+use std::{collections::VecDeque, fmt::Debug, time::Duration};
 
 use alloy_primitives::B256;
 use clickhouse::{
+    error::Result as ClickhouseResult,
     inserter::{Inserter, Quantities},
     Client as ClickhouseClient, Row, RowWrite,
 };
 use serde::Serialize;
-use tokio::{
-    sync::mpsc,
-    time::{interval, Interval},
-};
+use tokio::sync::mpsc;
 use tracing::info;
 
 use crate::{
     cli::ClickhouseArgs,
-    indexer::{models::BundleRow, BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET},
+    indexer::{
+        models::BundleRow,
+        time::{BackoffInterval, ExponentialBackoff},
+        BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TRACING_TARGET,
+    },
     metrics::IndexerMetrics,
     tasks::TaskExecutor,
     types::{Sampler, SystemBundle},
 };
+
+const MAX_BACKUP_SIZE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
 /// An high-level order type that can be indexed in clickhouse.
 pub(crate) trait ClickhouseIndexableOrder: Sized {
@@ -57,148 +59,247 @@ impl ClickhouseIndexableOrder for SystemBundle {
     }
 }
 
-pub(crate) trait ClickhouseBackupBackend {}
+#[derive(Debug)]
+struct FailedCommit<T: ClickhouseIndexableOrder> {
+    rows: Vec<T::ClickhouseRowType>,
+    quantities: Quantities,
+    attempts: u8,
+}
+
+impl<T: ClickhouseIndexableOrder> FailedCommit<T> {
+    fn new(rows: Vec<T::ClickhouseRowType>, quantities: Quantities) -> Self {
+        Self { rows, quantities, attempts: 0 }
+    }
+}
+
+// Rationale for sending multiple rows instead of sending rows: the backup abstraction must
+// periodically block to write data to the inserter and try to commit it to clickhouse. Each
+// attempt results in doing the previous step. This could clog the channel which will receive
+// individual rows, leading to potential row losses.
+//
+// By sending backup data less often, we give time gaps for these operation to be performed.
 
 struct InMemoryBackup<T: ClickhouseIndexableOrder> {
-    rx: mpsc::Receiver<Vec<T::ClickhouseRowType>>,
-    cache: BTreeMap<u128, T::ClickhouseRowType>,
-    failed_commits: VecDeque<Vec<T::ClickhouseRowType>>,
-    max_attempts: usize,
+    rx: mpsc::Receiver<FailedCommit<T>>,
+    failed_commits: VecDeque<FailedCommit<T>>,
     inserter: Inserter<T::ClickhouseRowType>,
-    interval: Interval,
+    interval: BackoffInterval,
+    max_attempts: u8,
+    max_size_bytes: u64,
+    apply_pressure: bool,
 }
 
 impl<T: ClickhouseIndexableOrder> InMemoryBackup<T> {
     fn new(
-        rx: mpsc::Receiver<Vec<T::ClickhouseRowType>>,
+        rx: mpsc::Receiver<FailedCommit<T>>,
         inserter: Inserter<T::ClickhouseRowType>,
-        max_attempts: usize,
-        frequency: Option<Duration>,
+        interval: Option<BackoffInterval>,
+        max_attempts: u8,
+        max_size_bytes: u64,
     ) -> Self {
-        let cache = BTreeMap::new();
-
-        let mut interval = tokio::time::interval(frequency.unwrap_or(Duration::from_secs(1)));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        Self { rx, cache, max_attempts, inserter, interval, failed_commits: VecDeque::new() }
+        Self {
+            rx,
+            max_attempts,
+            inserter,
+            interval: interval.unwrap_or_default(),
+            failed_commits: VecDeque::new(),
+            max_size_bytes,
+            apply_pressure: false,
+        }
     }
 
-    async fn run(mut self) {
+    #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
+    async fn run(&mut self) {
         loop {
             tokio::select! {
                 maybe_failed_commit = self.rx.recv() => {
                     let Some(failed_commit) = maybe_failed_commit else {
-                        tracing::warn!(TRACING_TARGET, "Clickhouse backup channel closed");
+                        tracing::error!("backup channel closed");
                         break;
                     };
+                    tracing::debug!(quantities = ?failed_commit.quantities, "received failed commit to backup");
 
                     self.failed_commits.push_back(failed_commit);
-                    if self.failed_commits.len() > 4 {
-                        self.failed_commits.pop_front();
+                    let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
+
+                    if total_size_bytes > self.max_size_bytes {
+                        self.apply_pressure = true;
+                        // TODO: maybe MiB would be a better unit here?
+                        tracing::warn!(total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, applying backpressure");
                     }
                 }
-                _ = interval.tick() => {
-                        let Some(oldest) = self.failed_commits.iter().peekable().peek_mut() else { continue };
+                _ = self.interval.tick() => {
+                        let Some(mut oldest) = self.failed_commits.pop_back() else {
+                            continue // Nothing to do!
+                        };
+
+                        if self.apply_pressure {
+                            oldest.attempts += 1;
+                        }
+
+                        if oldest.attempts > self.max_attempts {
+                            tracing::error!(max_attempts = self.max_attempts, "dropping failed commit, too many attempts");
+                            continue;
+                        }
+
+                        for row in &oldest.rows {
+                            let value_ref = T::to_row_ref(row);
+
+                            if let Err(e) = self.inserter.write(value_ref).await {
+                                IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
+                                tracing::error!(?e, "failed to write to backup inserter");
+                                continue;
+                            }
+                        }
+
+                        if let Err(e) = self.inserter.force_commit().await {
+                            tracing::error!(target: TRACING_TARGET, ?e, "failed to commit backup");
+                            self.failed_commits.push_front(oldest);
+                        } else {
+                            tracing::info!(target: TRACING_TARGET, "successfully backed up");
+                            self.interval.reset();
+                        }
+
                 }
             }
         }
+    }
 
-            for i in 1..=self.max_attempts {
-                for row in &failed_commit {
-                    let value_ref = T::to_row_ref(row);
+    #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
+    async fn end(mut self) {
+        for failed_commit in self.failed_commits.drain(..) {
+            for row in &failed_commit.rows {
+                let value_ref = T::to_row_ref(row);
 
-                    if let Err(e) = self.inserter.write(value_ref).await {
-                        IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-                        tracing::error!(target: TRACING_TARGET,
-                            ?e, "failed to write {} to clickhouse backup inserter", T::ORDER_TYPE
-                        );
-                        continue;
-                    }
-                }
-
-                if let Err(e) = self.inserter.force_commit().await {
-                    tracing::error!(target: TRACING_TARGET, ?e, attempt = i, max_attempts = self.max_attempts, "failed to commit clickhouse backup");
+                if let Err(e) = self.inserter.write(value_ref).await {
+                    IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
+                    tracing::error!(?e, "failed to write to backup inserter during shutdown");
+                    continue;
                 }
             }
-
-            // if let Err(e) = self.inserter.write(T::to_row_ref(&row)).await {
-            //     IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-            //     tracing::error!(target: TRACING_TARGET, ?e, "failed to write {} to clickhouse backup inserter", T::ORDER_TYPE);
-            // }
+            if let Err(e) = self.inserter.force_commit().await {
+                tracing::error!(target: TRACING_TARGET, ?e, "failed to commit backup during shutdown");
+            }
         }
     }
 }
 
-struct BackupRunner<T: ClickhouseIndexableOrder, B: ClickhouseBackupBackend> {
-    rx: mpsc::Receiver<T::ClickhouseRowType>,
+impl<T: ClickhouseIndexableOrder> std::fmt::Debug for InMemoryBackup<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InMemoryBackup")
+            .field("rx", &self.rx)
+            .field("inserter", &T::ORDER_TYPE.to_string())
+            .field("failed_commits", &self.failed_commits.len())
+            .field("max_attempts", &self.max_attempts)
+            .field("max_size_bytes", &self.max_size_bytes)
+            .finish()
+    }
+}
 
-    _phantom: std::marker::PhantomData<B>,
+struct ClickhouseInserter<T: ClickhouseIndexableOrder> {
+    inner: Inserter<T::ClickhouseRowType>,
+    rows_backup: Vec<T::ClickhouseRowType>,
+    backup_tx: mpsc::Sender<FailedCommit<T>>,
+    builder_name: String,
+}
+
+impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
+    fn new(
+        inner: Inserter<T::ClickhouseRowType>,
+        backup_tx: mpsc::Sender<FailedCommit<T>>,
+        builder_name: String,
+    ) -> Self {
+        let rows_backup = Vec::new();
+        Self { inner, rows_backup, backup_tx, builder_name }
+    }
+
+    /// Writes the provided order into the inner Clickhouse writer buffer.
+    #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
+    async fn write(&mut self, order: T) {
+        let hash = order.hash();
+        let order_row: T::ClickhouseRowType = (order, self.builder_name.clone()).into();
+        let value_ref = T::to_row_ref(&order_row);
+
+        if let Err(e) = self.inner.write(value_ref).await {
+            IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
+            tracing::error!(?e, %hash, "failed to write to clickhouse inserter"
+            )
+        }
+
+        // NOTE: we don't backup if writing failes. The reason is that if this fails, then the same
+        // writing to the backup inserter will fail.
+        self.rows_backup.push(order_row);
+    }
+
+    /// Tries to commit to Clickhouse if the conditions are met. In case of failures, data is sent
+    /// to the backup actor for retries.
+    #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
+    async fn commit(&mut self) {
+        let pending = self.inner.pending().clone(); // This is cheap to clone.
+
+        match self.inner.commit().await {
+            Ok(quantities) => {
+                if quantities == Quantities::ZERO {
+                    tracing::trace!("committed to inserter");
+                } else {
+                    tracing::debug!(?quantities, "inserted batch to clickhouse");
+                    IndexerMetrics::process_clickhouse_quantities(&quantities);
+                }
+            }
+            Err(e) => {
+                IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
+                tracing::error!(?e, "failed to commit bundle to clickhouse");
+
+                let rows = std::mem::take(&mut self.rows_backup);
+                let failed_commit = FailedCommit::new(rows, pending);
+
+                if let Err(e) = self.backup_tx.try_send(failed_commit) {
+                    tracing::error!(?e, "failed to send rows backup");
+                }
+            }
+        }
+    }
+
+    /// Ends the current `INSERT` and whole `Inserter` unconditionally.
+    async fn end(self) -> ClickhouseResult<Quantities> {
+        self.inner.end().await
+    }
+}
+
+impl<T: ClickhouseIndexableOrder> std::fmt::Debug for ClickhouseInserter<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClickhouseInserter")
+            .field("inserter", &T::ORDER_TYPE.to_string())
+            .field("rows_backup_len", &self.rows_backup.len())
+            .field("builder_name", &self.builder_name)
+            .finish()
+    }
 }
 
 struct InserterRunner<T: ClickhouseIndexableOrder> {
     rx: mpsc::Receiver<T>,
-    inserter: Inserter<T::ClickhouseRowType>,
-    builder_name: String,
+    inserter: ClickhouseInserter<T>,
 }
 
 impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
-    fn new(
-        rx: mpsc::Receiver<T>,
-        inserter: Inserter<T::ClickhouseRowType>,
-        builder_name: BuilderName,
-    ) -> Self {
-        Self { rx, inserter, builder_name }
+    fn new(rx: mpsc::Receiver<T>, inserter: ClickhouseInserter<T>) -> Self {
+        Self { rx, inserter }
     }
 
+    #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
     async fn run_loop(&mut self) {
         let mut sampler = Sampler::default()
             .with_sample_size(self.rx.capacity() / 2)
             .with_interval(Duration::from_secs(4));
 
-        // let time = std::time::SystemTime::now()
-        //     .duration_since(UNIX_EPOCH)
-        //     .expect("time went backwards")
-        //     .as_micros();
-
         while let Some(order) = self.rx.recv().await {
-            tracing::trace!(target: TRACING_TARGET, hash = %order.hash(), "received {} to index", T::ORDER_TYPE);
+            tracing::trace!(hash = %order.hash(), "received data to index");
             sampler.sample(|| {
                 IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), T::ORDER_TYPE);
             });
 
-            let hash = order.hash();
-            let order_row: T::ClickhouseRowType = (order, self.builder_name.clone()).into();
-            let value_ref = T::to_row_ref(&order_row);
-
-            if let Err(e) = self.inserter.write(value_ref).await {
-                IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-                tracing::error!(target: TRACING_TARGET,
-                    ?e,
-                    %hash,
-                    "failed to write {} to clickhouse inserter", T::ORDER_TYPE
-                )
-            }
-            // Send to backup channel. Backup channel will add to its backend, either disk or
-            // in-memory (btreemap?).
-
-            // TODO(thedevbirb): implement a file-based backup in case this call fails due to
-            // connection timeouts or whatever.
-            match self.inserter.commit().await {
-                Ok(quantities) => {
-                    if quantities == Quantities::ZERO {
-                        tracing::trace!(target: TRACING_TARGET, %hash, "committed {} to inserter", T::ORDER_TYPE);
-                    } else {
-                        // Send message to cleanup from backup channel from that time backwards.
-
-                        tracing::debug!(target: TRACING_TARGET, ?quantities, "inserted batch of {}s to clickhouse", T::ORDER_TYPE);
-                        IndexerMetrics::process_clickhouse_quantities(&quantities);
-                    }
-                }
-                Err(e) => {
-                    IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
-                    tracing::error!(target: TRACING_TARGET, ?e, "failed to commit bundle of {}s to clickhouse", T::ORDER_TYPE)
-                }
-            }
+            self.inserter.write(order).await;
+            self.inserter.commit().await;
         }
         tracing::error!(target: TRACING_TARGET, "{} tx channel closed, indexer will stop running", T::ORDER_TYPE);
     }
@@ -246,8 +347,22 @@ impl ClickhouseIndexer {
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
             .with_max_rows(65_536);
 
-        let mut bundle_inserter_runner =
-            InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
+        // TODO: cleanup
+
+        let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(8); // TODO: use this and spin up backup
+        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name);
+
+        let interval = BackoffInterval::new(ExponentialBackoff::from_millis(100)).with_jitter();
+
+        let mut backup_runner = InMemoryBackup::new(
+            rx,
+            client.inserter::<BundleRow>(bundles_table_name.as_str()),
+            Some(interval),
+            4,
+            MAX_BACKUP_SIZE_BYTES,
+        );
+
+        let mut bundle_inserter_runner = InserterRunner::new(bundle_rx, bundle_inserter);
 
         // TODO: Make this generic over order types. Requires some trait bounds.
         task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
@@ -273,8 +388,33 @@ impl ClickhouseIndexer {
             drop(shutdown_guard);
         });
 
+        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
+            let mut shutdown_guard = None;
+            tokio::select! {
+                _ = backup_runner.run() => {
+                    info!(target: TRACING_TARGET, "clickhouse bundle indexer channel closed");
+                }
+                guard = shutdown => {
+                    info!(target: TRACING_TARGET, "Received shutdown for bundle indexer, performing cleanup");
+                    shutdown_guard = Some(guard);
+                },
+            }
+
+            backup_runner.end().await;
+            drop(shutdown_guard);
+        });
+
         // TODO: support bundle receipts in Clickhouse.
         task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
+    }
+}
+
+impl<T: ClickhouseIndexableOrder> std::fmt::Debug for InserterRunner<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InserterRunner")
+            .field("inserter", &T::ORDER_TYPE.to_string())
+            .field("rx", &self.rx)
+            .finish()
     }
 }
 
