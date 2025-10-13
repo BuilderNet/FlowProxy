@@ -20,6 +20,7 @@ mod name {
     pub(crate) mod forwarder {
         pub(crate) const HTTP_CALL_FAILURES: &str = "forwarder_http_call_failures";
         pub(crate) const INFLIGHT_REQUESTS: &str = "forwarder_inflight_http_calls";
+        pub(crate) const OPEN_HTTP_CONNECTIONS: &str = "forwarder_open_http_connections";
         pub(crate) const JSON_RPC_DECODING_FAILURES: &str = "forwarder_rpc_decoding_failures";
         pub(crate) const RPC_CALL_DURATION: &str = "forwarder_rpc_call_duration";
         pub(crate) const RPC_CALL_FAILURES: &str = "forwarder_rpc_call_failures";
@@ -98,6 +99,7 @@ pub fn describe() {
     describe_histogram!(forwarder::RPC_CALL_DURATION, "Duration of RPC calls to peers in seconds");
     describe_counter!(forwarder::RPC_CALL_FAILURES, "Total number of failed RPC calls to peers");
     describe_gauge!(forwarder::INFLIGHT_REQUESTS, "Number of inflight HTTP requests to peers");
+    describe_gauge!(forwarder::OPEN_HTTP_CONNECTIONS, "Number of open HTTP connections to peers");
 
     // Indexer metrics
     describe_counter!(
@@ -194,6 +196,12 @@ impl ForwarderMetrics {
     #[inline]
     pub fn set_inflight_requests(count: usize) {
         gauge!(forwarder::INFLIGHT_REQUESTS).set(count as f64);
+    }
+
+    /// Set the number of open HTTP connections.
+    #[inline]
+    pub fn set_open_http_connections(count: usize, peer_name: String) {
+        gauge!(forwarder::OPEN_HTTP_CONNECTIONS, "peer_name" => peer_name).set(count as f64);
     }
 
     /// The duration of the RPC call to a peer.
