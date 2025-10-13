@@ -2,7 +2,7 @@ general:
   # Stop after 13 minutes (simulated time)
   # This should be enough to submit all the bundles in the testdata.parquet file, so will depend on the
   # time range defined there. IMPORTANT: Update this if the time range changes, and add a small buffer (3m).
-  stop_time: 6m
+  stop_time: 5m
   # Show progress in the console
   progress: true
   # Add some latency to syscalls to avoid deadlocks

@@ -130,11 +130,13 @@ get-results() {
   docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy2/eth0.pcap \
     "./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap"
 
+  echo "Generating pcap summary CSV for proxy1"
   tshark -r "./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap" \
     -T fields -E header=y -E separator=\; \
     -e frame.time -e ip.src -e ip.dst -e frame.len \
     >"./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}_summary.csv"
 
+  echo "Generating pcap summary CSV for proxy2"
   tshark -r "./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap" \
     -T fields -E header=y -E separator=\; \
     -e frame.time -e ip.src -e ip.dst -e frame.len \
