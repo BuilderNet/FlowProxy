@@ -125,6 +125,7 @@ pub async fn run_with_listeners(
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .connect_timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .pool_max_idle_per_host(512)
+        .pool_idle_timeout(Duration::from_secs(30))
         .build()?;
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
