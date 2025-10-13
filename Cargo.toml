@@ -67,6 +67,8 @@ axum = { version = "0.8", default-features = false, features = [
   "tokio",
   "tracing"
 ] }
+tower = "0.5"
+pin-project-lite = "0.2.16"
 wyhash = "0.6.0"
 mime = "0.3"
 serde = { version = "1", features = ["derive"] }
