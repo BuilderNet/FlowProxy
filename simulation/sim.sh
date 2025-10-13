@@ -92,12 +92,14 @@ run() {
             echo -n
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
             mkdir -p /root/svg
-            (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/svg/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
+            (mkdir -p /tmp/flamegraph_\${proxyName} && cd /tmp/flamegraph_\${proxyName} && /root/flamegraph -o /root/svg/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
           fi
         done
 
         echo \"Waiting for flamegraph generation to complete...\"
         wait
+
+        sleep 2
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
