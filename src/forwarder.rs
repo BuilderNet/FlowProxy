@@ -387,11 +387,19 @@ impl Future for HttpForwarder {
         let this = self.get_mut();
 
         loop {
+            // First poll for completed work.
+            if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
+                this.on_response(response);
+                continue;
+            }
+
+            // Then accept new requests.
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
                     info!(target: FORWARDER, name = %this.peer_name, "Terminating forwarder");
                     return Poll::Ready(());
                 };
+
                 trace!(target: FORWARDER, name = %this.peer_name, ?request, "Sending request");
                 this.pending.push(send_http_request(
                     this.client.clone(),
@@ -401,11 +409,6 @@ impl Future for HttpForwarder {
                 ));
 
                 ForwarderMetrics::set_inflight_requests(this.pending.len());
-                continue;
-            }
-
-            if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
-                this.on_response(response);
                 continue;
             }
 
