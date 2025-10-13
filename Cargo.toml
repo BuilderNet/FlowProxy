@@ -31,6 +31,9 @@ tokio-util = { version = "0.7.16" }
 futures = { version = "0.3" }
 futures-util = { version = "0.3.31" }
 
+# allocator
+tikv-jemallocator = { version = "0.6", optional = true }
+
 # tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -107,6 +110,11 @@ criterion = "0.7"
 [[bench]]
 name = "validation"
 harness = false
+
+[features]
+default = ["jemalloc"]
+# Enable jemalloc as the global allocator
+jemalloc = ["dep:tikv-jemallocator"]
 
 # Speed up compilation time for dev builds by reducing emitted debug info.
 # NOTE: Debuggers may provide less useful information with this setting.

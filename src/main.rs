@@ -5,6 +5,22 @@ use buildernet_orderflow_proxy::{
 };
 use clap::Parser;
 
+#[cfg(all(feature = "jemalloc", unix))]
+type AllocatorInner = tikv_jemallocator::Jemalloc;
+#[cfg(not(all(feature = "jemalloc", unix)))]
+type AllocatorInner = std::alloc::System;
+
+/// Custom allocator.
+pub(crate) type Allocator = AllocatorInner;
+
+/// Creates a new [custom allocator][Allocator].
+pub(crate) const fn new_allocator() -> Allocator {
+    AllocatorInner {}
+}
+
+#[global_allocator]
+static ALLOC: Allocator = new_allocator();
+
 fn main() {
     let args = OrderflowIngressArgs::parse();
     init_tracing(args.log_json);
