@@ -206,7 +206,7 @@ impl OrderflowIngress {
                 return JsonRpcResponse::error(
                     Some(request.id),
                     JsonRpcError::MethodNotFound(other.to_owned()),
-                )
+                );
             }
         };
 
@@ -263,9 +263,6 @@ impl OrderflowIngress {
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
-        let sent_at = headers
-            .get(BUILDERNET_SENT_AT_HEADER)
-            .map(|h| UtcDateTime::parse_header(h).expect("Failed to parse sent at header"));
         let received_at = UtcInstant::now();
         let payload_size = body.len();
 
@@ -303,6 +300,8 @@ impl OrderflowIngress {
                 return JsonRpcResponse::error(None, error);
             }
         };
+
+        let sent_at = headers.get(BUILDERNET_SENT_AT_HEADER).and_then(UtcDateTime::parse_header);
 
         // TODO: Change to Low once Go proxy is updated / everyone is running Rust proxy.
         let mut priority = Priority::Medium;
@@ -426,7 +425,7 @@ impl OrderflowIngress {
                 return JsonRpcResponse::error(
                     Some(request.id),
                     JsonRpcError::MethodNotFound(other.to_owned()),
-                )
+                );
             }
         };
 
