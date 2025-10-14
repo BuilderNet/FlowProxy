@@ -50,6 +50,15 @@ pub struct ClickhouseArgs {
         id = "CLICKHOUSE_MAX_BACKUP_SIZE_BYTES"
     )]
     pub max_backup_size_bytes: Option<u64>,
+
+    /// Restricts time (in ms) on waiting for a response from the CH server. Thus, it includes all work
+    /// needed to handle `INSERT` by the CH server, e.g. handling all materialized views and so on.
+    #[arg(
+        long = "indexer.clickhouse.end-timeout-ms",
+        env = "CLICKHOUSE_END_TIMEOUT_MS",
+        id = "CLICKHOUSE_END_TIMEOUT_MS"
+    )]
+    pub end_timeout_ms: Option<u64>,
 }
 
 /// Arguments required to setup file-based parquet indexing.

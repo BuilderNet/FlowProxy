@@ -186,7 +186,8 @@ impl ClickhouseIndexer {
 
         // TODO: make this configurable.
         let send_timeout = Duration::from_secs(2);
-        let end_timeout = Duration::from_secs(4);
+        let end_timeout =
+            args.end_timeout_ms.map(Duration::from_millis).unwrap_or(Duration::from_secs(4));
 
         let bundle_inserter = client
             .inserter::<BundleRow>(bundles_table_name.as_str())
@@ -368,6 +369,7 @@ pub(crate) mod tests {
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
                 max_backup_size_bytes: None,
+                end_timeout_ms: None,
             }
         }
     }
