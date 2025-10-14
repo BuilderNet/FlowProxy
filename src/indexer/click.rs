@@ -362,12 +362,17 @@ impl ClickhouseIndexer {
             .with_password(password)
             .with_validation(validation);
 
+        // TODO: make this configurable.
+        let send_timeout = Duration::from_secs(2);
+        let end_timeout = Duration::from_secs(8);
+
         let bundle_inserter = client
             .inserter::<BundleRow>(bundles_table_name.as_str())
             .with_period(Some(Duration::from_secs(4))) // Dump every 4s
             .with_period_bias(0.1) // 4±(0.1*4)
             .with_max_bytes(128 * 1024 * 1024) // 128MiB
-            .with_max_rows(65_536);
+            .with_max_rows(65_536)
+            .with_timeouts(Some(send_timeout), Some(end_timeout));
 
         let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
         let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name);
