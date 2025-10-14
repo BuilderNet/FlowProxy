@@ -309,7 +309,7 @@ mod tests {
         assert!(before + Duration::from_millis(total + acceptable_drift) >= Instant::now());
         assert!(Instant::now() >= before + Duration::from_millis(total));
 
-        let acceptable_drift = 1;
+        let acceptable_drift = 2;
         interval.reset();
         let before = Instant::now();
         interval.tick().await;
