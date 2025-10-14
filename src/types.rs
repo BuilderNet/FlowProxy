@@ -94,9 +94,9 @@ impl BundleHash for RawBundle {
                 refund_identity,
                 signing_address: _,
                 version,
-                min_timestamp: _,
-                max_timestamp: _,
-                delayed_refund: _,
+                min_timestamp,
+                max_timestamp,
+                delayed_refund,
             } = bundle;
 
             if let Some(block_number) = block_number {
@@ -150,6 +150,18 @@ impl BundleHash for RawBundle {
             if let Some(version) = version {
                 version.hash(state);
             }
+
+	    if let Some(min_timestamp) = min_timestamp {
+		min_timestamp.hash(state);
+	    }
+
+	    if let Some(max_timestamp) = max_timestamp {
+		max_timestamp.hash(state);
+	    }
+
+	    if let Some(delayed_refund) = delayed_refund {
+		delayed_refund.hash(state);
+	    }
         }
 
         let mut hasher = wyhash::WyHash::default();
