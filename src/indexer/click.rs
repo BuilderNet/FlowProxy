@@ -22,6 +22,7 @@ use crate::{
     types::{Sampler, SystemBundle},
 };
 
+/// A default maximum size in bytes for the in-memory backup of failed commits.
 const MAX_BACKUP_SIZE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 
 /// An high-level order type that can be indexed in clickhouse.
@@ -381,7 +382,8 @@ impl ClickhouseIndexer {
         let mut bundle_inserter_runner = InserterRunner::new(bundle_rx, bundle_inserter);
 
         let mut bundle_backup =
-            MemoryBackup::new(rx, client.inserter::<BundleRow>(bundles_table_name.as_str()));
+            MemoryBackup::new(rx, client.inserter::<BundleRow>(bundles_table_name.as_str()))
+                .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 
         // TODO: Make this generic over order types. Requires some trait bounds.
         task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
@@ -542,6 +544,7 @@ pub(crate) mod tests {
                 username: Some(config.user),
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
+                max_backup_size_bytes: None,
             }
         }
     }

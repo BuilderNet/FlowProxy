@@ -42,6 +42,14 @@ pub struct ClickhouseArgs {
         id = "CLICKHOUSE_BUNDLES_TABLE_NAME"
     )]
     pub bundles_table_name: Option<String>,
+
+    /// The maximum size in bytes for the in-memory backup in case of ClickHouse insertion failure.
+    #[arg(
+        long = "indexer.clickhouse.max-backup-size-bytes",
+        env = "CLICKHOUSE_MAX_BACKUP_SIZE_BYTES",
+        id = "CLICKHOUSE_MAX_BACKUP_SIZE_BYTES"
+    )]
+    pub max_backup_size_bytes: Option<u64>,
 }
 
 /// Arguments required to setup file-based parquet indexing.
