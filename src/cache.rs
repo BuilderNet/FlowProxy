@@ -39,7 +39,12 @@ impl OrderCache {
     pub fn hit_ratio(&self) -> f64 {
         let hits = self.hits.load(Ordering::Relaxed);
         let misses = self.misses.load(Ordering::Relaxed);
-        hits as f64 / (hits + misses) as f64
+        let total = hits + misses;
+        if total == 0 {
+            0.0
+        } else {
+            hits as f64 / total as f64
+        }
     }
 
     /// Insert an order ID into the cache.
@@ -90,7 +95,12 @@ impl SignerCache {
     pub fn hit_ratio(&self) -> f64 {
         let hits = self.hits.load(Ordering::Relaxed);
         let misses = self.misses.load(Ordering::Relaxed);
-        hits as f64 / (hits + misses) as f64
+        let total = hits + misses;
+        if total == 0 {
+            0.0
+        } else {
+            hits as f64 / total as f64
+        }
     }
 
     /// Insert a transaction hash and its recovered signer into the cache.
