@@ -5,10 +5,13 @@
 //!
 //! NOT usable yet.
 
-use std::future::{poll_fn, Future as _};
-use std::task::{Context, Poll};
-use std::time::Duration;
-use std::{iter::Iterator, pin::Pin};
+use std::{
+    future::{poll_fn, Future as _},
+    iter::Iterator,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 /// A random number generator for applying jitter to [`std::time::Duration`].
 #[derive(Debug, Clone)]
@@ -95,7 +98,8 @@ impl Iterator for ExponentialBackoff {
     }
 }
 
-/// An interval heavily inspired by [`tokio::time::Interval`], that supports exponential back-off and jitter.
+/// An interval heavily inspired by [`tokio::time::Interval`], that supports exponential back-off
+/// and jitter.
 #[derive(Debug)]
 pub(crate) struct BackoffInterval {
     /// Future that completes the next time the `Interval` yields a value.
@@ -132,8 +136,8 @@ impl BackoffInterval {
         // instant.
         let next = self.next();
 
-        // CHANGE: Unfortunately, [`tokio::time::Sleep::reset_without_reregister`] isn't pub(crate)lic so we have
-        // to register the waker again.
+        // CHANGE: Unfortunately, [`tokio::time::Sleep::reset_without_reregister`] isn't
+        // pub(crate)lic so we have to register the waker again.
         self.delay.as_mut().reset(next);
 
         Poll::Ready(timeout)
@@ -146,7 +150,8 @@ impl BackoffInterval {
         instant.await
     }
 
-    /// Resets backoff to the initial state, and the next tick will happen after the initial period returned by [`ExponentialBackoff`].
+    /// Resets backoff to the initial state, and the next tick will happen after the initial period
+    /// returned by [`ExponentialBackoff`].
     pub(crate) fn reset(&mut self) {
         self.backoff.reset();
         let next = self.next();
