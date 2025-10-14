@@ -381,9 +381,13 @@ impl ClickhouseIndexer {
         let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name);
         let mut bundle_inserter_runner = InserterRunner::new(bundle_rx, bundle_inserter);
 
-        let mut bundle_backup =
-            MemoryBackup::new(rx, client.inserter::<BundleRow>(bundles_table_name.as_str()))
-                .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
+        let mut bundle_backup = MemoryBackup::new(
+            rx,
+            client
+                .inserter::<BundleRow>(bundles_table_name.as_str())
+                .with_timeouts(Some(send_timeout), Some(end_timeout)),
+        )
+        .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 
         // TODO: Make this generic over order types. Requires some trait bounds.
         task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
