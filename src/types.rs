@@ -50,7 +50,7 @@ pub struct SystemBundle {
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
     pub raw_bundle: Arc<RawBundle>,
     /// The bundle hash.
-    pub raw_bundle_hash: B256,
+    pub bundle_hash: B256,
     /// The decoded bundle.
     pub decoded_bundle: Arc<DecodedBundle>,
     /// Metadata about the bundle.
@@ -100,12 +100,14 @@ impl BundleHash for RawBundle {
                         uuid,
                         replacement_nonce,
                         refund_identity,
-                        signing_address: _,
                         version,
                         min_timestamp,
                         max_timestamp,
                         delayed_refund,
                         block_number,
+                        signing_address: _,
+                        // NOTE: If we call `hash`, this should not be set.
+                        bundle_hash: _,
                     },
             } = bundle;
 
@@ -260,11 +262,13 @@ impl SystemBundle {
     /// Create a new system bundle from a raw bundle and additional data, using a signer lookup
     /// function for the transaction signers. Returns an error if the raw bundle fails to decode.
     fn try_decode_inner(
-        bundle: RawBundle,
+        mut bundle: RawBundle,
         metadata: SystemBundleMetadata,
         lookup: Option<impl Fn(B256) -> Option<Address>>,
     ) -> Result<Self, RawBundleConvertError> {
         let raw_bundle_hash = bundle.bundle_hash();
+        // Set the bundle hash in the metadata.
+        bundle.metadata.bundle_hash = Some(raw_bundle_hash);
 
         let mut decoded = if let Some(lookup) = lookup {
             bundle.clone().decode_with_signer_lookup(TxEncoding::WithBlobData, lookup)?.into()
@@ -279,7 +283,7 @@ impl SystemBundle {
         Ok(Self {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded),
-            raw_bundle_hash,
+            bundle_hash: raw_bundle_hash,
             metadata,
         })
     }
@@ -299,7 +303,7 @@ impl SystemBundle {
 
     /// Returns the bundle hash.
     pub fn bundle_hash(&self) -> B256 {
-        self.raw_bundle_hash
+        self.bundle_hash
     }
 
     /// Returns the bundle if it is a new bundle.

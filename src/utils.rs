@@ -440,6 +440,7 @@ pub mod testutils {
                     refund_percent: Some(rng.random_range(0..100)),
                     refund_recipient: Some(Address::random_with(rng)),
                     delayed_refund: None,
+                    bundle_hash: None,
                 },
             }
         }

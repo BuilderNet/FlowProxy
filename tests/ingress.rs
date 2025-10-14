@@ -98,8 +98,11 @@ async fn ingress_http_e2e() {
 
     let mut received = builder.recv::<RawBundle>().await.unwrap();
     assert!(received.metadata.signing_address.is_some());
+    assert!(received.metadata.bundle_hash.is_some());
     // NOTE: This will have a signing address populated which we reset
     received.metadata.signing_address = None;
+    received.metadata.bundle_hash = None;
+
     assert_eq!(received, bundle);
 
     let bundle = RawBundle::random(&mut rng);
@@ -126,8 +129,10 @@ async fn ingress_http_e2e() {
 
     let mut received = builder.recv::<RawBundle>().await.unwrap();
     assert!(received.metadata.signing_address.is_some());
+    assert!(received.metadata.bundle_hash.is_some());
     // NOTE: This will have a signing address populated which we reset
     received.metadata.signing_address = None;
+    received.metadata.bundle_hash = None;
     assert_eq!(received, bundle);
 }
 

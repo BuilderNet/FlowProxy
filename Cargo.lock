@@ -5344,7 +5344,7 @@ dependencies = [
 [[package]]
 name = "rbuilder-primitives"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rbuilder?rev=89f68c6#89f68c6bca395984d7809bfd8b5d590fafa659aa"
+source = "git+https://github.com/flashbots/rbuilder?rev=a21de88#a21de88b133a5604bd6c56e75543577e9992b4b9"
 dependencies = [
  "ahash",
  "alloy-consensus",
