@@ -204,7 +204,7 @@ impl ClickhouseIndexer {
             rx,
             client
                 .inserter::<BundleRow>(bundles_table_name.as_str())
-                .with_timeouts(Some(send_timeout), Some(end_timeout * 2)),
+                .with_timeouts(Some(send_timeout), Some(end_timeout * 3)),
         )
         .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 

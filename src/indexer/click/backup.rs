@@ -136,7 +136,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                             self.interval.reset();
                         }
                         Err(e) => {
-                            tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, "failed to commit bundle to clickhouse from backup");
+                            tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, quantities = ?oldest.quantities, "failed to commit bundle to clickhouse from backup");
                             IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
                             self.failed_commits.push_back(oldest);
                             continue;
