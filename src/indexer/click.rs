@@ -131,14 +131,14 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                         tracing::error!(target = TARGET, "backup channel closed");
                         break;
                     };
-                    tracing::debug!(target = TARGET, quantities = ?failed_commit.quantities, "received failed commit to backup");
+                    tracing::debug!(target: TARGET, quantities = ?failed_commit.quantities, "received failed commit to backup");
 
                     self.failed_commits.push_back(failed_commit);
                     let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
                     IndexerMetrics::set_clickhouse_backup_commit_size_bytes(total_size_bytes);
 
                     if total_size_bytes > self.max_size_bytes && self.failed_commits.len() > 1 {
-                        tracing::warn!(target = TARGET, total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
+                        tracing::warn!(target: TARGET, total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
                         let oldest = self.failed_commits.pop_back().expect("length checked above");
                         IndexerMetrics::process_clickhouse_backup_data_lost_quantities(&oldest.quantities);
                     }
@@ -155,7 +155,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
 
                         if let Err(e) = self.inserter.write(value_ref).await {
                             IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-                            tracing::error!(target = TARGET, ?e, "failed to write to backup inserter");
+                            tracing::error!(target: TARGET, ?e, "failed to write to backup inserter");
                             continue;
                         }
                     }
@@ -187,7 +187,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
 
                 if let Err(e) = self.inserter.write(value_ref).await {
                     tracing::error!(
-                        target = TARGET,
+                        target: TARGET,
                         ?e,
                         "failed to write to backup inserter during shutdown"
                     );
@@ -196,13 +196,13 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                 }
             }
             if let Err(e) = self.inserter.force_commit().await {
-                tracing::error!(target = TARGET, ?e, "failed to commit backup during shutdown");
+                tracing::error!(target: TARGET, ?e, "failed to commit backup during shutdown");
                 IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
             }
         }
 
         if let Err(e) = self.inserter.end().await {
-            tracing::error!(target = TARGET, ?e, "failed to end backup inserter during shutdown");
+            tracing::error!(target: TARGET, ?e, "failed to end backup inserter during shutdown");
         }
     }
 }
@@ -250,7 +250,7 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
 
         if let Err(e) = self.inner.write(value_ref).await {
             IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-            tracing::error!(target = TARGET, ?e, %hash, "failed to write to clickhouse inserter")
+            tracing::error!(target: TARGET, ?e, %hash, "failed to write to clickhouse inserter")
         }
 
         // NOTE: we don't backup if writing failes. The reason is that if this fails, then the same
@@ -275,13 +275,13 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
             }
             Err(e) => {
                 IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
-                tracing::error!(target = TARGET, ?e, "failed to commit bundle to clickhouse");
+                tracing::error!(target: TARGET, ?e, "failed to commit bundle to clickhouse");
 
                 let rows = std::mem::take(&mut self.rows_backup);
                 let failed_commit = FailedCommit::new(rows, pending);
 
                 if let Err(e) = self.backup_tx.try_send(failed_commit) {
-                    tracing::error!(target = TARGET, ?e, "failed to send rows backup");
+                    tracing::error!(target: TARGET, ?e, "failed to send rows backup");
                 }
             }
         }
@@ -325,7 +325,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
             .with_interval(Duration::from_secs(4));
 
         while let Some(order) = self.rx.recv().await {
-            tracing::trace!(target = TARGET, hash = %order.hash(), "received data to index");
+            tracing::trace!(target: TARGET, hash = %order.hash(), "received data to index");
             sampler.sample(|| {
                 IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), T::ORDER_TYPE);
             });
@@ -333,7 +333,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
             self.inserter.write(order).await;
             self.inserter.commit().await;
         }
-        tracing::error!(target = TARGET, "tx channel closed, indexer will stop running");
+        tracing::error!(target: TARGET, "tx channel closed, indexer will stop running");
     }
 }
 
