@@ -5,19 +5,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use alloy_primitives::B256;
 use clickhouse::{
     error::Result as ClickhouseResult,
     inserter::{Inserter, Quantities},
-    Client as ClickhouseClient, Row, RowWrite,
+    Client as ClickhouseClient,
 };
-use serde::Serialize;
 use tokio::sync::mpsc;
 
 use crate::{
     cli::ClickhouseArgs,
     indexer::{
-        backup::{FailedCommit, MemoryBackup, MAX_BACKUP_SIZE_BYTES},
+        click::{
+            backup::{FailedCommit, MemoryBackup, MAX_BACKUP_SIZE_BYTES},
+            primitives::ClickhouseIndexableOrder,
+        },
         models::BundleRow,
         BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TARGET,
     },
@@ -26,36 +27,8 @@ use crate::{
     types::{Sampler, SystemBundle},
 };
 
-/// An high-level order type that can be indexed in clickhouse.
-pub(crate) trait ClickhouseIndexableOrder: Sized {
-    /// The associated inner row type that can be serialized into Clickhouse data.
-    type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
-
-    /// The type of such order, e.g. "bundles" or "transactions". For informational purposes.
-    const ORDER_TYPE: &'static str;
-
-    /// An identifier of such order.
-    fn hash(&self) -> B256;
-
-    /// Internal function that takes the inner row types and extracts the reference needed for
-    /// Clickhouse inserter functions like `Inserter::write`. While a default implementation is not
-    /// provided, it should suffice to simply return `row`.
-    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_>;
-}
-
-impl ClickhouseIndexableOrder for SystemBundle {
-    type ClickhouseRowType = BundleRow;
-
-    const ORDER_TYPE: &'static str = "bundle";
-
-    fn hash(&self) -> B256 {
-        self.bundle_hash
-    }
-
-    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
-        row
-    }
-}
+mod backup;
+mod primitives;
 
 /// A wrapper over a Clickhouse [`Inserter`] that supports a backup mechanism.
 struct ClickhouseInserter<T: ClickhouseIndexableOrder> {

@@ -13,7 +13,6 @@ use crate::{
     types::{BundleReceipt, SystemBundle},
 };
 
-mod backup;
 mod click;
 mod models;
 mod parq;
