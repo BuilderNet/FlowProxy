@@ -328,10 +328,12 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
                 };
 
-                let Some(bundle_hash) = bundle.metadata.bundle_hash else {
-                    error!(target: "ingress", "Bundle hash is not set");
-                    IngressSystemMetrics::increment_json_rpc_parse_errors();
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                let bundle_hash = match bundle.metadata.bundle_hash {
+                    Some(bundle_hash) => bundle_hash,
+                    None => {
+                        debug!(target: "ingress", "Bundle hash is not set");
+                        bundle.bundle_hash()
+                    }
                 };
 
                 // Deduplicate bundles.
