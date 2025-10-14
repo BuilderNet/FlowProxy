@@ -1,6 +1,10 @@
 //! Indexing functionality powered by Clickhouse.
 
-use std::{collections::VecDeque, fmt::Debug, time::Duration};
+use std::{
+    collections::VecDeque,
+    fmt::Debug,
+    time::{Duration, Instant},
+};
 
 use alloy_primitives::B256;
 use clickhouse::{
@@ -161,10 +165,12 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                         }
                     }
 
+                    let start = Instant::now();
                     match self.inserter.force_commit().await {
                         Ok(quantities) => {
                             tracing::info!(target: TARGET, order = T::ORDER_TYPE, ?quantities, "successfully backed up");
                             IndexerMetrics::process_clickhouse_backup_data_quantities(&quantities);
+                            IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
                             self.interval.reset();
                         }
                         Err(e) => {
@@ -258,6 +264,7 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
     async fn commit(&mut self) {
         let pending = self.inner.pending().clone(); // This is cheap to clone.
 
+        let start = Instant::now();
         match self.inner.commit().await {
             Ok(quantities) => {
                 if quantities == Quantities::ZERO {
@@ -265,6 +272,7 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
                 } else {
                     tracing::debug!(target: TARGET, order = T::ORDER_TYPE, ?quantities, "inserted batch to clickhouse");
                     IndexerMetrics::process_clickhouse_quantities(&quantities);
+                    IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
                 }
             }
             Err(e) => {

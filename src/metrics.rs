@@ -39,6 +39,8 @@ mod name {
         pub(crate) const CLICKHOUSE_BYTES_COMMITTED: &str = "indexer_clickhouse_bytes_committed";
         pub(crate) const CLICKHOUSE_BATCHES_COMMITTED: &str =
             "indexer_clickhouse_batches_committed";
+        pub(crate) const CLICKHOUSE_BATCH_COMMIT_TIME: &str =
+            "indexer_clickhouse_batch_commit_time";
 
         pub(crate) const CLICKHOUSE_BACKUP_SIZE_BYTES: &str =
             "indexer_clickhouse_backup_size_bytes";
@@ -142,6 +144,11 @@ pub fn describe() {
     describe_counter!(
         indexer::CLICKHOUSE_BATCHES_COMMITTED,
         "Total number of batches committed to ClickHouse"
+    );
+    // TODO: add remaining metrics descriptions of backup metrics
+    describe_histogram!(
+        indexer::CLICKHOUSE_BATCH_COMMIT_TIME,
+        "Duration of Clickhouse batch commits in seconds"
     );
     describe_gauge!(indexer::PARQUET_QUEUE_SIZE, "Current size of Parquet write queue");
 
@@ -549,5 +556,12 @@ impl IndexerMetrics {
     #[inline]
     pub fn set_parquet_queue_size(size: usize, order: &'static str) {
         gauge!(indexer::PARQUET_QUEUE_SIZE, "order" => order).set(size as f64);
+    }
+
+    // Histograms
+
+    #[inline]
+    pub fn record_clickhouse_batch_commit_time(duration: Duration) {
+        histogram!(indexer::CLICKHOUSE_BATCH_COMMIT_TIME).record(duration.as_secs_f64());
     }
 }
