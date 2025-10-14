@@ -71,7 +71,7 @@ pub struct IndexerArgs {
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
 pub struct CacheArgs {
     /// The order cache TTL in seconds.
-    #[clap(long = "order-cache.ttl", default_value_t = 12)]
+    #[clap(long = "order-cache.ttl", default_value_t = 24)]
     pub order_cache_ttl: u64,
 
     /// The order cache size.
@@ -83,7 +83,7 @@ pub struct CacheArgs {
     pub signer_cache_ttl: u64,
 
     /// The signer cache size.
-    #[clap(long = "signer-cache.size", default_value_t = 4096)]
+    #[clap(long = "signer-cache.size", default_value_t = 16384)]
     pub signer_cache_size: u64,
 }
 
