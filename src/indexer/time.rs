@@ -71,6 +71,8 @@ impl ExponentialBackoff {
 impl Iterator for ExponentialBackoff {
     type Item = Duration;
 
+    // TODO: change this logic, so that we can always multiply base by a factor.
+    // e.g. base = 8, factor = 2 yields to: 8ms, 16ms, 32ms, 64ms, ...
     fn next(&mut self) -> Option<Duration> {
         // set delay duration by applying factor
         let duration = if let Some(duration) = self.current.checked_mul(self.factor) {
@@ -171,8 +173,8 @@ impl BackoffInterval {
 
 impl Default for BackoffInterval {
     fn default() -> Self {
-        // So will return 4, 16, 32, 64, 128, ... milliseconds with jitter.
-        Self::new(ExponentialBackoff::from_millis(4).max_delay(Duration::from_millis(1024)))
+        // So will return 4, 16, 64, 256, 1024, ... milliseconds with jitter.
+        Self::new(ExponentialBackoff::from_millis(4).max_delay(Duration::from_millis(8192)))
             .with_jitter()
     }
 }
