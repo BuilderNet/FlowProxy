@@ -44,6 +44,8 @@ mod name {
 
         pub(crate) const CLICKHOUSE_BACKUP_SIZE_BYTES: &str =
             "indexer_clickhouse_backup_size_bytes";
+        pub(crate) const CLICKHOUSE_BACKUP_SIZE_BATCHES: &str =
+            "indexer_clickhouse_backup_size_batches";
         pub(crate) const CLICKHOUSE_BACKUP_PRESSURE_APPLIED: &str =
             "indexer_clickhouse_pressure_applied";
         pub(crate) const CLICKHOUSE_BACKUP_DATA_BYTES: &str =
@@ -544,8 +546,13 @@ impl IndexerMetrics {
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_commit_size_bytes(size: u64) {
+    pub fn set_clickhouse_backup_size_bytes(size: u64) {
         gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES).set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_size_batches(size: usize) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES).set(size as f64);
     }
 
     #[inline]

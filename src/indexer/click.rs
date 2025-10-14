@@ -139,8 +139,12 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                     self.failed_commits.push_back(failed_commit);
                     let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
 
-                    IndexerMetrics::set_clickhouse_backup_commit_size_bytes(total_size_bytes);
-                    tracing::debug!(target: TARGET, order = T::ORDER_TYPE, bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, "received failed commit to backup");
+                    IndexerMetrics::set_clickhouse_backup_size_bytes(total_size_bytes);
+                    IndexerMetrics::set_clickhouse_backup_size_batches(self.failed_commits.len());
+                    tracing::debug!(target: TARGET, order = T::ORDER_TYPE,
+                        bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, total_batches = self.failed_commits.len(),
+                        "received failed commit to backup"
+                    );
 
                     if total_size_bytes > self.max_size_bytes && self.failed_commits.len() > 1 {
                         tracing::warn!(target: TARGET, order = T::ORDER_TYPE, total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
@@ -151,7 +155,8 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                 _ = self.interval.tick() => {
                     let Some(oldest) = self.failed_commits.pop_back() else {
                         self.interval.reset();
-                        IndexerMetrics::set_clickhouse_backup_commit_size_bytes(0);
+                        IndexerMetrics::set_clickhouse_backup_size_bytes(0);
+                        IndexerMetrics::set_clickhouse_backup_size_batches(0);
                         continue // Nothing to do!
                     };
 
