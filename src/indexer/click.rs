@@ -129,11 +129,13 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                         tracing::error!(target: TARGET, order = T::ORDER_TYPE, "backup channel closed");
                         break;
                     };
-                    tracing::debug!(target: TARGET, order = T::ORDER_TYPE, quantities = ?failed_commit.quantities, "received failed commit to backup");
 
+                    let quantities = failed_commit.quantities.clone();
                     self.failed_commits.push_back(failed_commit);
                     let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
+
                     IndexerMetrics::set_clickhouse_backup_commit_size_bytes(total_size_bytes);
+                    tracing::debug!(target: TARGET, order = T::ORDER_TYPE, bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, "received failed commit to backup");
 
                     if total_size_bytes > self.max_size_bytes && self.failed_commits.len() > 1 {
                         tracing::warn!(target: TARGET, order = T::ORDER_TYPE, total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
