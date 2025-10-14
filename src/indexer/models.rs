@@ -341,10 +341,12 @@ pub(crate) mod tests {
                     max_timestamp: value.max_timestamp,
                     reverting_tx_hashes: value.reverting_tx_hashes.clone(),
                     dropping_tx_hashes: value.dropping_tx_hashes.clone(),
-                    // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it was
-                    // written, because in Clickhouse we cannot have `Nullable(Array(T))`.
+                    // NOTE: we don't really know whether this was `None` or `Some(vec![])` when it
+                    // was written, because in Clickhouse we cannot have
+                    // `Nullable(Array(T))`.
                     refund_tx_hashes: Some(value.refund_tx_hashes.clone()),
-                    // NOTE: we'll always consider this unset, and set the `replacement_uuid` instead.
+                    // NOTE: we'll always consider this unset, and set the `replacement_uuid`
+                    // instead.
                     uuid: None,
                     replacement_uuid: value.replacement_uuid,
                     replacement_nonce: value.replacement_nonce,
