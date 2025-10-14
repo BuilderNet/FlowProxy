@@ -30,7 +30,7 @@ impl ClickhouseIndexableOrder for SystemBundle {
     const ORDER_TYPE: &'static str = "bundle";
 
     fn hash(&self) -> B256 {
-        self.bundle_hash
+        self.raw_bundle_hash
     }
 
     fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {

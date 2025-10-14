@@ -87,12 +87,12 @@ run() {
 
         echo 'Generating flamegraphs for running processes...'
         for pid in \$(pgrep -f buildernet-orderflow-proxy); do
-          proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy[0-9]+' || true)
+          proxyName=\$(ps -p \$pid -o args= | grep -oP 'proxy[0-9]+' | head -n1 || true)
           if [[ -n \"\$proxyName\" ]]; then
             echo -n
             echo \"Generating flamegraph for \$proxyName (PID \$pid)\"
             mkdir -p /root/svg
-            (cd /tmp && mkdir -p flamegraph_\${proxyName} && cd flamegraph_\${proxyName} && /root/flamegraph -o /root/svg/\${proxyName}.svg --pid \$pid --no-inline -F 99) &
+            (mkdir -p \"/tmp/flamegraph_\${proxyName}\" && cd \"/tmp/flamegraph_\${proxyName}\" && /root/flamegraph -o \"/root/svg/\${proxyName}.svg\" --pid \$pid --no-inline -F 99) &
           fi
         done
 
@@ -101,7 +101,7 @@ run() {
       "
   else
     docker run $RUN_ARGS --name "$CONTAINER_NAME" -v ./scenarios:/root/scenarios:ro -it "$IMAGE" \
-      /bin/bash -c "shadow --template-directory /root/testdata/ scenarios/${scenario} | while IFS= read -r line; do
+      /bin/bash -c "./shadow --template-directory /root/testdata/ scenarios/${scenario} | while IFS= read -r line; do
         if [[ \$line =~ ru_utime=([0-9.]+)\ minutes.*ru_stime=([0-9.]+)\ minutes ]]; then
           echo \"Real user time: \${BASH_REMATCH[1]} minutes\"
           echo \"Simulated time: \${BASH_REMATCH[2]} minutes\"
@@ -130,11 +130,13 @@ get-results() {
   docker cp "$CONTAINER_NAME":/root/shadow.data/hosts/proxy2/eth0.pcap \
     "./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap"
 
+  echo "Generating pcap summary CSV for proxy1"
   tshark -r "./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap" \
     -T fields -E header=y -E separator=\; \
     -e frame.time -e ip.src -e ip.dst -e frame.len \
     >"./results/proxy1_eth0_${timestamp}_runtime-${runtime}_scale-${scale}_summary.csv"
 
+  echo "Generating pcap summary CSV for proxy2"
   tshark -r "./results/proxy2_eth0_${timestamp}_runtime-${runtime}_scale-${scale}.pcap" \
     -T fields -E header=y -E separator=\; \
     -e frame.time -e ip.src -e ip.dst -e frame.len \
@@ -147,6 +149,7 @@ get-results() {
     [ -f "$svg" ] || continue
     svg_basename=$(basename "$svg")
     svg_name="${svg_basename%.svg}"
+    echo "Copying $svg to ./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
     cp "$svg" "./results/${svg_name}_${timestamp}_runtime-${runtime}_scale-${scale}.svg"
   done
 
