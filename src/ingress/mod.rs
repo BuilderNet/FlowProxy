@@ -339,6 +339,9 @@ impl OrderflowIngress {
                         IngressUserMetrics::set_order_cache_hit_ratio(
                             ingress.order_cache.hit_ratio(),
                         );
+                        IngressUserMetrics::set_order_cache_entry_count(
+                            ingress.order_cache.entry_count(),
+                        );
                     }
 
                     return JsonRpcResponse::result(
@@ -498,7 +501,9 @@ impl OrderflowIngress {
 
             if sample {
                 IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
+                IngressUserMetrics::set_order_cache_entry_count(self.order_cache.entry_count());
             }
+
             return Ok(bundle_hash);
         }
 
@@ -538,6 +543,7 @@ impl OrderflowIngress {
         // Sample the signer cache hit ratio.
         if sample {
             IngressUserMetrics::set_signer_cache_hit_ratio(self.signer_cache.hit_ratio());
+            IngressUserMetrics::set_signer_cache_entry_count(self.signer_cache.entry_count());
         }
 
         if bundle.is_empty() {

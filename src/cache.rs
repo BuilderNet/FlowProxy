@@ -47,6 +47,11 @@ impl OrderCache {
         }
     }
 
+    /// Get the number of entries in the cache.
+    pub fn entry_count(&self) -> u64 {
+        self.cache.entry_count()
+    }
+
     /// Insert an order ID into the cache.
     pub fn insert(&self, key: B256) {
         self.cache.insert(key, ());
@@ -101,6 +106,11 @@ impl SignerCache {
         } else {
             hits as f64 / total as f64
         }
+    }
+
+    /// Get the number of entries in the cache.
+    pub fn entry_count(&self) -> u64 {
+        self.cache.entry_count()
     }
 
     /// Insert a transaction hash and its recovered signer into the cache.

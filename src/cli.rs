@@ -79,7 +79,7 @@ pub struct CacheArgs {
     pub order_cache_size: u64,
 
     /// The signer cache TTL in seconds.
-    #[clap(long = "signer-cache.ttl", default_value_t = 12)]
+    #[clap(long = "signer-cache.ttl", default_value_t = 36)]
     pub signer_cache_ttl: u64,
 
     /// The signer cache size.
