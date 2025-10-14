@@ -380,7 +380,7 @@ impl ClickhouseIndexer {
 
         // TODO: make this configurable.
         let send_timeout = Duration::from_secs(2);
-        let end_timeout = Duration::from_secs(8);
+        let end_timeout = Duration::from_secs(4);
 
         let bundle_inserter = client
             .inserter::<BundleRow>(bundles_table_name.as_str())
@@ -398,7 +398,7 @@ impl ClickhouseIndexer {
             rx,
             client
                 .inserter::<BundleRow>(bundles_table_name.as_str())
-                .with_timeouts(Some(send_timeout), Some(end_timeout)),
+                .with_timeouts(Some(send_timeout), Some(end_timeout * 2)),
         )
         .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 
