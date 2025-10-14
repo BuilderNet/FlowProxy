@@ -331,8 +331,8 @@ pub trait IngressHandlerMetricsExt {
 
     /// Set the order cache hit ratio.
     #[inline]
-    fn set_order_cache_hit_ratio(ratio: f64, order_type: &'static str) {
-        gauge!(ingress::ORDER_CACHE_HIT_RATIO, "handler" => Self::HANDLER, "order_type" => order_type).set(ratio);
+    fn set_order_cache_hit_ratio(ratio: f64) {
+        gauge!(ingress::ORDER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
     }
 
     /// Set the signer cache hit ratio.

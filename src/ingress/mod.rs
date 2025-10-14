@@ -338,7 +338,6 @@ impl OrderflowIngress {
                     if bundle_hash.sample(10) {
                         IngressUserMetrics::set_order_cache_hit_ratio(
                             ingress.order_cache.hit_ratio(),
-                            "bundle",
                         );
                     }
 
@@ -389,7 +388,6 @@ impl OrderflowIngress {
                     if tx_hash.sample(10) {
                         IngressUserMetrics::set_order_cache_hit_ratio(
                             ingress.order_cache.hit_ratio(),
-                            "transaction",
                         );
                     }
 
@@ -428,7 +426,6 @@ impl OrderflowIngress {
                     if bundle_hash.sample(10) {
                         IngressUserMetrics::set_order_cache_hit_ratio(
                             ingress.order_cache.hit_ratio(),
-                            "mev_share_bundle",
                         );
                     }
 
@@ -500,22 +497,14 @@ impl OrderflowIngress {
             IngressUserMetrics::increment_order_cache_hit("bundle");
 
             if sample {
-                IngressUserMetrics::set_order_cache_hit_ratio(
-                    self.order_cache.hit_ratio(),
-                    "bundle",
-                );
+                IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
             }
             return Ok(bundle_hash);
         }
 
         self.order_cache.insert(bundle_hash);
         let signer_cache = self.signer_cache.clone();
-        let lookup = move |hash: B256| {
-            signer_cache
-                .get(&hash)
-                .inspect(|a| debug!(target: "signer-cache", "cache hit for hash: {hash} -- {a}"))
-                .map(|a| a.clone())
-        };
+        let lookup = move |hash: B256| signer_cache.get(&hash);
 
         if bundle.metadata.version.is_none() {
             bundle.metadata.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
@@ -538,7 +527,6 @@ impl OrderflowIngress {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
                 for tx in &bundle.txs {
-                    debug!(target: "signer-cache", "adding to signer cache: {} -- {}", tx.hash(), tx.signer());
                     self.signer_cache.insert(tx.hash(), tx.signer());
                 }
             }
@@ -587,10 +575,7 @@ impl OrderflowIngress {
             IngressUserMetrics::increment_order_cache_hit("mev_share_bundle");
 
             if bundle_hash.sample(10) {
-                IngressUserMetrics::set_order_cache_hit_ratio(
-                    self.order_cache.hit_ratio(),
-                    "mev_share_bundle",
-                );
+                IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
             }
 
             return Ok(bundle_hash);
@@ -667,10 +652,7 @@ impl OrderflowIngress {
             IngressUserMetrics::increment_order_cache_hit("transaction");
 
             if tx_hash.sample(10) {
-                IngressUserMetrics::set_order_cache_hit_ratio(
-                    self.order_cache.hit_ratio(),
-                    "transaction",
-                );
+                IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
             }
 
             return Ok(tx_hash);
