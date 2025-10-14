@@ -128,7 +128,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
             tokio::select! {
                 maybe_failed_commit = self.rx.recv() => {
                     let Some(failed_commit) = maybe_failed_commit else {
-                        tracing::error!(target = TARGET, "backup channel closed");
+                        tracing::error!(target: TARGET, "backup channel closed");
                         break;
                     };
                     tracing::debug!(target: TARGET, quantities = ?failed_commit.quantities, "received failed commit to backup");
@@ -267,9 +267,9 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
         match self.inner.commit().await {
             Ok(quantities) => {
                 if quantities == Quantities::ZERO {
-                    tracing::trace!(target = TARGET, "committed to inserter");
+                    tracing::trace!(target: TARGET, "committed to inserter");
                 } else {
-                    tracing::debug!(target = TARGET, ?quantities, "inserted batch to clickhouse");
+                    tracing::debug!(target: TARGET, ?quantities, "inserted batch to clickhouse");
                     IndexerMetrics::process_clickhouse_quantities(&quantities);
                 }
             }
