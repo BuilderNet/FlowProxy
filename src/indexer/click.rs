@@ -27,7 +27,7 @@ use crate::{
 };
 
 /// A default maximum size in bytes for the in-memory backup of failed commits.
-const MAX_BACKUP_SIZE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+const MAX_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 
 /// An high-level order type that can be indexed in clickhouse.
 pub(crate) trait ClickhouseIndexableOrder: Sized {
