@@ -153,8 +153,6 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                     }
                 }
                 _ = self.interval.tick() => {
-                    tracing::trace!(target: TARGET, order = T::ORDER_TYPE, "backup interval ticked");
-
                     let Some(oldest) = self.failed_commits.pop_back() else {
                         self.interval.reset();
                         IndexerMetrics::set_clickhouse_backup_size_bytes(0);
