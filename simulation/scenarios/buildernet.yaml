@@ -34,7 +34,7 @@ hosts:
       expected_final_state: running
       environment:
         # System API ports of the proxies
-        SYSTEM_PORT: "9755"
+        SYSTEM_PORT: "5544"
   submitter:
     # Run the submitter in zone 0
     network_node_id: 0
@@ -55,12 +55,12 @@ hosts:
       pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:5544 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy1.parquet --builder-name proxy1
       start_time: 1s
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
-        RUST_LOG: info
+        RUST_LOG: buildernet_orderflow_proxy=info,ingress=info,forwarder=info
   proxy2:
     network_node_id: 1
     ip_addr: 10.0.0.4
@@ -71,8 +71,8 @@ hosts:
       pcap_capture_size: 20
     processes:
     - path: /root/buildernet-orderflow-proxy
-      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:9755 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet
+      args: --user-listen-url 0.0.0.0:9754 --system-listen-url 0.0.0.0:5544 --builder-listen-url 0.0.0.0:8756 --builder-hub-url http://hub:3000 --indexer.parquet.bundle-receipts-file-path bundle_receipts_proxy2.parquet --builder-name proxy2
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
-        RUST_LOG: info
+        RUST_LOG: buildernet_orderflow_proxy=info,ingress=info,forwarder=info

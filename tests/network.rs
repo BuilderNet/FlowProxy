@@ -37,15 +37,15 @@ async fn network_e2e() {
 
     let mut received = builder2.recv::<RawBundle>().await.unwrap();
 
-    assert!(received.signing_address.is_some());
+    assert!(received.metadata.signing_address.is_some());
     // NOTE: This will have a signing address populated which we reset
-    received.signing_address = None;
+    received.metadata.signing_address = None;
     assert_eq!(received, bundle);
 
     let mut received = builder1.recv::<RawBundle>().await.unwrap();
-    assert!(received.signing_address.is_some());
+    assert!(received.metadata.signing_address.is_some());
     // NOTE: This will have a signing address populated which we reset
-    received.signing_address = None;
+    received.metadata.signing_address = None;
     assert_eq!(received, bundle);
 
     tokio::time::sleep(Duration::from_secs(2)).await;

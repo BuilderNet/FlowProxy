@@ -1,9 +1,10 @@
 use crate::{
-    cache::OrderCache,
+    cache::{OrderCache, SignerCache},
     consts::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
-        DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD,
-        FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD, USE_LEGACY_SIGNATURE,
+        DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD,
+        USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -14,8 +15,8 @@ use crate::{
     rate_limit::CounterOverTime,
     types::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, SystemBundle, SystemMevShareBundle, SystemTransaction,
-        UtcInstant,
+        EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleMetadata,
+        SystemMevShareBundle, SystemTransaction, UtcInstant,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -59,6 +60,7 @@ pub struct OrderflowIngress {
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
     pub order_cache: OrderCache,
+    pub signer_cache: SignerCache,
     pub forwarders: IngressForwarders,
     pub flashbots_signer: Option<Address>,
     /// The URL of the local builder. Used to send readyz requests.
@@ -331,6 +333,17 @@ impl OrderflowIngress {
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
                     IngressSystemMetrics::increment_order_cache_hit("bundle");
+
+                    // Sample the order cache hit ratio.
+                    if bundle_hash.sample(10) {
+                        IngressUserMetrics::set_order_cache_hit_ratio(
+                            ingress.order_cache.hit_ratio(),
+                        );
+                        IngressUserMetrics::set_order_cache_entry_count(
+                            ingress.order_cache.entry_count(),
+                        );
+                    }
+
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -373,6 +386,14 @@ impl OrderflowIngress {
                 if ingress.order_cache.contains(&tx_hash) {
                     trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
                     IngressSystemMetrics::increment_order_cache_hit("transaction");
+
+                    // Sample the order cache hit ratio.
+                    if tx_hash.sample(10) {
+                        IngressUserMetrics::set_order_cache_hit_ratio(
+                            ingress.order_cache.hit_ratio(),
+                        );
+                    }
+
                     return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
                 }
 
@@ -403,6 +424,14 @@ impl OrderflowIngress {
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Share bundle already processed");
                     IngressSystemMetrics::increment_order_cache_hit("mev_share_bundle");
+
+                    // Sample the order cache hit ratio.
+                    if bundle_hash.sample(10) {
+                        IngressUserMetrics::set_order_cache_hit_ratio(
+                            ingress.order_cache.hit_ratio(),
+                        );
+                    }
+
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -446,35 +475,52 @@ impl OrderflowIngress {
         trace!(target: "ingress", ?entity, "Processing bundle");
         // Convert to system bundle.
         let Entity::Signer(signer) = entity else { unreachable!() };
+        bundle.metadata.signing_address = Some(signer);
 
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.uuid.or(bundle.replacement_uuid).is_some()) && bundle.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
+            bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
-            bundle.replacement_nonce = Some(timestamp.try_into().expect("Timestamp too large"));
+            bundle.metadata.replacement_nonce =
+                Some(timestamp.try_into().expect("Timestamp too large"));
         }
 
         // Deduplicate bundles.
         // IMPORTANT: For correct cancellation deduplication, the replacement nonce must be set (see
         // above).
         let bundle_hash = bundle.bundle_hash();
+        let sample = bundle_hash.sample(10);
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
             IngressUserMetrics::increment_order_cache_hit("bundle");
+
+            if sample {
+                IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
+                IngressUserMetrics::set_order_cache_entry_count(self.order_cache.entry_count());
+            }
+
             return Ok(bundle_hash);
         }
 
         self.order_cache.insert(bundle_hash);
+        let signer_cache = self.signer_cache.clone();
+        let lookup = move |hash: B256| signer_cache.get(&hash);
+
+        if bundle.metadata.version.is_none() {
+            bundle.metadata.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
+        }
 
         // Decode and validate the bundle.
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
-                SystemBundle::try_from_raw_bundle(bundle, signer, received_at, priority)
+                let metadata = SystemBundleMetadata { signer, received_at, priority };
+                SystemBundle::try_decode_with_lookup(bundle, metadata, lookup)
             })
             .await
             .inspect_err(|e| {
@@ -485,10 +531,19 @@ impl OrderflowIngress {
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
                 debug!(target: "ingress", bundle_hash = %bundle.hash, "New bundle decoded");
+                for tx in &bundle.txs {
+                    self.signer_cache.insert(tx.hash(), tx.signer());
+                }
             }
             DecodedBundle::EmptyReplacement(replacement_data) => {
                 debug!(target: "ingress", ?replacement_data, "Replacement bundle decoded");
             }
+        }
+
+        // Sample the signer cache hit ratio.
+        if sample {
+            IngressUserMetrics::set_signer_cache_hit_ratio(self.signer_cache.hit_ratio());
+            IngressUserMetrics::set_signer_cache_entry_count(self.signer_cache.entry_count());
         }
 
         if bundle.is_empty() {
@@ -524,6 +579,11 @@ impl OrderflowIngress {
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
             IngressUserMetrics::increment_order_cache_hit("mev_share_bundle");
+
+            if bundle_hash.sample(10) {
+                IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
+            }
+
             return Ok(bundle_hash);
         }
 
@@ -596,6 +656,11 @@ impl OrderflowIngress {
         if self.order_cache.contains(&tx_hash) {
             trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
             IngressUserMetrics::increment_order_cache_hit("transaction");
+
+            if tx_hash.sample(10) {
+                IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
+            }
+
             return Ok(tx_hash);
         }
 
