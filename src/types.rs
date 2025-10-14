@@ -85,6 +85,7 @@ pub trait BundleHash {
 impl BundleHash for RawBundle {
     fn bundle_hash(&self) -> B256 {
         fn hash(bundle: &RawBundle, state: &mut wyhash::WyHash) {
+            debug_assert!(bundle.metadata.bundle_hash.is_none(), "bundle hash should not be set");
             // We destructure here so we never miss any fields if new fields are added in the
             // future.
             let RawBundle {
@@ -100,12 +101,14 @@ impl BundleHash for RawBundle {
                         uuid,
                         replacement_nonce,
                         refund_identity,
-                        signing_address: _,
                         version,
                         min_timestamp,
                         max_timestamp,
                         delayed_refund,
                         block_number,
+                        signing_address: _,
+                        // NOTE: If we call `hash`, this should not be set.
+                        bundle_hash: _,
                     },
             } = bundle;
 
@@ -260,11 +263,13 @@ impl SystemBundle {
     /// Create a new system bundle from a raw bundle and additional data, using a signer lookup
     /// function for the transaction signers. Returns an error if the raw bundle fails to decode.
     fn try_decode_inner(
-        bundle: RawBundle,
+        mut bundle: RawBundle,
         metadata: SystemBundleMetadata,
         lookup: Option<impl Fn(B256) -> Option<Address>>,
     ) -> Result<Self, RawBundleConvertError> {
         let raw_bundle_hash = bundle.bundle_hash();
+        // Set the bundle hash in the metadata.
+        bundle.metadata.bundle_hash = Some(raw_bundle_hash);
 
         let mut decoded = if let Some(lookup) = lookup {
             bundle.clone().decode_with_signer_lookup(TxEncoding::WithBlobData, lookup)?.into()
@@ -274,6 +279,7 @@ impl SystemBundle {
 
         if let DecodedBundle::Bundle(bundle) = &mut decoded {
             bundle.signer = Some(metadata.signer);
+            bundle.external_hash = Some(raw_bundle_hash);
         }
 
         Ok(Self {

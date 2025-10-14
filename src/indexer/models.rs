@@ -336,6 +336,7 @@ pub(crate) mod tests {
             RawBundle {
                 txs: value.transactions_raw.into_iter().map(Bytes::from).collect(),
                 metadata: RawBundleMetadata {
+                    bundle_hash: Some(value.hash),
                     block_number: Some(U64::from(value.block_number)),
                     min_timestamp: value.min_timestamp,
                     max_timestamp: value.max_timestamp,
