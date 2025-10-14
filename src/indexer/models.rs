@@ -251,7 +251,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     refund_percent: bundle.raw_bundle.metadata.refund_percent,
                     refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
                     refund_identity: bundle.raw_bundle.metadata.refund_identity,
-                    hash: decoded.hash,
+                    hash: bundle.bundle_hash,
                     version: match decoded.version {
                         BundleVersion::V1 => 1,
                         BundleVersion::V2 => 2,
@@ -306,7 +306,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
                     refund_percent: bundle.raw_bundle.metadata.refund_percent,
                     refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
                     refund_identity: bundle.raw_bundle.metadata.refund_identity,
-                    hash: bundle.raw_bundle_hash,
+                    hash: bundle.bundle_hash,
                     // NOTE: For now, replacement bundles don't have a version, so we set v2.
                     version: 2,
                 }
@@ -336,6 +336,7 @@ pub(crate) mod tests {
             RawBundle {
                 txs: value.transactions_raw.into_iter().map(Bytes::from).collect(),
                 metadata: RawBundleMetadata {
+                    bundle_hash: Some(value.hash),
                     block_number: Some(U64::from(value.block_number)),
                     min_timestamp: value.min_timestamp,
                     max_timestamp: value.max_timestamp,
@@ -368,7 +369,9 @@ pub(crate) mod tests {
     #[test]
     fn clickhouse_bundle_row_conversion_round_trip_works() {
         let system_bundle = indexer::tests::system_bundle_example();
+        println!("Bundle hash: {:?}", system_bundle.bundle_hash());
         let bundle_row: BundleRow = (system_bundle.clone(), "buildernet".to_string()).into();
+        println!("Bundle row hash: {:?}", bundle_row.hash);
 
         let mut raw_bundle_round_trip: RawBundle = bundle_row.into();
         raw_bundle_round_trip.metadata.signing_address = None;
