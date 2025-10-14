@@ -15,8 +15,8 @@ use crate::{
     rate_limit::CounterOverTime,
     types::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, SystemBundle, SystemBundleMetadata, SystemMevShareBundle,
-        SystemTransaction, UtcInstant,
+        EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleMetadata,
+        SystemMevShareBundle, SystemTransaction, UtcInstant,
     },
     utils::UtcDateTimeHeader as _,
     validation::validate_transaction,
@@ -333,6 +333,15 @@ impl OrderflowIngress {
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Bundle already processed");
                     IngressSystemMetrics::increment_order_cache_hit("bundle");
+
+                    // Sample the order cache hit ratio.
+                    if bundle_hash.sample(10) {
+                        IngressUserMetrics::set_order_cache_hit_ratio(
+                            ingress.order_cache.hit_ratio(),
+                            "bundle",
+                        );
+                    }
+
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -375,6 +384,15 @@ impl OrderflowIngress {
                 if ingress.order_cache.contains(&tx_hash) {
                     trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
                     IngressSystemMetrics::increment_order_cache_hit("transaction");
+
+                    // Sample the order cache hit ratio.
+                    if tx_hash.sample(10) {
+                        IngressUserMetrics::set_order_cache_hit_ratio(
+                            ingress.order_cache.hit_ratio(),
+                            "transaction",
+                        );
+                    }
+
                     return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
                 }
 
@@ -405,6 +423,15 @@ impl OrderflowIngress {
                 if ingress.order_cache.contains(&bundle_hash) {
                     trace!(target: "ingress", bundle_hash = %bundle_hash, "Share bundle already processed");
                     IngressSystemMetrics::increment_order_cache_hit("mev_share_bundle");
+
+                    // Sample the order cache hit ratio.
+                    if bundle_hash.sample(10) {
+                        IngressUserMetrics::set_order_cache_hit_ratio(
+                            ingress.order_cache.hit_ratio(),
+                            "mev_share_bundle",
+                        );
+                    }
+
                     return JsonRpcResponse::result(
                         request.id,
                         EthResponse::BundleHash(bundle_hash),
@@ -467,9 +494,17 @@ impl OrderflowIngress {
         // IMPORTANT: For correct cancellation deduplication, the replacement nonce must be set (see
         // above).
         let bundle_hash = bundle.bundle_hash();
+        let sample = bundle_hash.sample(10);
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
             IngressUserMetrics::increment_order_cache_hit("bundle");
+
+            if sample {
+                IngressUserMetrics::set_order_cache_hit_ratio(
+                    self.order_cache.hit_ratio(),
+                    "bundle",
+                );
+            }
             return Ok(bundle_hash);
         }
 
@@ -512,6 +547,11 @@ impl OrderflowIngress {
             }
         }
 
+        // Sample the signer cache hit ratio.
+        if sample {
+            IngressUserMetrics::set_signer_cache_hit_ratio(self.signer_cache.hit_ratio());
+        }
+
         if bundle.is_empty() {
             IngressUserMetrics::increment_empty_bundles();
         } else {
@@ -545,6 +585,14 @@ impl OrderflowIngress {
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: "ingress", %bundle_hash, "Bundle already processed");
             IngressUserMetrics::increment_order_cache_hit("mev_share_bundle");
+
+            if bundle_hash.sample(10) {
+                IngressUserMetrics::set_order_cache_hit_ratio(
+                    self.order_cache.hit_ratio(),
+                    "mev_share_bundle",
+                );
+            }
+
             return Ok(bundle_hash);
         }
 
@@ -617,6 +665,14 @@ impl OrderflowIngress {
         if self.order_cache.contains(&tx_hash) {
             trace!(target: "ingress", tx_hash = %tx_hash, "Transaction already processed");
             IngressUserMetrics::increment_order_cache_hit("transaction");
+
+            if tx_hash.sample(10) {
+                IngressUserMetrics::set_order_cache_hit_ratio(
+                    self.order_cache.hit_ratio(),
+                    "transaction",
+                );
+            }
+
             return Ok(tx_hash);
         }
 

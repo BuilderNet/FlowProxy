@@ -634,6 +634,22 @@ impl From<WithEncoding<SystemTransaction>> for EncodedOrder {
     }
 }
 
+/// A trait for types that can be sampled (simple modulo based sampling).
+pub trait Samplable {
+    fn sample(&self, every: usize) -> bool;
+}
+
+impl Samplable for B256 {
+    /// Sample the hash if the first 8 bytes are divisible by the given number.
+    #[inline]
+    fn sample(&self, every: usize) -> bool {
+        let mut first = [0; 8];
+        first.copy_from_slice(&self.0[..8]);
+        let every = every as u64;
+        u64::from_be_bytes(first) % every == 0
+    }
+}
+
 /// A simple sampler that executes a closure every `sample_size` calls, or if a certain amount of
 /// time has passed since last sampling call.
 #[derive(Debug, Clone)]
