@@ -50,7 +50,7 @@ pub struct SystemBundle {
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
     pub raw_bundle: Arc<RawBundle>,
     /// The bundle hash.
-    pub raw_bundle_hash: B256,
+    pub bundle_hash: B256,
     /// The decoded bundle.
     pub decoded_bundle: Arc<DecodedBundle>,
     /// Metadata about the bundle.
@@ -85,7 +85,6 @@ pub trait BundleHash {
 impl BundleHash for RawBundle {
     fn bundle_hash(&self) -> B256 {
         fn hash(bundle: &RawBundle, state: &mut wyhash::WyHash) {
-            debug_assert!(bundle.metadata.bundle_hash.is_none(), "bundle hash should not be set");
             // We destructure here so we never miss any fields if new fields are added in the
             // future.
             let RawBundle {
@@ -279,13 +278,12 @@ impl SystemBundle {
 
         if let DecodedBundle::Bundle(bundle) = &mut decoded {
             bundle.signer = Some(metadata.signer);
-            bundle.external_hash = Some(raw_bundle_hash);
         }
 
         Ok(Self {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded),
-            raw_bundle_hash,
+            bundle_hash: raw_bundle_hash,
             metadata,
         })
     }
@@ -305,7 +303,7 @@ impl SystemBundle {
 
     /// Returns the bundle hash.
     pub fn bundle_hash(&self) -> B256 {
-        self.raw_bundle_hash
+        self.bundle_hash
     }
 
     /// Returns the bundle if it is a new bundle.
