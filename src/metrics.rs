@@ -40,6 +40,18 @@ mod name {
         pub(crate) const CLICKHOUSE_BATCHES_COMMITTED: &str =
             "indexer_clickhouse_batches_committed";
 
+        pub(crate) const CLICKHOUSE_BACKUP_SIZE_BYTES: &str =
+            "indexer_clickhouse_backup_size_bytes";
+        pub(crate) const CLICKHOUSE_BACKUP_PRESSURE_APPLIED: &str =
+            "indexer_clickhouse_pressure_applied";
+        pub(crate) const CLICKHOUSE_BACKUP_DATA_BYTES: &str =
+            "indexer_clickhouse_backup_data_bytes";
+        pub(crate) const CLICKHOUSE_BACKUP_DATA_ROWS: &str = "indexer_clickhouse_backup_data_rows";
+        pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_BYTES: &str =
+            "indexer_clickhouse_backup_data_lost_bytes";
+        pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_ROWS: &str =
+            "indexer_clickhouse_backup_data_lost_rows";
+
         pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
     }
 
@@ -437,6 +449,8 @@ impl BuilderHubMetrics {
 pub struct IndexerMetrics;
 
 impl IndexerMetrics {
+    // Counters
+
     #[inline]
     pub fn increment_bundle_indexing_failures(err: String) {
         counter!(indexer::BUNDLE_INDEXING_FAILURES, "error" => err).increment(1);
@@ -458,13 +472,35 @@ impl IndexerMetrics {
     }
 
     #[inline]
-    pub fn set_clickhouse_queue_size(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_QUEUE_SIZE, "order" => order).set(size as f64);
+    fn increment_clickhouse_backup_data_bytes(size: u64) {
+        counter!(indexer::CLICKHOUSE_BACKUP_DATA_BYTES).increment(size);
+    }
+
+    fn increment_clickhouse_backup_data_rows(count: u64) {
+        counter!(indexer::CLICKHOUSE_BACKUP_DATA_ROWS).increment(count);
+    }
+
+    /// Process the quantities of data lost because pressure has been applied to backup.
+    #[inline]
+    pub fn process_clickhouse_backup_data_quantities(quantities: &Quantities) {
+        Self::increment_clickhouse_backup_data_bytes(quantities.bytes);
+        Self::increment_clickhouse_backup_data_rows(quantities.rows);
     }
 
     #[inline]
-    pub fn set_parquet_queue_size(size: usize, order: &'static str) {
-        gauge!(indexer::PARQUET_QUEUE_SIZE, "order" => order).set(size as f64);
+    fn increment_clickhouse_backup_data_lost_bytes(size: u64) {
+        counter!(indexer::CLICKHOUSE_BACKUP_DATA_LOST_BYTES).increment(size);
+    }
+
+    fn increment_clickhouse_backup_data_lost_rows(count: u64) {
+        counter!(indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS).increment(count);
+    }
+
+    /// Process the quantities of data lost because pressure has been applied to backup.
+    #[inline]
+    pub fn process_clickhouse_backup_data_lost_quantities(quantities: &Quantities) {
+        Self::increment_clickhouse_backup_data_lost_bytes(quantities.bytes);
+        Self::increment_clickhouse_backup_data_lost_rows(quantities.rows);
     }
 
     /// Process the quantities from the Clickhouse inserter. No-op if the quantities are zero.
@@ -491,5 +527,27 @@ impl IndexerMetrics {
 
     fn increment_clickhouse_batches_committed() {
         counter!(indexer::CLICKHOUSE_BATCHES_COMMITTED).increment(1);
+    }
+
+    // Gauges
+
+    #[inline]
+    pub fn set_clickhouse_queue_size(size: usize, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_QUEUE_SIZE, "order" => order).set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_commit_size_bytes(size: u64) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES).set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_pressure_applied(bool: bool) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_PRESSURE_APPLIED).set(bool as u64 as f64);
+    }
+
+    #[inline]
+    pub fn set_parquet_queue_size(size: usize, order: &'static str) {
+        gauge!(indexer::PARQUET_QUEUE_SIZE, "order" => order).set(size as f64);
     }
 }

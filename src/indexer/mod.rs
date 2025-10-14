@@ -30,7 +30,7 @@ pub const BUNDLE_TABLE_NAME: &str = "bundles";
 /// The name of the Clickhouse table to store transactions in.
 pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 /// The tracing target for this indexer crate.
-const TRACING_TARGET: &str = "indexer";
+const TARGET: &str = "indexer";
 
 /// A simple alias to refer to a builder name.
 pub(crate) type BuilderName = String;
@@ -133,7 +133,7 @@ struct MockIndexer;
 
 impl MockIndexer {
     fn run(self, receivers: OrderReceivers, task_executor: TaskExecutor) {
-        tracing::info!(target: TRACING_TARGET, "Running with mocked indexer");
+        tracing::info!(target: TARGET, "Running with mocked indexer");
 
         let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx } = receivers;
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });

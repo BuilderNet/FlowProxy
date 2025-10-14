@@ -168,7 +168,8 @@ impl BackoffInterval {
 
 impl Default for BackoffInterval {
     fn default() -> Self {
-        Self::new(ExponentialBackoff::from_millis(100))
+        // So will return 4, 16, 32, 64, 128, ... milliseconds with jitter.
+        Self::new(ExponentialBackoff::from_millis(4)).with_jitter()
     }
 }
 
