@@ -46,15 +46,14 @@ mod name {
             "indexer_clickhouse_backup_size_bytes";
         pub(crate) const CLICKHOUSE_BACKUP_SIZE_BATCHES: &str =
             "indexer_clickhouse_backup_size_batches";
-        pub(crate) const CLICKHOUSE_BACKUP_PRESSURE_APPLIED: &str =
-            "indexer_clickhouse_pressure_applied";
         pub(crate) const CLICKHOUSE_BACKUP_DATA_BYTES: &str =
-            "indexer_clickhouse_backup_data_bytes";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_ROWS: &str = "indexer_clickhouse_backup_data_rows";
+            "indexer_clickhouse_backup_data_bytes_total";
+        pub(crate) const CLICKHOUSE_BACKUP_DATA_ROWS: &str =
+            "indexer_clickhouse_backup_data_rows_total";
         pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_BYTES: &str =
-            "indexer_clickhouse_backup_data_lost_bytes";
+            "indexer_clickhouse_backup_data_lost_bytes_total";
         pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_ROWS: &str =
-            "indexer_clickhouse_backup_data_lost_rows";
+            "indexer_clickhouse_backup_data_lost_rows_total";
 
         pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
     }
@@ -147,7 +146,34 @@ pub fn describe() {
         indexer::CLICKHOUSE_BATCHES_COMMITTED,
         "Total number of batches committed to ClickHouse"
     );
-    // TODO: add remaining metrics descriptions of backup metrics
+
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_SIZE_BYTES,
+        "Current size of Clickhouse backup in bytes"
+    );
+
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES,
+        "Current size of Clickhouse backup in batches"
+    );
+
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_DATA_BYTES,
+        "Total number of bytes sent to Clickhouse backup"
+    );
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_DATA_ROWS,
+        "Total number of rows sent to Clickhouse backup"
+    );
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_DATA_LOST_BYTES,
+        "Total number of bytes lost due to pressure on Clickhouse backup"
+    );
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS,
+        "Total number of rows lost due to pressure on Clickhouse backup"
+    );
+
     describe_histogram!(
         indexer::CLICKHOUSE_BATCH_COMMIT_TIME,
         "Duration of Clickhouse batch commits in seconds"
@@ -553,11 +579,6 @@ impl IndexerMetrics {
     #[inline]
     pub fn set_clickhouse_backup_size_batches(size: usize) {
         gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES).set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_pressure_applied(bool: bool) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_PRESSURE_APPLIED).set(bool as u64 as f64);
     }
 
     #[inline]
