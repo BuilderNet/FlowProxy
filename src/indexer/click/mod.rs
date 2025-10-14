@@ -85,6 +85,9 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
                     IndexerMetrics::process_clickhouse_quantities(&quantities);
                     IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
                 }
+
+                // Clear the backup rows.
+                self.rows_backup.clear();
             }
             Err(e) => {
                 IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
