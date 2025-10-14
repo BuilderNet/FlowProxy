@@ -24,7 +24,6 @@ use crate::{
 };
 
 const MAX_BACKUP_SIZE_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
-const MAX_BACKUP_ATTEMPTS_AFTER_PRESSURE: u8 = 8;
 
 /// An high-level order type that can be indexed in clickhouse.
 pub(crate) trait ClickhouseIndexableOrder: Sized {
@@ -65,14 +64,11 @@ struct FailedCommit<T: ClickhouseIndexableOrder> {
     rows: Vec<T::ClickhouseRowType>,
     /// The quantities related to such commit, like the total size in bytes.
     quantities: Quantities,
-    /// The number of attempts done to backup this data, once pressure has been applied.
-    /// See [`InMemoryBackup`] for its usage.
-    attempts: u8,
 }
 
 impl<T: ClickhouseIndexableOrder> FailedCommit<T> {
     fn new(rows: Vec<T::ClickhouseRowType>, quantities: Quantities) -> Self {
-        Self { rows, quantities, attempts: 0 }
+        Self { rows, quantities }
     }
 }
 
@@ -97,14 +93,9 @@ struct MemoryBackup<T: ClickhouseIndexableOrder> {
     inserter: Inserter<T::ClickhouseRowType>,
     /// The interval at which we try to backup data.
     interval: BackoffInterval,
-    /// The maximum number of attempts for committing a past commit again, once
-    /// pressure is applied.
-    max_attempts: u8,
     /// The maximum size in bytes for holding past failed commits. Once we go over this threshold,
     /// pressure is applied.
     max_size_bytes: u64,
-    /// If true, starts to count attempts to backup data.
-    apply_pressure: bool,
 }
 
 impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
@@ -114,16 +105,8 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
             inserter,
             interval: Default::default(),
             failed_commits: Default::default(),
-            max_attempts: MAX_BACKUP_ATTEMPTS_AFTER_PRESSURE,
             max_size_bytes: MAX_BACKUP_SIZE_BYTES,
-            apply_pressure: false,
         }
-    }
-
-    #[allow(dead_code)]
-    fn with_max_attempts(mut self, max_attempts: u8) -> Self {
-        self.max_attempts = max_attempts;
-        self
     }
 
     #[allow(dead_code)]
@@ -154,29 +137,18 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                     let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
                     IndexerMetrics::set_clickhouse_backup_commit_size_bytes(total_size_bytes);
 
-                    self.apply_pressure = total_size_bytes > self.max_size_bytes;
-                    IndexerMetrics::set_clickhouse_backup_pressure_applied(self.apply_pressure);
-                    if self.apply_pressure {
-                        tracing::warn!(total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, applying backpressure");
-
+                    if total_size_bytes > self.max_size_bytes && self.failed_commits.len() > 1 {
+                        tracing::warn!(total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
+                        let oldest = self.failed_commits.pop_back().expect("length checked above");
+                        IndexerMetrics::process_clickhouse_backup_data_lost_quantities(&oldest.quantities);
                     }
                 }
                 _ = self.interval.tick() => {
-                    let Some(mut oldest) = self.failed_commits.pop_back() else {
+                    let Some(oldest) = self.failed_commits.pop_back() else {
                         self.interval.reset();
                         IndexerMetrics::set_clickhouse_backup_commit_size_bytes(0);
                         continue // Nothing to do!
                     };
-
-                    if self.apply_pressure {
-                        oldest.attempts += 1;
-                    }
-
-                    if oldest.attempts > self.max_attempts {
-                        tracing::error!(max_attempts = self.max_attempts, "dropping failed commit, too many attempts");
-                        IndexerMetrics::process_clickhouse_backup_data_lost_quantities(&oldest.quantities);
-                        continue;
-                    }
 
                     for row in &oldest.rows {
                         let value_ref = T::to_row_ref(row);
@@ -237,7 +209,6 @@ impl<T: ClickhouseIndexableOrder> std::fmt::Debug for MemoryBackup<T> {
             .field("rx", &self.rx)
             .field("inserter", &T::ORDER_TYPE.to_string())
             .field("failed_commits", &self.failed_commits.len())
-            .field("max_attempts", &self.max_attempts)
             .field("max_size_bytes", &self.max_size_bytes)
             .finish()
     }
