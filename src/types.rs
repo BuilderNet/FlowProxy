@@ -151,17 +151,17 @@ impl BundleHash for RawBundle {
                 version.hash(state);
             }
 
-	    if let Some(min_timestamp) = min_timestamp {
-		min_timestamp.hash(state);
-	    }
+            if let Some(min_timestamp) = min_timestamp {
+                min_timestamp.hash(state);
+            }
 
-	    if let Some(max_timestamp) = max_timestamp {
-		max_timestamp.hash(state);
-	    }
+            if let Some(max_timestamp) = max_timestamp {
+                max_timestamp.hash(state);
+            }
 
-	    if let Some(delayed_refund) = delayed_refund {
-		delayed_refund.hash(state);
-	    }
+            if let Some(delayed_refund) = delayed_refund {
+                delayed_refund.hash(state);
+            }
         }
 
         let mut hasher = wyhash::WyHash::default();
