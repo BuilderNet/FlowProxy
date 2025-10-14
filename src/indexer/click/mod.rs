@@ -61,7 +61,8 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
 
         if let Err(e) = self.inner.write(value_ref).await {
             IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-            tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, %hash, "failed to write to clickhouse inserter")
+            tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, %hash, "failed to write to clickhouse inserter");
+            return;
         }
 
         // NOTE: we don't backup if writing failes. The reason is that if this fails, then the same
