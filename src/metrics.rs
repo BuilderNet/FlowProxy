@@ -62,6 +62,10 @@ mod name {
         pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
         pub(crate) const TXS_PER_MEV_SHARE_BUNDLE: &str = "ingress_txs_per_mev_share_bundle";
         pub(crate) const TOTAL_EMPTY_BUNDLES: &str = "ingress_total_empty_bundles";
+        pub(crate) const ORDER_CACHE_HIT_RATIO: &str = "ingress_order_cache_hit_ratio";
+        pub(crate) const SIGNER_CACHE_HIT_RATIO: &str = "ingress_signer_cache_hit_ratio";
+        pub(crate) const ORDER_CACHE_ENTRY_COUNT: &str = "ingress_order_cache_entry_count";
+        pub(crate) const SIGNER_CACHE_ENTRY_COUNT: &str = "ingress_signer_cache_entry_count";
     }
 
     /// System processing metrics.
@@ -145,6 +149,10 @@ pub fn describe() {
         "Total number of incoming unknown JSON-RPC method calls"
     );
     describe_counter!(ingress::ORDER_CACHE_HIT, "Total number of order cache hits");
+    describe_gauge!(
+        ingress::ORDER_CACHE_HIT_RATIO,
+        "Ratio of order cache hits (successful cache hits / total orders) by order type"
+    );
     describe_counter!(
         ingress::REQUESTS_RATE_LIMITED,
         "Total number of incoming rate-limited requests"
@@ -168,6 +176,12 @@ pub fn describe() {
         "Number of transactions per MEV-share bundle"
     );
     describe_counter!(ingress::TOTAL_EMPTY_BUNDLES, "Total number of cancellation bundles");
+    describe_gauge!(
+        ingress::SIGNER_CACHE_HIT_RATIO,
+        "Ratio of transaction signer cache hits (successful cache hits / total transactions)"
+    );
+    describe_gauge!(ingress::ORDER_CACHE_ENTRY_COUNT, "Number of entries in the order cache");
+    describe_gauge!(ingress::SIGNER_CACHE_ENTRY_COUNT, "Number of entries in the signer cache");
 
     // System end-to-end processing metrics
     describe_histogram!(
@@ -317,6 +331,28 @@ pub trait IngressHandlerMetricsExt {
     #[inline]
     fn increment_empty_bundles() {
         counter!(ingress::TOTAL_EMPTY_BUNDLES, "handler" => Self::HANDLER).increment(1);
+    }
+
+    /// Set the order cache hit ratio.
+    #[inline]
+    fn set_order_cache_hit_ratio(ratio: f64) {
+        gauge!(ingress::ORDER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
+    }
+
+    #[inline]
+    fn set_order_cache_entry_count(count: u64) {
+        gauge!(ingress::ORDER_CACHE_ENTRY_COUNT, "handler" => Self::HANDLER).set(count as f64);
+    }
+
+    /// Set the signer cache hit ratio.
+    #[inline]
+    fn set_signer_cache_hit_ratio(ratio: f64) {
+        gauge!(ingress::SIGNER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
+    }
+
+    #[inline]
+    fn set_signer_cache_entry_count(count: u64) {
+        gauge!(ingress::SIGNER_CACHE_ENTRY_COUNT, "handler" => Self::HANDLER).set(count as f64);
     }
 }
 
