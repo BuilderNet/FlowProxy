@@ -452,12 +452,12 @@ impl IndexerMetrics {
     // Counters
 
     #[inline]
-    pub fn increment_bundle_indexing_failures(err: String) {
+    pub fn increment_bundle_indexing_failures(err: &'static str) {
         counter!(indexer::BUNDLE_INDEXING_FAILURES, "error" => err).increment(1);
     }
 
     #[inline]
-    pub fn increment_bundle_receipt_indexing_failures(err: String) {
+    pub fn increment_bundle_receipt_indexing_failures(err: &'static str) {
         counter!(indexer::BUNDLE_RECEIPT_INDEXING_FAILURES, "error" => err).increment(1);
     }
 

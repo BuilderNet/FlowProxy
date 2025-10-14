@@ -120,15 +120,31 @@ pub struct IndexerHandle {
 impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
-            IndexerMetrics::increment_bundle_indexing_failures(e.to_string());
-            tracing::error!(?e, "failed to send bundle to index");
+            match e {
+                mpsc::error::TrySendError::Full(bundle) => {
+                    tracing::error!(target: TARGET, bundle_hash = ?bundle.bundle_hash(), "CRITICAL: Failed to send bundle to index, channel is full");
+                    IndexerMetrics::increment_bundle_indexing_failures("Full");
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle to index, indexer task is closed");
+                    IndexerMetrics::increment_bundle_indexing_failures("Closed");
+                }
+            }
         }
     }
 
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt) {
         if let Err(e) = self.senders.bundle_receipt_tx.try_send(bundle_receipt) {
-            IndexerMetrics::increment_bundle_receipt_indexing_failures(e.to_string());
-            tracing::error!(?e, "failed to send bundle receipt to index");
+            match e {
+                mpsc::error::TrySendError::Full(_) => {
+                    tracing::error!(target: TARGET,  "Failed to send bundle receipt to index, channel is full");
+                    IndexerMetrics::increment_bundle_receipt_indexing_failures("Full");
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle receipt to index, indexer task is closed");
+                    IndexerMetrics::increment_bundle_receipt_indexing_failures("Closed");
+                }
+            }
         }
     }
 }
