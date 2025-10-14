@@ -1,6 +1,6 @@
 //! Indexing functionality powered by Clickhouse.
 //!
-//! TODO: update metrics
+//! TODO: update metrics and tracing
 
 use std::{collections::VecDeque, fmt::Debug, time::Duration};
 
@@ -59,10 +59,16 @@ impl ClickhouseIndexableOrder for SystemBundle {
     }
 }
 
-#[derive(Debug)]
+/// Represents data we failed to commit to clickhouse, including the rows and some information
+/// about the size of such data.
+#[derive(Debug, Clone)]
 struct FailedCommit<T: ClickhouseIndexableOrder> {
+    /// The actual rows we were trying to commit.
     rows: Vec<T::ClickhouseRowType>,
+    /// The quantities related to such commit, like the total size in bytes.
     quantities: Quantities,
+    /// The number of attempts done to backup this data, once pressure has been applied.
+    /// See [`InMemoryBackup`] for its usage.
     attempts: u8,
 }
 
@@ -79,17 +85,31 @@ impl<T: ClickhouseIndexableOrder> FailedCommit<T> {
 //
 // By sending backup data less often, we give time gaps for these operation to be performed.
 
-struct InMemoryBackup<T: ClickhouseIndexableOrder> {
+/// An in-memory backup actor for Clickhouse data. This actor receives [`FailedCommit`]s and keeps
+/// them in memory, and periodically tries to commit them back again to Clickhouse. Since memory
+/// is finite, there is an upper bound on how much memory this data structure holds. Once this has
+/// been hit, pressure applies, meaning that we try again a certain failed commit for a finite
+/// number of times, and then we discard it to accomdate new data.
+struct MemoryBackup<T: ClickhouseIndexableOrder> {
+    /// The receiver of failed commit attempts.
     rx: mpsc::Receiver<FailedCommit<T>>,
+    /// The in-memory cache of failed commits.
     failed_commits: VecDeque<FailedCommit<T>>,
+    /// A clickhouse inserter for committing again the data.
     inserter: Inserter<T::ClickhouseRowType>,
+    /// The interval at which we try to backup data.
     interval: BackoffInterval,
+    /// The maximum number of attempts for committing a past commit again, once
+    /// pressure is applied.
     max_attempts: u8,
+    /// The maximum size in bytes for holding past failed commits. Once we go over this threshold,
+    /// pressure is applied.
     max_size_bytes: u64,
+    /// If true, starts to count attempts to backup data.
     apply_pressure: bool,
 }
 
-impl<T: ClickhouseIndexableOrder> InMemoryBackup<T> {
+impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
     fn new(
         rx: mpsc::Receiver<FailedCommit<T>>,
         inserter: Inserter<T::ClickhouseRowType>,
@@ -108,6 +128,7 @@ impl<T: ClickhouseIndexableOrder> InMemoryBackup<T> {
         }
     }
 
+    /// Run the backup actor until it is possible to receive messages.
     #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
     async fn run(&mut self) {
         loop {
@@ -130,6 +151,7 @@ impl<T: ClickhouseIndexableOrder> InMemoryBackup<T> {
                 }
                 _ = self.interval.tick() => {
                         let Some(mut oldest) = self.failed_commits.pop_back() else {
+                            self.interval.reset();
                             continue // Nothing to do!
                         };
 
@@ -165,6 +187,7 @@ impl<T: ClickhouseIndexableOrder> InMemoryBackup<T> {
         }
     }
 
+    /// To call on shutdown, tries make a last-resort attempt to backup all the data.
     #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
     async fn end(mut self) {
         for failed_commit in self.failed_commits.drain(..) {
@@ -184,7 +207,7 @@ impl<T: ClickhouseIndexableOrder> InMemoryBackup<T> {
     }
 }
 
-impl<T: ClickhouseIndexableOrder> std::fmt::Debug for InMemoryBackup<T> {
+impl<T: ClickhouseIndexableOrder> std::fmt::Debug for MemoryBackup<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InMemoryBackup")
             .field("rx", &self.rx)
@@ -196,10 +219,16 @@ impl<T: ClickhouseIndexableOrder> std::fmt::Debug for InMemoryBackup<T> {
     }
 }
 
+/// A wrapper over a Clickhouse [`Inserter`] that supports a backup mechanism.
 struct ClickhouseInserter<T: ClickhouseIndexableOrder> {
+    /// The inner Clickhouse inserter client.
     inner: Inserter<T::ClickhouseRowType>,
+    /// A small in-memory backup of the current data we're trying to commit. In case this fails to
+    /// be inserted into Clickhouse, it is sent to the backup actor.
     rows_backup: Vec<T::ClickhouseRowType>,
+    /// The channel where to send data to be backed up.
     backup_tx: mpsc::Sender<FailedCommit<T>>,
+    /// The name of the local operator to use when adding data to clickhouse.
     builder_name: String,
 }
 
@@ -227,7 +256,7 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
         }
 
         // NOTE: we don't backup if writing failes. The reason is that if this fails, then the same
-        // writing to the backup inserter will fail.
+        // writing to the backup inserter should fail.
         self.rows_backup.push(order_row);
     }
 
@@ -276,8 +305,12 @@ impl<T: ClickhouseIndexableOrder> std::fmt::Debug for ClickhouseInserter<T> {
     }
 }
 
+/// A long-lived actor to run a [`ClickhouseIndexer`] until it possible to receive new order to
+/// index.
 struct InserterRunner<T: ClickhouseIndexableOrder> {
+    /// The channel from which we can receive new orders to index.
     rx: mpsc::Receiver<T>,
+    /// The underlying Clickhouse inserter.
     inserter: ClickhouseInserter<T>,
 }
 
@@ -286,6 +319,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
         Self { rx, inserter }
     }
 
+    /// Run the inserter until it is possible to receive new orders.
     #[tracing::instrument(target = TRACING_TARGET, fields(order = %T::ORDER_TYPE))]
     async fn run_loop(&mut self) {
         let mut sampler = Sampler::default()
@@ -354,7 +388,7 @@ impl ClickhouseIndexer {
 
         let interval = BackoffInterval::new(ExponentialBackoff::from_millis(100)).with_jitter();
 
-        let mut backup_runner = InMemoryBackup::new(
+        let mut backup_runner = MemoryBackup::new(
             rx,
             client.inserter::<BundleRow>(bundles_table_name.as_str()),
             Some(interval),
