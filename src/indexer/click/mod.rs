@@ -17,10 +17,10 @@ use crate::{
     indexer::{
         click::{
             backup::{FailedCommit, MemoryBackup, MAX_BACKUP_SIZE_BYTES},
-            primitives::ClickhouseIndexableOrder,
+            models::BundleRow,
+            primitives::{BuilderName, ClickhouseIndexableOrder},
         },
-        models::BundleRow,
-        BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TARGET,
+        OrderReceivers, BUNDLE_TABLE_NAME, TARGET,
     },
     metrics::IndexerMetrics,
     primitives::{Sampler, SystemBundle},
@@ -28,7 +28,8 @@ use crate::{
 };
 
 mod backup;
-mod primitives;
+mod models;
+pub(crate) mod primitives;
 
 /// A wrapper over a Clickhouse [`Inserter`] that supports a backup mechanism.
 struct ClickhouseInserter<T: ClickhouseIndexableOrder> {
@@ -271,7 +272,8 @@ pub(crate) mod tests {
     use crate::{
         cli::ClickhouseArgs,
         indexer::{
-            click::ClickhouseIndexer, models::BundleRow, tests::system_bundle_example,
+            click::{models::BundleRow, ClickhouseIndexer},
+            tests::system_bundle_example,
             OrderSenders, BUNDLE_TABLE_NAME,
         },
         tasks::TaskManager,

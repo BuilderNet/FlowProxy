@@ -7,14 +7,16 @@ use tokio::sync::mpsc;
 
 use crate::{
     cli::IndexerArgs,
-    indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
+    indexer::{
+        click::{primitives::BuilderName, ClickhouseIndexer},
+        parq::ParquetIndexer,
+    },
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, SystemBundle},
     tasks::TaskExecutor,
 };
 
 mod click;
-mod models;
 mod parq;
 mod ser;
 
@@ -35,9 +37,6 @@ pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 
 /// The tracing target for this indexer crate.
 const TARGET: &str = "indexer";
-
-/// A simple alias to refer to a builder name.
-pub(crate) type BuilderName = String;
 
 /// Trait for adding order indexing functionality.
 pub trait OrderIndexer: Sync + Send {

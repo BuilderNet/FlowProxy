@@ -1,8 +1,8 @@
 //! Contains the model used for storing data inside Clickhouse.
 
 use crate::indexer::{
+    click::BuilderName,
     ser::{address, addresses, hash, hashes, u256es},
-    BuilderName,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
@@ -327,7 +327,7 @@ pub(crate) mod tests {
     use rbuilder_primitives::serialize::{RawBundle, RawBundleMetadata};
 
     use crate::{
-        indexer::{self, models::BundleRow},
+        indexer::{self, click::models::BundleRow},
         primitives::SystemBundle,
     };
 

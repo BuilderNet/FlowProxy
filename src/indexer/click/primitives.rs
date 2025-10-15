@@ -2,10 +2,10 @@ use alloy_primitives::B256;
 use clickhouse::{Row, RowWrite};
 use serde::Serialize;
 
-use crate::{
-    indexer::{models::BundleRow, BuilderName},
-    primitives::SystemBundle,
-};
+use crate::{indexer::click::models::BundleRow, primitives::SystemBundle};
+
+/// A simple alias to refer to a builder name.
+pub(crate) type BuilderName = String;
 
 /// An high-level order type that can be indexed in clickhouse.
 pub(crate) trait ClickhouseIndexableOrder: Sized {
