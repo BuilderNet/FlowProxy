@@ -19,8 +19,8 @@ impl Default for PriorityQueues {
     fn default() -> Self {
         Self {
             high: Arc::new(Semaphore::new(Semaphore::MAX_PERMITS)),
-            medium: Arc::new(Semaphore::new(10_000)),
-            low: Arc::new(Semaphore::new(1_000)),
+            medium: Arc::new(Semaphore::new(50_000)),
+            low: Arc::new(Semaphore::new(5_000)),
         }
     }
 }
@@ -42,6 +42,11 @@ impl PriorityQueues {
             Priority::Medium => &self.medium,
             Priority::Low => &self.low,
         }
+    }
+
+    /// Return the available permits for the given priority.
+    pub fn available_permits_for(&self, priority: Priority) -> usize {
+        self.semaphore_for(priority).available_permits()
     }
 
     /// Spawn the task with given priority.

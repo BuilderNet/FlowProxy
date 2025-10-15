@@ -87,6 +87,7 @@ mod name {
             "system_e2e_transaction_processing_time";
         pub(crate) const E2E_SYSTEM_ORDER_PROCESSING_TIME: &str =
             "system_e2e_system_order_processing_time";
+        pub(crate) const AVAILABLE_PERMITS: &str = "system_available_queue_permits";
     }
 }
 
@@ -233,6 +234,10 @@ pub fn describe() {
     describe_histogram!(
         system::E2E_SYSTEM_ORDER_PROCESSING_TIME,
         "End-to-end system order processing time in seconds"
+    );
+    describe_gauge!(
+        system::AVAILABLE_PERMITS,
+        "Number of available permits per priority queue (except high)"
     );
 }
 
@@ -479,6 +484,11 @@ impl SystemMetrics {
 
         histogram!(system::E2E_SYSTEM_ORDER_PROCESSING_TIME, &labels)
             .record(duration.as_secs_f64());
+    }
+
+    #[inline]
+    pub fn record_available_permits(priority: Priority, permits: usize) {
+        gauge!(system::AVAILABLE_PERMITS, "priority" => priority.as_str()).set(permits as f64);
     }
 }
 

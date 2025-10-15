@@ -10,7 +10,9 @@ use crate::{
     forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
-    metrics::{IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics},
+    metrics::{
+        IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics, SystemMetrics,
+    },
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
         EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleMetadata,
@@ -509,6 +511,14 @@ impl OrderflowIngress {
             if sample {
                 IngressUserMetrics::set_order_cache_hit_ratio(self.order_cache.hit_ratio());
                 IngressUserMetrics::set_order_cache_entry_count(self.order_cache.entry_count());
+
+                // Only record available permits for non-high priorities.
+                if !priority.is_high() {
+                    SystemMetrics::record_available_permits(
+                        priority,
+                        self.pqueues.available_permits_for(priority),
+                    );
+                }
             }
 
             return Ok(bundle_hash);
