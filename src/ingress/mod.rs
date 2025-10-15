@@ -35,6 +35,7 @@ use dashmap::DashMap;
 use flate2::read::GzDecoder;
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use reqwest::Url;
+use serde_json::Value;
 use std::{
     collections::HashMap,
     io::Read as _,
@@ -129,13 +130,13 @@ impl OrderflowIngress {
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
-            Err(error) => return JsonRpcResponse::error(None, error),
+            Err(error) => return JsonRpcResponse::error(Value::Null, error),
         };
 
         // NOTE: Signature is mandatory
         let Some(signer) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) else {
             trace!(target: INGRESS, "Error verifying signature");
-            return JsonRpcResponse::error(None, JsonRpcError::InvalidSignature);
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::InvalidSignature);
         };
 
         let entity = Entity::Signer(signer);
@@ -145,7 +146,7 @@ impl OrderflowIngress {
                 if data.rate_limit.count() > ingress.rate_limit_count {
                     trace!(target: INGRESS, "Rate limited request");
                     IngressUserMetrics::increment_requests_rate_limited();
-                    return JsonRpcResponse::error(None, JsonRpcError::RateLimited);
+                    return JsonRpcResponse::error(Value::Null, JsonRpcError::RateLimited);
                 }
                 data.rate_limit.inc();
             }
@@ -164,7 +165,7 @@ impl OrderflowIngress {
             Err(e) => {
                 trace!(target: INGRESS, ?e, body_utf8, "Error parsing JSON-RPC request");
                 IngressUserMetrics::increment_json_rpc_parse_errors(UNKNOWN);
-                return JsonRpcResponse::error(None, e);
+                return JsonRpcResponse::error(Value::Null, e);
             }
         };
 
@@ -173,7 +174,7 @@ impl OrderflowIngress {
             data.scores.score_mut(received_at.into()).number_of_requests += 1;
         }
 
-        trace!(target: INGRESS, ?entity, id = request.id, method = request.method, params = ?request.params, "Serving user JSON-RPC request");
+        trace!(target: INGRESS, ?entity, id = ?request.id, method = request.method, params = ?request.params, "Serving user JSON-RPC request");
         let result = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(Ok(bundle)) = request.take_single_param().map(|p| {
@@ -182,7 +183,7 @@ impl OrderflowIngress {
                     )
                 }) else {
                     IngressUserMetrics::increment_json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD);
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 ingress.on_bundle(entity, bundle, received_at).await.map(EthResponse::BundleHash)
@@ -198,7 +199,7 @@ impl OrderflowIngress {
                     IngressUserMetrics::increment_json_rpc_parse_errors(
                         ETH_SEND_RAW_TRANSACTION_METHOD,
                     );
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 ingress.send_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
@@ -210,7 +211,7 @@ impl OrderflowIngress {
                     ))
                 else {
                     IngressUserMetrics::increment_json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD);
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 ingress
@@ -222,7 +223,7 @@ impl OrderflowIngress {
                 trace!(target: INGRESS, %other, "Method not supported");
                 IngressUserMetrics::increment_json_rpc_unknown_method(other.to_owned());
                 return JsonRpcResponse::error(
-                    Some(request.id),
+                    request.id,
                     JsonRpcError::MethodNotFound(other.to_owned()),
                 );
             }
@@ -236,7 +237,7 @@ impl OrderflowIngress {
                         data.scores.score_mut(received_at.into()).invalid_requests += 1;
                     }
                 }
-                JsonRpcResponse::error(Some(request.id), error.into_jsonrpc_error())
+                JsonRpcResponse::error(request.id, error.into_jsonrpc_error())
             }
         };
 
@@ -286,7 +287,7 @@ impl OrderflowIngress {
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
-            Err(error) => return JsonRpcResponse::error(None, error),
+            Err(error) => return JsonRpcResponse::error(Value::Null, error),
         };
 
         let peer = 'peer: {
@@ -306,7 +307,7 @@ impl OrderflowIngress {
                 flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
                 "Error verifying peer signature"
             );
-            return JsonRpcResponse::error(None, JsonRpcError::Internal);
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
         };
 
         // This gets computed only if we enter in an error branch.
@@ -318,7 +319,7 @@ impl OrderflowIngress {
             Err(e) => {
                 error!(target: INGRESS, ?e, body_utf8 = body_utf8(), "Error parsing JSON-RPC request");
                 IngressSystemMetrics::increment_json_rpc_parse_errors(UNKNOWN);
-                return JsonRpcResponse::error(None, e);
+                return JsonRpcResponse::error(Value::Null, e);
             }
         };
 
@@ -332,14 +333,14 @@ impl OrderflowIngress {
             trace!(target: INGRESS, %peer, "Error retrieving priority from system request, defaulting to {priority}");
         }
 
-        trace!(target: INGRESS, %peer, id = request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");
+        trace!(target: INGRESS, %peer, id = ?request.id, method = request.method, params = ?request.params, "Serving system JSON-RPC request");
 
         let (raw, response) = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(raw) = request.take_single_param() else {
                     error!(target: INGRESS, "Error parsing bundle from system request: take single param failed");
                     IngressSystemMetrics::increment_json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD);
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 let bundle = match serde_json::from_value::<RawBundle>(raw.clone()) {
@@ -349,10 +350,7 @@ impl OrderflowIngress {
                         IngressSystemMetrics::increment_json_rpc_parse_errors(
                             ETH_SEND_BUNDLE_METHOD,
                         );
-                        return JsonRpcResponse::error(
-                            Some(request.id),
-                            JsonRpcError::InvalidParams,
-                        );
+                        return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                     }
                 };
 
@@ -409,7 +407,7 @@ impl OrderflowIngress {
                     IngressSystemMetrics::increment_json_rpc_parse_errors(
                         ETH_SEND_RAW_TRANSACTION_METHOD,
                     );
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 let Ok(tx) =
@@ -418,7 +416,7 @@ impl OrderflowIngress {
                     IngressSystemMetrics::increment_json_rpc_parse_errors(
                         ETH_SEND_RAW_TRANSACTION_METHOD,
                     );
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 let tx_hash = *tx.tx_hash();
@@ -452,7 +450,7 @@ impl OrderflowIngress {
                 let Some(raw) = request.take_single_param() else {
                     tracing::error!(target: INGRESS, "Error parsing mev share bundle from system request: take single param failed");
                     IngressSystemMetrics::increment_json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD);
-                    return JsonRpcResponse::error(Some(request.id), JsonRpcError::InvalidParams);
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
                 let bundle = match serde_json::from_value::<RawShareBundle>(raw.clone()) {
@@ -462,10 +460,7 @@ impl OrderflowIngress {
                         IngressSystemMetrics::increment_json_rpc_parse_errors(
                             MEV_SEND_BUNDLE_METHOD,
                         );
-                        return JsonRpcResponse::error(
-                            Some(request.id),
-                            JsonRpcError::InvalidParams,
-                        );
+                        return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                     }
                 };
 
@@ -501,7 +496,7 @@ impl OrderflowIngress {
                 error!(target: INGRESS, %other, "Method not supported");
                 IngressSystemMetrics::increment_json_rpc_unknown_method(other.to_owned());
                 return JsonRpcResponse::error(
-                    Some(request.id),
+                    request.id,
                     JsonRpcError::MethodNotFound(other.to_owned()),
                 );
             }
@@ -531,8 +526,8 @@ impl OrderflowIngress {
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
-            && bundle.metadata.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
+            bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
