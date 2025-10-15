@@ -539,10 +539,18 @@ pub(crate) mod tests {
             validation,
         );
 
-        // 3. Send a bundle receipt
-        let bundle_receipt = bundle_receipt_example();
-        let bundle_receipt_row = (bundle_receipt.clone(), builder_name.clone()).into();
-        senders.bundle_receipt_tx.send(bundle_receipt.clone()).await.unwrap();
+        let mut bundle_receipts = Vec::new();
+        let mut bundle_receipts_rows = Vec::new();
+        for _ in 0..16 {
+            bundle_receipts.push(bundle_receipt_example());
+            // So we get a different `received_at` field
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        for bundle_receipt in bundle_receipts {
+            let bundle_receipt_row = (bundle_receipt.clone(), builder_name.clone()).into();
+            bundle_receipts_rows.push(bundle_receipt_row);
+            senders.bundle_receipt_tx.send(bundle_receipt.clone()).await.unwrap();
+        }
 
         // Wait a bit for bundle to be actually processed before shutting down.
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -553,12 +561,16 @@ pub(crate) mod tests {
             "shutdown timeout"
         );
         let select_row = client
-            .query(&format!("SELECT * FROM {BUNDLE_RECEIPTS_TABLE_NAME} LIMIT 1"))
-            .fetch_one::<BundleReceiptRow>()
+            .query(&format!("SELECT * FROM {BUNDLE_RECEIPTS_TABLE_NAME}"))
+            .fetch_all::<BundleReceiptRow>()
             .await
             .unwrap();
 
-        assert_eq!(select_row, bundle_receipt_row);
+        assert_eq!(select_row.len(), bundle_receipts_rows.len());
+
+        for (row, expected) in select_row.iter().zip(bundle_receipts_rows.iter()) {
+            assert_eq!(row, expected);
+        }
 
         drop(image);
     }

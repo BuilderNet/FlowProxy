@@ -165,6 +165,7 @@ impl MockIndexer {
 #[cfg(test)]
 pub(crate) mod tests {
     use rbuilder_primitives::serialize::RawBundle;
+    use revm_primitives::B256;
     use time::UtcDateTime;
 
     use crate::{
@@ -244,9 +245,8 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn bundle_receipt_example() -> BundleReceipt {
-        let system_bundle = system_bundle_example();
         BundleReceipt {
-            bundle_hash: system_bundle.bundle_hash,
+            bundle_hash: B256::random(),
             sent_at: Some(UtcDateTime::now_ms()),
             received_at: UtcDateTime::now_ms(),
             src_builder_name: "buildernet".to_string(),
