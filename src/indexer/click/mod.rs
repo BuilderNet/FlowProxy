@@ -507,7 +507,7 @@ pub(crate) mod tests {
 
     /// E2E where we spin up the whole indexer and we shut down the application.
     #[tokio::test(flavor = "multi_thread")]
-    async fn clickhouse_bundle_receipts_insert_single_row_e2e_succeds() {
+    async fn clickhouse_bundle_receipts_rows_e2e_succeds() {
         // Uncomment to toggle logs.
         let registry = tracing_subscriber::registry().with(
             EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
@@ -515,7 +515,7 @@ pub(crate) mod tests {
         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse
-        let (image, client, config) = create_test_clickhouse_client(false).await.unwrap();
+        let (image, client, config) = create_test_clickhouse_client(true).await.unwrap();
         create_clickhouse_bundle_receipts_table(&client).await.unwrap();
 
         // 2. Spin up task executor and indexer
