@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::{
     indexer::{models::BundleRow, BuilderName},
-    types::SystemBundle,
+    primitives::SystemBundle,
 };
 
 /// An high-level order type that can be indexed in clickhouse.

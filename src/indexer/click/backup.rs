@@ -4,8 +4,8 @@ use clickhouse::inserter::{Inserter, Quantities};
 use tokio::sync::mpsc;
 
 use crate::{
-    indexer::{click::ClickhouseIndexableOrder, time::BackoffInterval},
-    metrics::IndexerMetrics,
+    indexer::click::ClickhouseIndexableOrder, metrics::IndexerMetrics,
+    primitives::backoff::BackoffInterval,
 };
 
 /// A default maximum size in bytes for the in-memory backup of failed commits.
