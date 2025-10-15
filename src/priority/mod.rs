@@ -27,10 +27,6 @@ impl Priority {
             Self::Low => "low",
         }
     }
-
-    pub fn is_high(&self) -> bool {
-        matches!(self, Self::High)
-    }
 }
 
 #[cfg(test)]
