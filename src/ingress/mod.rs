@@ -164,6 +164,8 @@ impl OrderflowIngress {
             }
         }
 
+        println!("Body: {:?}", String::from_utf8(body.to_vec()).unwrap());
+
         let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
         {
             Ok(request) => request,
