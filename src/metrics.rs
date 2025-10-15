@@ -66,12 +66,7 @@ mod name {
         pub(crate) const JSON_RPC_UNKNOWN_METHOD: &str = "ingress_json_rpc_unknown_method";
         pub(crate) const ORDER_CACHE_HIT: &str = "ingress_order_cache_hit";
         pub(crate) const REQUESTS_RATE_LIMITED: &str = "ingress_requests_rate_limited";
-        pub(crate) const SEND_BUNDLE_REQUEST_DURATION: &str =
-            "ingress_eth_sendBundle_request_duration";
-        pub(crate) const SEND_TRANSACTION_REQUEST_DURATION: &str =
-            "ingress_eth_sendRawTransaction_request_duration";
-        pub(crate) const SEND_MEV_SHARE_BUNDLE_REQUEST_DURATION: &str =
-            "ingress_mev_sendBundle_request_duration";
+        pub(crate) const RPC_REQUEST_DURATION: &str = "ingress_rpc_request_duration";
         pub(crate) const VALIDATION_ERRORS: &str = "ingress_validation_errors";
 
         pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
@@ -205,16 +200,8 @@ pub fn describe() {
         "Total number of incoming rate-limited requests"
     );
     describe_histogram!(
-        ingress::SEND_BUNDLE_REQUEST_DURATION,
-        "Duration of eth_sendBundle requests in seconds"
-    );
-    describe_histogram!(
-        ingress::SEND_MEV_SHARE_BUNDLE_REQUEST_DURATION,
-        "Duration of mev_sendBundle requests in seconds"
-    );
-    describe_histogram!(
-        ingress::SEND_TRANSACTION_REQUEST_DURATION,
-        "Duration of eth_sendRawTransaction requests in seconds"
+        ingress::RPC_REQUEST_DURATION,
+        "Duration of incoming RPC requests in seconds"
     );
     describe_counter!(ingress::VALIDATION_ERRORS, "Total number of validation errors");
     describe_histogram!(ingress::TXS_PER_BUNDLE, "Number of transactions per bundle");
@@ -357,21 +344,21 @@ pub trait IngressHandlerMetricsExt {
     /// The duration of the `eth_sendBundle` RPC call.
     #[inline]
     fn record_bundle_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::SEND_BUNDLE_REQUEST_DURATION, "handler" => Self::HANDLER, "priority" => priority.as_str())
+        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "eth_sendBundle", "priority" => priority.as_str())
             .record(duration.as_secs_f64());
     }
 
     /// The duration of the `mev_sendBundle` RPC call.
     #[inline]
     fn record_mev_share_bundle_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::SEND_MEV_SHARE_BUNDLE_REQUEST_DURATION, "handler" => Self::HANDLER, "priority" => priority.as_str())
+        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "mev_sendBundle", "priority" => priority.as_str())
             .record(duration.as_secs_f64());
     }
 
     /// The duration of the `eth_sendRawTransaction` RPC call.
     #[inline]
     fn record_transaction_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::SEND_TRANSACTION_REQUEST_DURATION, "handler" => Self::HANDLER, "priority" => priority.as_str())
+        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "eth_sendRawTransaction", "priority" => priority.as_str())
             .record(duration.as_secs_f64());
     }
 
