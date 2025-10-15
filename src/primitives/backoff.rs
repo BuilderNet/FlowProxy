@@ -178,7 +178,7 @@ impl Default for BackoffInterval {
 
 #[cfg(test)]
 mod tests {
-    use tokio::time::{self, Duration, Instant};
+    use tokio::time::{Duration, Instant};
 
     use super::*;
 
@@ -236,108 +236,63 @@ mod tests {
         assert_eq!(s.next(), Some(Duration::from_millis(10)));
     }
 
-    #[tokio::test]
+    // Tests with `start_paused = true` consists of tests with [`tokio::time::pause`] and
+    // require manual advancement of time with [`tokio::time::advance`] or with sleeps.
+
+    #[tokio::test(start_paused = true)]
     async fn backoff_interval_ticks_as_expected() {
         let backoff = ExponentialBackoff::from_millis(2);
-        // Should yiled now, now + 2ms, now + 4ms, now + 8ms, ...
+        let mut backoff_clone = backoff.clone();
         let mut interval = BackoffInterval::new(backoff);
-        interval.tick().await;
 
         let before = Instant::now();
-        interval.tick().await; // +2ms
-        interval.tick().await; // +4ms
-        interval.tick().await; // +8ms
-        interval.tick().await; // +16ms
-        let total = 2 + 4 + 8 + 16;
-        // It may drift, but should be bounded.
-        assert!(before + Duration::from_millis(total + 10) >= Instant::now());
-        assert!(Instant::now() >= before + Duration::from_millis(total));
-    }
-
-    #[tokio::test]
-    async fn backoff_interval_ticks_immediately_then_backoffs() {
-        let backoff = ExponentialBackoff::from_millis(8);
-        // Should yiled now, now + 8ms, now + 64ms, now + 512ms, ...
-        let mut interval = BackoffInterval::new(backoff);
-
-        // The first tick should fire immediately
-
-        let before_1 = Instant::now();
         let t1 = interval.tick().await;
-        assert!(before_1 + Duration::from_millis(1) >= t1); // Ensure it's bounded.
-
-        // Move forward by 2ms, should tick in about 6ms.
-        time::sleep(Duration::from_millis(2)).await;
-        tokio::select! {
-            _ = interval.tick() => { panic!("should not have ticked yet"); },
-            _ = time::sleep(Duration::from_millis(4)) => {},
-        };
-        time::sleep(Duration::from_millis(6)).await;
-
-        let before_2 = Instant::now();
+        assert_eq!(t1, before);
         let t2 = interval.tick().await;
-        assert!(before_2 + Duration::from_millis(1) >= t2); // Ensure it's bounded.
-
-        // Move forward by 16ms, should tick in about 48ms.
-        time::sleep(Duration::from_millis(16)).await;
-        tokio::select! {
-            _ = interval.tick() => { panic!("should not have ticked yet"); },
-            _ = time::sleep(Duration::from_millis(32)) => {},
-        };
-        time::sleep(Duration::from_millis(48)).await;
-
-        let before_3 = Instant::now();
+        assert_eq!(t2, t1 + backoff_clone.next().unwrap());
         let t3 = interval.tick().await;
-        assert!(before_3 + Duration::from_millis(1) >= t3); // Ensure it's bounded.
+        assert_eq!(t3, t2 + backoff_clone.next().unwrap());
+        let t4 = interval.tick().await;
+        assert_eq!(t4, t3 + backoff_clone.next().unwrap());
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn backoff_interval_resets_properly() {
-        let mut interval = BackoffInterval::new(ExponentialBackoff::from_millis(2));
+        let backoff = ExponentialBackoff::from_millis(2);
+        let mut backoff_clone = backoff.clone();
+        let mut interval = BackoffInterval::new(backoff);
+
+        interval.tick().await;
+        interval.tick().await;
+        interval.tick().await;
         interval.tick().await;
 
-        let acceptable_drift = 10;
-
-        let before = Instant::now();
-        interval.tick().await; // +2ms
-        interval.tick().await; // +4ms
-        interval.tick().await; // +8ms
-        interval.tick().await; // +16ms
-        let total = 2 + 4 + 8 + 16;
-        // It may drift, but should be bounded.
-        assert!(before + Duration::from_millis(total + acceptable_drift) >= Instant::now());
-        assert!(Instant::now() >= before + Duration::from_millis(total));
-
-        let acceptable_drift = 2;
         interval.reset();
-        let before = Instant::now();
-        interval.tick().await;
-        assert!(before + Duration::from_millis(2 + acceptable_drift) >= Instant::now());
-        assert!(Instant::now() >= before + Duration::from_millis(2));
+        let now = Instant::now();
+        let expected_delay = backoff_clone.next().unwrap();
+        let actual = interval.tick().await;
+
+        assert_eq!(now + expected_delay, actual);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn backoff_interval_with_jitter_works() {
-        time::pause(); // manual control of time with time::advance
-
         // No jitter
         {
             let beginning = Instant::now();
 
             let backoff = ExponentialBackoff::from_millis(5);
+            let mut backoff_clone = backoff.clone();
             let mut interval = BackoffInterval::new(backoff);
+
             let t1 = interval.tick().await;
             assert_eq!(t1, beginning); // First tick is immediate
 
-            let expected_drift = 1; // in this mode, tokio intervally advances time by 1ms after sleep completion
-
-            // Next tick will be 5ms later, we have no jitter.
             let t2 = interval.tick().await;
-            assert_eq!(t2, beginning + Duration::from_millis(5 + expected_drift));
+            assert_eq!(t2, t1 + backoff_clone.next().unwrap());
 
-            // Next tick will be 25ms later, we have no jitter.
-            let t2 = interval.tick().await;
-            assert_eq!(t2, beginning + Duration::from_millis(5 + 25 + expected_drift * 2));
+            let t3 = interval.tick().await;
+            assert_eq!(t3, t2 + backoff_clone.next().unwrap());
         }
 
         // Jitter
@@ -345,13 +300,14 @@ mod tests {
             let beginning = Instant::now();
 
             let backoff = ExponentialBackoff::from_millis(5);
+            let mut backoff_clone = backoff.clone();
             let mut interval = BackoffInterval::new(backoff).with_jitter();
             let t1 = interval.tick().await;
             assert_eq!(t1, beginning); // First tick is immediate
 
             // Next tick will be 5ms later, but jitter changes it.
             let t2 = interval.tick().await;
-            assert_ne!(t2, beginning + Duration::from_millis(5));
+            assert_ne!(t2, t1 + backoff_clone.next().unwrap());
         }
     }
 }
