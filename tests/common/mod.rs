@@ -168,18 +168,18 @@ impl BuilderReceiver {
             Ok(decompressed) => decompressed,
             Err(error) => {
                 tracing::error!("Error decompressing body: {:?}", error);
-                return JsonRpcResponse::error(None, error);
+                return JsonRpcResponse::error(Value::Null, error);
             }
         };
 
         let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
         {
             Ok(request) => request,
-            Err(error) => return JsonRpcResponse::error(None, error),
+            Err(error) => return JsonRpcResponse::error(Value::Null, error),
         };
 
-        let request_id = request.id;
-        tracing::info!(id = request_id, method = request.method, "Received request");
+        let request_id = request.id.clone();
+        tracing::info!(id = ?request_id, method = request.method, "Received request");
 
         tracing::info!("Sending request to builder");
         tracing::debug!("Request: {:?}", request);
