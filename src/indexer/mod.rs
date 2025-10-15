@@ -9,15 +9,14 @@ use crate::{
     cli::IndexerArgs,
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     metrics::IndexerMetrics,
+    primitives::{BundleReceipt, SystemBundle},
     tasks::TaskExecutor,
-    types::{BundleReceipt, SystemBundle},
 };
 
 mod click;
 mod models;
 mod parq;
 mod ser;
-mod time;
 
 /// The size of the channel buffer for the bundle indexer.
 pub const BUNDLE_INDEXER_BUFFER_SIZE: usize = 12384;
@@ -166,8 +165,8 @@ pub(crate) mod tests {
     use rbuilder_primitives::serialize::RawBundle;
 
     use crate::{
+        primitives::{SystemBundle, SystemBundleMetadata, UtcInstant},
         priority::Priority,
-        types::{SystemBundle, SystemBundleMetadata, UtcInstant},
     };
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real

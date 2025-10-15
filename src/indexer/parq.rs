@@ -24,8 +24,8 @@ use crate::{
     cli::ParquetArgs,
     indexer::{BuilderName, OrderReceivers, TARGET},
     metrics::IndexerMetrics,
+    primitives::{BundleReceipt, Sampler},
     tasks::TaskExecutor,
-    types::{BundleReceipt, Sampler},
 };
 
 /// The Arrow schema for bundle receipts.
@@ -266,9 +266,9 @@ mod tests {
     use crate::{
         cli::ParquetArgs,
         indexer::{self, parq::ParquetIndexer},
+        primitives::BundleReceipt,
         priority::Priority,
         tasks::TaskManager,
-        types::BundleReceipt,
         utils::testutils::Random,
     };
 

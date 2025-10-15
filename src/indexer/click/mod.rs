@@ -23,8 +23,8 @@ use crate::{
         BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TARGET,
     },
     metrics::IndexerMetrics,
+    primitives::{Sampler, SystemBundle},
     tasks::TaskExecutor,
-    types::{Sampler, SystemBundle},
 };
 
 mod backup;
