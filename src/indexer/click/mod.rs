@@ -274,20 +274,20 @@ impl ClickhouseIndexer {
             let mut shutdown_guard = None;
             tokio::select! {
                 _ = bundle_receipt_inserter_runner.run_loop() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle indexer channel closed");
+                    tracing::info!(target: TARGET, "clickhouse bundle receipt indexer channel closed");
                 }
                 guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle indexer, performing cleanup");
+                    tracing::info!(target: TARGET, "Received shutdown for bundle receipt indexer, performing cleanup");
                     shutdown_guard = Some(guard);
                 },
             }
 
             match  bundle_receipt_inserter_runner.inserter.end().await {
                 Ok(quantities) => {
-                    tracing::info!(target: TARGET, ?quantities, "finalized clickhouse bundle inserter");
+                    tracing::info!(target: TARGET, ?quantities, "finalized clickhouse bundle receipt inserter");
                 }
                 Err(e) => {
-                    tracing::error!(target: TARGET, ?e, "failed to write end insertion of bundles to indexer");
+                    tracing::error!(target: TARGET, ?e, "failed to write end insertion of bundle receipts to indexer");
                 }
             }
             drop(shutdown_guard);
@@ -297,10 +297,10 @@ impl ClickhouseIndexer {
             let mut shutdown_guard = None;
             tokio::select! {
                 _ = bundle_receipt_backup.run() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle backup channel closed");
+                    tracing::info!(target: TARGET, "clickhouse bundle backup receipts channel closed");
                 }
                 guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle indexer, performing cleanup");
+                    tracing::info!(target: TARGET, "Received shutdown for bundle receipts indexer, performing cleanup");
                     shutdown_guard = Some(guard);
                 },
             }
