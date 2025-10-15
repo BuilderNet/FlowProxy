@@ -239,7 +239,7 @@ impl ClickhouseIndexer {
             bundle_receipt_inserter_runner,
             "bundle receipts"
         );
-        spawn_clickhouse_backup!(task_executor, bundle_receipt_backup, "bundles receipts");
+        spawn_clickhouse_backup!(task_executor, bundle_receipt_backup, "bundle receipts");
     }
 }
 
