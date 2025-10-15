@@ -24,10 +24,12 @@ use crate::{
     },
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, Sampler, SystemBundle},
+    spawn_clickhouse_backup, spawn_clickhouse_inserter,
     tasks::TaskExecutor,
 };
 
 mod backup;
+mod macros;
 mod models;
 pub(crate) mod primitives;
 
@@ -230,84 +232,14 @@ impl ClickhouseIndexer {
         )
         .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 
-        // TODO: Make this generic over order types. Requires some trait bounds.
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = bundle_inserter_runner.run_loop() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle indexer channel closed");
-                }
-                guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
-
-            match  bundle_inserter_runner.inserter.end().await {
-                Ok(quantities) => {
-                    tracing::info!(target: TARGET, ?quantities, "finalized clickhouse bundle inserter");
-                }
-                Err(e) => {
-                    tracing::error!(target: TARGET, ?e, "failed to write end insertion of bundles to indexer");
-                }
-            }
-            drop(shutdown_guard);
-        });
-
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = bundle_backup.run() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle backup channel closed");
-                }
-                guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
-
-            bundle_backup.end().await;
-            drop(shutdown_guard);
-        });
-
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = bundle_receipt_inserter_runner.run_loop() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle receipt indexer channel closed");
-                }
-                guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle receipt indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
-
-            match  bundle_receipt_inserter_runner.inserter.end().await {
-                Ok(quantities) => {
-                    tracing::info!(target: TARGET, ?quantities, "finalized clickhouse bundle receipt inserter");
-                }
-                Err(e) => {
-                    tracing::error!(target: TARGET, ?e, "failed to write end insertion of bundle receipts to indexer");
-                }
-            }
-            drop(shutdown_guard);
-        });
-
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = bundle_receipt_backup.run() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle backup receipts channel closed");
-                }
-                guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle receipts indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
-
-            bundle_receipt_backup.end().await;
-            drop(shutdown_guard);
-        });
+        spawn_clickhouse_inserter!(task_executor, bundle_inserter_runner, "bundles");
+        spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
+        spawn_clickhouse_inserter!(
+            task_executor,
+            bundle_receipt_inserter_runner,
+            "bundle receipts"
+        );
+        spawn_clickhouse_backup!(task_executor, bundle_receipt_backup, "bundles receipts");
     }
 }
 
