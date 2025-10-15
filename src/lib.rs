@@ -123,6 +123,7 @@ pub async fn run_with_listeners(
     info!(address = %local_signer, "Orderflow signer configured");
 
     let client = reqwest::Client::builder()
+        .hickory_dns(true)
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
         .pool_idle_timeout(Duration::from_secs(30))
@@ -280,6 +281,7 @@ async fn run_update_peers(
     task_executor: TaskExecutor,
 ) {
     let client = reqwest::Client::builder()
+        .hickory_dns(true)
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .build()
         .unwrap();
@@ -330,6 +332,7 @@ async fn run_update_peers(
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
                     client = reqwest::Client::builder()
+                        .hickory_dns(true)
                         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .https_only(true)
                         .add_root_certificate(tls_cert.clone())
