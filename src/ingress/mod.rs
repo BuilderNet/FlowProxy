@@ -633,9 +633,14 @@ impl OrderflowIngress {
     async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
         let bundle_uuid = bundle.uuid();
         let bundle_hash = bundle.bundle_hash();
+        let priority = bundle.metadata.priority;
+        let received_at = bundle.metadata.received_at;
+
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(bundle);
         debug!(target: "ingress", %bundle_uuid, %bundle_hash, "Bundle processed");
+
+        IngressUserMetrics::record_bundle_rpc_duration(priority, received_at.elapsed());
         Ok(bundle_hash)
     }
 
@@ -645,8 +650,12 @@ impl OrderflowIngress {
         bundle: SystemMevShareBundle,
     ) -> Result<B256, IngressError> {
         let bundle_hash = bundle.bundle_hash();
+        let received_at = bundle.received_at;
+
         self.forwarders.broadcast_mev_share_bundle(priority, bundle);
         debug!(target: "ingress", %bundle_hash, "MEV Share bundle processed");
+
+        IngressUserMetrics::record_mev_share_bundle_rpc_duration(priority, received_at.elapsed());
         Ok(bundle_hash)
     }
 
@@ -699,6 +708,8 @@ impl OrderflowIngress {
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", tx_hash = %tx_hash, elapsed = ?elapsed, "Raw transaction processed");
+
+        IngressUserMetrics::record_transaction_rpc_duration(priority, received_at.elapsed());
 
         Ok(tx_hash)
     }
