@@ -229,7 +229,7 @@ impl ParquetRunner {
             tokio::select! {
                 maybe_receipt = self.rx.recv() => {
                     sampler.sample(|| {
-                        IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), "bundle_receipt");
+                        IndexerMetrics::set_parquet_queue_size(self.rx.len(), "bundle_receipt");
                     });
 
                     let Some(receipt) = maybe_receipt else {
@@ -299,7 +299,6 @@ mod tests {
                 sent_at: Some(sent_at),
                 received_at,
                 src_builder_name: Address::random_with(rng).to_string(),
-                dst_builder_name: Some(Address::random_with(rng).to_string()),
                 payload_size: U32::random_with(rng).to(),
                 priority: Priority::Medium,
             }
@@ -324,7 +323,6 @@ mod tests {
         let bundle_hash: FixedSizeBinaryArray = batch.column(0).to_data().into();
         let sent_at: TimestampMicrosecondArray = batch.column(1).to_data().into();
         let received_at: TimestampMicrosecondArray = batch.column(2).to_data().into();
-        let dst_builder_name: StringArray = batch.column(3).to_data().into();
         let src_builder_name: StringArray = batch.column(4).to_data().into();
         let payload_size: UInt32Array = batch.column(5).to_data().into();
         let priority: UInt8Array = batch.column(6).to_data().into();
@@ -348,7 +346,6 @@ mod tests {
             };
 
             let src_builder_name = src_builder_name.value(i).to_string();
-            let dst_builder_name = dst_builder_name.value(i).to_string();
 
             let payload_size = payload_size.value(i);
             let priority = match priority.value(i) {
@@ -363,7 +360,6 @@ mod tests {
                 sent_at,
                 received_at,
                 src_builder_name,
-                dst_builder_name: Some(dst_builder_name),
                 payload_size,
                 priority,
             });
@@ -402,13 +398,8 @@ mod tests {
         // 2. --- Spam.
 
         let mut rng = rand::rng();
-        let example_bundle_receipts = (0..8192)
-            .map(|_| {
-                let mut r = BundleReceipt::random(&mut rng);
-                r.dst_builder_name = Some("buildernet_dst".to_string());
-                r
-            })
-            .collect::<Vec<_>>();
+        let example_bundle_receipts =
+            (0..1024).map(|_| BundleReceipt::random(&mut rng)).collect::<Vec<_>>();
 
         rt.block_on(async {
             for r in &example_bundle_receipts {
