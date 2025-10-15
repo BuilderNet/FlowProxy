@@ -403,12 +403,7 @@ pub(crate) mod tests {
     /// Creates the bundles table from the DDL present inside the `fixtures` folder.
     async fn create_clickhouse_bundles_table(client: &ClickhouseClient) -> ClickhouseResult<()> {
         let create_bundles_table_ddl = fs::read_to_string("./fixtures/create_bundles_table.sql")
-            .expect("could not read create_bundles_table.sql")
-            // NOTE: for local instances, ReplicatedMergeTree isn't supported.
-            .replace(
-                "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
-                "ENGINE = MergeTree()",
-            );
+            .expect("could not read create_bundles_table.sql");
         client.query(&create_bundles_table_ddl).execute().await
     }
 
@@ -418,8 +413,7 @@ pub(crate) mod tests {
     ) -> ClickhouseResult<()> {
         let create_bundle_receipts_table_ddl =
             fs::read_to_string("./fixtures/create_bundle_receipts_table.sql")
-                .expect("could not read create_bundle_receipts_table.sql")
-                .replace("ENGINE = SharedMergeTree()", "ENGINE = MergeTree()");
+                .expect("could not read create_bundle_receipts_table.sql");
         client.query(&create_bundle_receipts_table_ddl).execute().await
     }
 

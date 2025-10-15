@@ -12,7 +12,7 @@ CREATE TABLE bundle_receipts (
   INDEX bundle_hash_bloom_filter bundle_hash TYPE bloom_filter GRANULARITY 10,
   INDEX double_bundle_hash_bloom_filter double_bundle_hash TYPE bloom_filter GRANULARITY 10,
 )
-ENGINE = SharedMergeTree()
+ENGINE = MergeTree()
 PARTITION BY toYYYYMM(received_at)
 PRIMARY KEY (received_at)
 ORDER BY (received_at)
