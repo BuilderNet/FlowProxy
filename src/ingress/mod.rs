@@ -10,7 +10,9 @@ use crate::{
     forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
-    metrics::{IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics},
+    metrics::{
+        IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics, SystemMetrics,
+    },
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
         EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleMetadata,
@@ -99,6 +101,20 @@ impl OrderflowIngress {
             entity.priority(request, &mut data.scores, &self.spam_thresholds)
         } else {
             Priority::Low
+        }
+    }
+
+    /// Record queue capacity metrics for the given priority.
+    fn record_queue_capacity_metrics(&self, priority: Priority) {
+        let available_permits = self.pqueues.available_permits_for(priority);
+        let total_permits = self.pqueues.total_permits_for(priority);
+        if available_permits == 0 {
+            SystemMetrics::increment_queue_capacity_hit(priority);
+        }
+
+        // Record queue capacity almost hit if the queue is at 75% of capacity.
+        if available_permits <= total_permits / 4 {
+            SystemMetrics::increment_queue_capacity_almost_hit(priority);
         }
     }
 
@@ -521,6 +537,9 @@ impl OrderflowIngress {
         if bundle.metadata.version.is_none() {
             bundle.metadata.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
         }
+
+        // Record queue capacity metrics.
+        self.record_queue_capacity_metrics(priority);
 
         // Decode and validate the bundle.
         let bundle = self

@@ -87,6 +87,8 @@ mod name {
             "system_e2e_transaction_processing_time";
         pub(crate) const E2E_SYSTEM_ORDER_PROCESSING_TIME: &str =
             "system_e2e_system_order_processing_time";
+        pub(crate) const QUEUE_CAPACITY_HITS: &str = "system_queue_capacity_hits";
+        pub(crate) const QUEUE_CAPACITY_ALMOST_HITS: &str = "system_queue_capacity_almost_hits";
     }
 }
 
@@ -233,6 +235,14 @@ pub fn describe() {
     describe_histogram!(
         system::E2E_SYSTEM_ORDER_PROCESSING_TIME,
         "End-to-end system order processing time in seconds"
+    );
+    describe_counter!(
+        system::QUEUE_CAPACITY_HITS,
+        "Number of times the queue capacity was hit per priority"
+    );
+    describe_counter!(
+        system::QUEUE_CAPACITY_ALMOST_HITS,
+        "Number of times the queue capacity was almost hit per priority (>= 75% of capacity)"
     );
 }
 
@@ -479,6 +489,16 @@ impl SystemMetrics {
 
         histogram!(system::E2E_SYSTEM_ORDER_PROCESSING_TIME, &labels)
             .record(duration.as_secs_f64());
+    }
+
+    #[inline]
+    pub fn increment_queue_capacity_hit(priority: Priority) {
+        counter!(system::QUEUE_CAPACITY_HITS, "priority" => priority.as_str()).increment(1);
+    }
+
+    #[inline]
+    pub fn increment_queue_capacity_almost_hit(priority: Priority) {
+        counter!(system::QUEUE_CAPACITY_ALMOST_HITS, "priority" => priority.as_str()).increment(1);
     }
 }
 
