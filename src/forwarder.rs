@@ -7,12 +7,12 @@ use crate::{
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::{ForwarderMetrics, SystemMetrics},
-    priority::{pchannel, Priority},
-    tasks::TaskExecutor,
-    types::{
+    primitives::{
         EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithEncoding,
     },
+    priority::{pchannel, Priority},
+    tasks::TaskExecutor,
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;

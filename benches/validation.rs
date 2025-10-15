@@ -6,8 +6,8 @@ use alloy_signer_local::PrivateKeySigner;
 use buildernet_orderflow_proxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_verify_signature,
+    primitives::{SystemBundle, SystemBundleMetadata, UtcInstant},
     priority::Priority,
-    types::{SystemBundle, SystemBundleMetadata, UtcInstant},
     utils::testutils::Random,
 };
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};

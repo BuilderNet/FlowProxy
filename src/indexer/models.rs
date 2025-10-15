@@ -12,7 +12,7 @@ use rbuilder_primitives::BundleVersion;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::types::{DecodedBundle, SystemBundle};
+use crate::primitives::{DecodedBundle, SystemBundle};
 
 /// Model representing Clickhouse bundle row.
 ///
@@ -328,7 +328,7 @@ pub(crate) mod tests {
 
     use crate::{
         indexer::{self, models::BundleRow},
-        types::SystemBundle,
+        primitives::SystemBundle,
     };
 
     impl From<BundleRow> for RawBundle {
