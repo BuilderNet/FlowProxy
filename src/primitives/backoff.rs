@@ -1,7 +1,4 @@
 //! Time-related utilies.
-//!
-//! TODO: move this into a "primitives" folder, requires refactory that should not be done in the
-//! PR that introduced this.
 
 use std::{
     future::{poll_fn, Future as _},
