@@ -6,10 +6,11 @@ CREATE TABLE bundle_receipts (
   `received_at` DateTime64(6, 'UTC') COMMENT 'The time the local operator has received the payload',
   `dst_builder_name` LowCardinality(String) COMMENT 'The operator that received the payload',
   `src_builder_name` LowCardinality(String) COMMENT 'The name of the operator which sent us the payload',
-  `payload_size` UInt32,
-  `priority` LowCardinality(String), -- Or UInt 8?
+  `payload_size` UInt32 COMMENT 'The size of the uncompressed payload in bytes',
+  `priority` UInt8,
 
   INDEX bundle_hash_bloom_filter bundle_hash TYPE bloom_filter GRANULARITY 10,
+  INDEX double_bundle_hash_bloom_filter double_bundle_hash TYPE bloom_filter GRANULARITY 10,
 )
 ENGINE = SharedMergeTree()
 PARTITION BY toYYYYMM(received_at)
