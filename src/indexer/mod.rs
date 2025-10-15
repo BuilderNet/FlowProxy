@@ -32,6 +32,9 @@ pub const TRANSACTION_INDEXER_BUFFER_SIZE: usize = 4096;
 /// The name of the Clickhouse table to store bundles in.
 pub const BUNDLE_TABLE_NAME: &str = "bundles";
 
+/// The name of the Clickhouse table to store bundle receipts in.
+pub const BUNDLE_RECEIPTS_TABLE_NAME: &str = "bundle_receipts";
+
 /// The name of the Clickhouse table to store transactions in.
 pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 

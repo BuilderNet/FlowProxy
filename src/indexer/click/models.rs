@@ -322,6 +322,7 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
 
 /// The clickhouse model representing a [`crate::primitives::BundleReceipt`].
 #[derive(Debug, Clone, clickhouse::Row, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleReceiptRow {
     #[serde(with = "hash")]
     bundle_hash: B256,

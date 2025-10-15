@@ -2,7 +2,10 @@ use alloy_primitives::B256;
 use clickhouse::{Row, RowWrite};
 use serde::Serialize;
 
-use crate::{indexer::click::models::BundleRow, primitives::SystemBundle};
+use crate::{
+    indexer::click::models::{BundleReceiptRow, BundleRow},
+    primitives::{BundleReceipt, SystemBundle},
+};
 
 /// A simple alias to refer to a builder name.
 pub(crate) type BuilderName = String;
@@ -28,6 +31,20 @@ impl ClickhouseIndexableOrder for SystemBundle {
     type ClickhouseRowType = BundleRow;
 
     const ORDER_TYPE: &'static str = "bundle";
+
+    fn hash(&self) -> B256 {
+        self.bundle_hash
+    }
+
+    fn to_row_ref(row: &Self::ClickhouseRowType) -> &<Self::ClickhouseRowType as Row>::Value<'_> {
+        row
+    }
+}
+
+impl ClickhouseIndexableOrder for BundleReceipt {
+    type ClickhouseRowType = BundleReceiptRow;
+
+    const ORDER_TYPE: &'static str = "bundle_receipt";
 
     fn hash(&self) -> B256 {
         self.bundle_hash
