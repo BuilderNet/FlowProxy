@@ -11,6 +11,19 @@ use std::str::FromStr;
 /// Supported JSON-RPC version 2.0.
 pub const JSONRPC_VERSION_2: &str = "2.0";
 
+fn deserialize_id<'de, D>(deserializer: D) -> Result<serde_json::Value, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let id = serde_json::Value::deserialize(deserializer)?;
+    match id {
+        serde_json::Value::String(_) | serde_json::Value::Number(_) | serde_json::Value::Null => {
+            Ok(id)
+        }
+        _ => Err(serde::de::Error::custom("id must be string, number, or null")),
+    }
+}
+
 /// JSON-RPC request object.
 /// Spec: <https://www.jsonrpc.org/specification#request_object>.
 ///
@@ -19,7 +32,8 @@ pub const JSONRPC_VERSION_2: &str = "2.0";
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest<T> {
     /// An identifier established by the client.
-    pub id: u64,
+    #[serde(deserialize_with = "deserialize_id")]
+    pub id: serde_json::Value,
     /// A String specifying the version of the JSON-RPC protocol. MUST be exactly "2.0".
     pub jsonrpc: String,
     /// A String containing the name of the method to be invoked.
@@ -62,13 +76,15 @@ where
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
         match Json::<JsonRpcRequest<T>>::from_request(req, state).await {
             Ok(json) => {
-                let id = json.id;
+                let id = json.id.clone();
                 match Self::from_json(json) {
                     Ok(request) => Ok(request),
-                    Err(error) => Err(JsonRpcResponse::error(Some(id), error)),
+                    Err(error) => Err(JsonRpcResponse::error(id, error)),
                 }
             }
-            Err(_error) => Err(JsonRpcResponse::error(None, JsonRpcError::ParseError)),
+            Err(_error) => {
+                Err(JsonRpcResponse::error(serde_json::Value::Null, JsonRpcError::ParseError))
+            }
         }
     }
 }
@@ -77,26 +93,26 @@ where
 /// Spec: <https://www.jsonrpc.org/specification#response_object>.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonRpcResponse<T> {
-    pub id: Option<u64>,
+    pub id: serde_json::Value,
     pub jsonrpc: String,
     #[serde(flatten)]
     pub result_or_error: JsonRpcResponseTy<T>,
 }
 
 impl<T> JsonRpcResponse<T> {
-    pub fn new(id: Option<u64>, result_or_error: JsonRpcResponseTy<T>) -> Self {
+    pub fn new(id: serde_json::Value, result_or_error: JsonRpcResponseTy<T>) -> Self {
         Self { id, result_or_error, jsonrpc: JSONRPC_VERSION_2.to_owned() }
     }
 
-    pub fn result(id: u64, result: T) -> Self {
+    pub fn result(id: serde_json::Value, result: T) -> Self {
         Self {
-            id: Some(id),
+            id,
             result_or_error: JsonRpcResponseTy::Result(result),
             jsonrpc: JSONRPC_VERSION_2.to_owned(),
         }
     }
 
-    pub fn error(id: Option<u64>, error: JsonRpcError) -> Self {
+    pub fn error(id: serde_json::Value, error: JsonRpcError) -> Self {
         Self {
             id,
             result_or_error: JsonRpcResponseTy::Error { code: error.code(), message: error },
@@ -260,6 +276,28 @@ mod tests {
         ];
         for error in errors {
             assert_eq!(error, JsonRpcError::from_str(&error.to_string()).unwrap());
+        }
+    }
+
+    #[test]
+    fn jsonrpc_id_parsing() {
+        let valid_ids = [
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle","id":1}"#,
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle","id":"1"}"#,
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle","id":null}"#,
+        ];
+        for id in valid_ids {
+            let _req: JsonRpcRequest<()> = serde_json::from_str(id).unwrap();
+        }
+
+        let invalid_ids = [
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle","id":{}}"#,
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle","id":[]}"#,
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle","id":true}"#,
+            r#"{"jsonrpc":"2.0","method":"eth_sendBundle"}"#,
+        ];
+        for id in invalid_ids {
+            serde_json::from_str::<JsonRpcRequest<()>>(id).unwrap_err();
         }
     }
 }
