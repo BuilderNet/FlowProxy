@@ -20,6 +20,8 @@ pub const BUILDERNET_SENT_AT_HEADER: &str = "X-BuilderNet-SentAtUs";
 /// Header name for XFF header.
 pub const XFF_HEADER: &str = "X-Forwarded-For";
 
+pub const UNKNOWN: &str = "unknown";
+
 /// JSON-RPC method name for sending bundles.
 pub const ETH_SEND_BUNDLE_METHOD: &str = "eth_sendBundle";
 

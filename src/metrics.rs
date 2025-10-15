@@ -294,8 +294,9 @@ pub trait IngressHandlerMetricsExt {
     }
 
     #[inline]
-    fn increment_json_rpc_parse_errors() {
-        counter!(ingress::JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER).increment(1);
+    fn increment_json_rpc_parse_errors(method: &'static str) {
+        counter!(ingress::JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER, "method" => method)
+            .increment(1);
     }
 
     #[inline]
