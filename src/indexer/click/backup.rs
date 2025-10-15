@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, time::Instant};
 
 use clickhouse::inserter::{Inserter, Quantities};
+use derive_more::{Deref, DerefMut};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -30,6 +31,27 @@ impl<T: ClickhouseIndexableOrder> FailedCommit<T> {
     }
 }
 
+/// A wrapper over a [`VecDeque`] of [`FailedCommit`] with added functionality
+#[derive(Deref, DerefMut)]
+struct FailedCommits<T: ClickhouseIndexableOrder>(VecDeque<FailedCommit<T>>);
+
+impl<T: ClickhouseIndexableOrder> FailedCommits<T> {
+    fn track_size(&self) -> u64 {
+        let total_size_bytes = self.iter().map(|c| c.quantities.bytes).sum::<u64>();
+
+        IndexerMetrics::set_clickhouse_backup_size_bytes(total_size_bytes, T::ORDER_TYPE);
+        IndexerMetrics::set_clickhouse_backup_size_batches(self.len(), T::ORDER_TYPE);
+
+        total_size_bytes
+    }
+}
+
+impl<T: ClickhouseIndexableOrder> Default for FailedCommits<T> {
+    fn default() -> Self {
+        Self(VecDeque::default())
+    }
+}
+
 // Rationale for sending multiple rows instead of sending rows: the backup abstraction must
 // periodically block to write data to the inserter and try to commit it to clickhouse. Each
 // attempt results in doing the previous step. This could clog the channel which will receive
@@ -46,7 +68,7 @@ pub(crate) struct MemoryBackup<T: ClickhouseIndexableOrder> {
     /// The receiver of failed commit attempts.
     rx: mpsc::Receiver<FailedCommit<T>>,
     /// The in-memory cache of failed commits.
-    failed_commits: VecDeque<FailedCommit<T>>,
+    failed_commits: FailedCommits<T>,
     /// A clickhouse inserter for committing again the data.
     inserter: Inserter<T::ClickhouseRowType>,
     /// The interval at which we try to backup data.
@@ -94,10 +116,8 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
 
                     let quantities = failed_commit.quantities.clone();
                     self.failed_commits.push_back(failed_commit);
-                    let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
+                    let total_size_bytes = self.failed_commits.track_size();
 
-                    IndexerMetrics::set_clickhouse_backup_size_bytes(total_size_bytes);
-                    IndexerMetrics::set_clickhouse_backup_size_batches(self.failed_commits.len());
                     tracing::debug!(target: TARGET, order = T::ORDER_TYPE,
                         bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, total_batches = self.failed_commits.len(),
                         "received failed commit to backup"
@@ -112,8 +132,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                 _ = self.interval.tick() => {
                     let Some(oldest) = self.failed_commits.pop_back() else {
                         self.interval.reset();
-                        IndexerMetrics::set_clickhouse_backup_size_bytes(0);
-                        IndexerMetrics::set_clickhouse_backup_size_batches(0);
+                        self.failed_commits.track_size();
                         continue // Nothing to do!
                     };
 

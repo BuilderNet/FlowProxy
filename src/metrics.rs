@@ -595,13 +595,13 @@ impl IndexerMetrics {
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size_bytes(size: u64) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES).set(size as f64);
+    pub fn set_clickhouse_backup_size_bytes(size: u64, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "order" => order).set(size as f64);
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size_batches(size: usize) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES).set(size as f64);
+    pub fn set_clickhouse_backup_size_batches(size: usize, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "order" => order).set(size as f64);
     }
 
     #[inline]
