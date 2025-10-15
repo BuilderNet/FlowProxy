@@ -564,6 +564,8 @@ impl OrderflowIngress {
 
         self.indexer_handle.index_bundle(bundle.clone());
 
+        IngressUserMetrics::record_bundle_rpc_duration(priority, elapsed);
+
         self.send_bundle(bundle).await
     }
 
@@ -626,6 +628,8 @@ impl OrderflowIngress {
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", %bundle_hash, ?elapsed, "MEV Share bundle validated");
+
+        IngressUserMetrics::record_mev_share_bundle_rpc_duration(priority, elapsed);
 
         self.send_mev_share_bundle(priority, bundle).await
     }
@@ -699,6 +703,8 @@ impl OrderflowIngress {
 
         let elapsed = start.elapsed();
         debug!(target: "ingress", tx_hash = %tx_hash, elapsed = ?elapsed, "Raw transaction processed");
+
+        IngressUserMetrics::record_transaction_rpc_duration(priority, elapsed);
 
         Ok(tx_hash)
     }
