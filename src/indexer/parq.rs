@@ -334,7 +334,7 @@ mod tests {
         let mut out = Vec::with_capacity(batch.num_rows());
 
         let bundle_hash: FixedSizeBinaryArray = batch.column(0).to_data().into();
-        let double_bundle_hash: FixedSizeBinaryArray = batch.column(1).to_data().into();
+        let _double_bundle_hash: FixedSizeBinaryArray = batch.column(1).to_data().into();
         let sent_at: TimestampMicrosecondArray = batch.column(2).to_data().into();
         let received_at: TimestampMicrosecondArray = batch.column(3).to_data().into();
         let _dst_builder_name: StringArray = batch.column(4).to_data().into();

@@ -162,9 +162,10 @@ impl MockIndexer {
 #[cfg(test)]
 pub(crate) mod tests {
     use rbuilder_primitives::serialize::RawBundle;
+    use time::UtcDateTime;
 
     use crate::{
-        primitives::{SystemBundle, SystemBundleMetadata, UtcInstant},
+        primitives::{BundleReceipt, SystemBundle, SystemBundleMetadata, UtcInstant},
         priority::Priority,
     };
 
@@ -226,5 +227,17 @@ pub(crate) mod tests {
 
         let metadata = SystemBundleMetadata { signer, received_at, priority: Priority::Medium };
         SystemBundle::try_decode(bundle, metadata).unwrap()
+    }
+
+    pub(crate) fn bundle_receipt_example() -> BundleReceipt {
+        let system_bundle = system_bundle_example();
+        BundleReceipt {
+            bundle_hash: system_bundle.bundle_hash,
+            sent_at: Some(UtcDateTime::now()),
+            received_at: UtcDateTime::now(),
+            src_builder_name: "buildernet".to_string(),
+            payload_size: 256,
+            priority: Priority::Medium,
+        }
     }
 }
