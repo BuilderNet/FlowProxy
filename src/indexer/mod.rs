@@ -172,6 +172,17 @@ pub(crate) mod tests {
         priority::Priority,
     };
 
+    trait UtcDateTimeExt {
+        fn now_ms() -> Self;
+    }
+
+    impl UtcDateTimeExt for UtcDateTime {
+        fn now_ms() -> Self {
+            let now = UtcDateTime::now();
+            now.replace_millisecond(now.millisecond()).unwrap()
+        }
+    }
+
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
     /// bundle, along with the block number set to zero. The rest is to mainly populate some
     /// fields.
@@ -236,8 +247,8 @@ pub(crate) mod tests {
         let system_bundle = system_bundle_example();
         BundleReceipt {
             bundle_hash: system_bundle.bundle_hash,
-            sent_at: Some(UtcDateTime::now()),
-            received_at: UtcDateTime::now(),
+            sent_at: Some(UtcDateTime::now_ms()),
+            received_at: UtcDateTime::now_ms(),
             src_builder_name: "buildernet".to_string(),
             payload_size: 256,
             priority: Priority::Medium,
