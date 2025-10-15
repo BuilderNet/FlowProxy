@@ -425,7 +425,7 @@ pub(crate) mod tests {
                 0 => Priority::High,
                 1 => Priority::Medium,
                 2 => Priority::Low,
-                _ => panic!("invalid priority value: {}", value),
+                _ => panic!("invalid priority value: {value}"),
             }
         }
     }
