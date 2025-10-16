@@ -83,7 +83,7 @@ thiserror = "2"
 uuid = { version = "1", features = ["serde"] }
 dashmap = "6"
 flate2 = { version = "1", features = ["zlib-rs"], default-features = false }
-reqwest = { version = "0.12", features = ["json", "hickory-dns"] }
+reqwest = { version = "0.12", features = ["json"] }
 strum = "0.27"
 strum_macros = "0.27"
 mini-moka = "0.10.3"
