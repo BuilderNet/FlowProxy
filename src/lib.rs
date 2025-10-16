@@ -322,8 +322,7 @@ async fn run_update_peers(
                     .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                     .max_concurrent_connections(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                     .tcp_send_buffer_size(8 * 1024 * 1024) // 8MB
-                    .tcp_recv_buffer_size(8 * 1024 * 1024) // 8MB
-                    .build();
+                    .tcp_recv_buffer_size(8 * 1024 * 1024); // 8MB
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 
