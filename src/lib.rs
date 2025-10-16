@@ -320,7 +320,10 @@ async fn run_update_peers(
                     .pool_idle_timeout(Duration::from_secs(90))
                     .request_timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                     .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                    .max_concurrent_connections(DEFAULT_CONNECTION_LIMIT_PER_HOST);
+                    .max_concurrent_connections(DEFAULT_CONNECTION_LIMIT_PER_HOST)
+                    .tcp_send_buffer_size(8 * 1024 * 1024) // 8MB
+                    .tcp_recv_buffer_size(8 * 1024 * 1024) // 8MB
+                    .build();
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 

@@ -149,7 +149,7 @@ impl HttpClient {
 
     /// Create a new client builder for custom configuration.
     pub fn builder(id: impl Into<String>) -> HttpClientBuilder {
-        HttpClientBuilder::new().connection_limiter_id(id)
+        HttpClientBuilder::new(id)
     }
 
     /// Get a reference to the underlying hyper client.
@@ -229,13 +229,13 @@ pub struct HttpClientBuilder {
 
 impl HttpClientBuilder {
     /// Create a new builder with default high-performance settings.
-    pub fn new() -> Self {
+    pub fn new(id: impl Into<String>) -> Self {
         Self {
             pool_max_idle_per_host: 2048,
             pool_idle_timeout: Duration::from_secs(120),
             request_timeout: Duration::from_secs(2),
             max_concurrent_connections: None,
-            connection_limiter_id: "client".to_string(),
+            connection_limiter_id: id.into(),
             http2_connection_window_size: 16 * 1024 * 1024, // 16MB
             http2_stream_window_size: 8 * 1024 * 1024,      // 8MB
             http2_max_frame_size: 16 * 1024 * 1024,         // 16MB
@@ -281,14 +281,6 @@ impl HttpClientBuilder {
     /// Set to None (default) for unlimited connections.
     pub fn max_concurrent_connections(mut self, max: usize) -> Self {
         self.max_concurrent_connections = Some(max);
-        self
-    }
-
-    /// Set the identifier for connection limiter metrics.
-    ///
-    /// This ID is used in metrics to distinguish different client instances.
-    pub fn connection_limiter_id(mut self, id: impl Into<String>) -> Self {
-        self.connection_limiter_id = id.into();
         self
     }
 
@@ -418,7 +410,7 @@ impl HttpClientBuilder {
 
 impl Default for HttpClientBuilder {
     fn default() -> Self {
-        Self::new()
+        Self::new("default_client")
     }
 }
 
@@ -428,7 +420,7 @@ mod tests {
 
     #[test]
     fn test_builder_defaults() {
-        let builder = HttpClientBuilder::new();
+        let builder = HttpClientBuilder::new("test_client");
         assert_eq!(builder.pool_max_idle_per_host, 2048);
         assert_eq!(builder.pool_idle_timeout, Duration::from_secs(120));
         assert_eq!(builder.http2_connection_window_size, 16 * 1024 * 1024);
@@ -440,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_builder_customization() {
-        let builder = HttpClientBuilder::new()
+        let builder = HttpClientBuilder::new("test_client")
             .pool_max_idle_per_host(4096)
             .pool_idle_timeout(Duration::from_secs(60))
             .http2_connection_window_size(32 * 1024 * 1024)
