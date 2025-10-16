@@ -336,6 +336,10 @@ async fn run_update_peers(
                         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .https_only(true)
                         .add_root_certificate(tls_cert.clone())
+                        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+                            DEFAULT_CONNECTION_LIMIT_PER_HOST,
+                            builder.name.clone(),
+                        ))
                         .build()
                         .expect("Valid root certificate");
                 }
