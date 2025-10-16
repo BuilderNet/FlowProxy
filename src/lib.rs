@@ -126,7 +126,6 @@ pub async fn run_with_listeners(
         .hickory_dns(true)
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-        .pool_idle_timeout(Duration::from_secs(30))
         .connector_layer(utils::limit::ConnectionLimiterLayer::new(
             DEFAULT_CONNECTION_LIMIT_PER_HOST,
             "local-builder".to_string(),
@@ -335,7 +334,12 @@ async fn run_update_peers(
                         .hickory_dns(true)
                         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .https_only(true)
+                        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                         .add_root_certificate(tls_cert.clone())
+                        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+                            DEFAULT_CONNECTION_LIMIT_PER_HOST,
+                            builder.name.clone(),
+                        ))
                         .build()
                         .expect("Valid root certificate");
                 }
