@@ -1,15 +1,27 @@
-use std::{collections::VecDeque, path::PathBuf, time::Instant};
+use std::{
+    collections::VecDeque,
+    marker::PhantomData,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use clickhouse::inserter::{Inserter, Quantities};
+use derive_more::{Deref, DerefMut};
 use tokio::sync::mpsc;
 
 use crate::{
-    indexer::click::ClickhouseIndexableOrder, metrics::IndexerMetrics,
+    indexer::{click::ClickhouseIndexableOrder, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
+    metrics::IndexerMetrics,
     primitives::backoff::BackoffInterval,
 };
 
 /// A default maximum size in bytes for the in-memory backup of failed commits.
 pub(crate) const MAX_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+
+/// The default path where the backup database is stored.
+pub(crate) const DISK_BACKUP_DATABASE_PATH: &str =
+    "/var/lib/buildernet-orderflow-proxy/clickhouse_backup.db";
 
 /// Tracing target for the backup actor.
 const TARGET: &str = "indexer::backup";
@@ -103,20 +115,124 @@ impl<T: ClickhouseIndexableOrder> Default for FailedCommits<T> {
     }
 }
 
-struct DiskBackup {
-    db: redb::Database,
+/// Configuration for the [`DiskBackup`] of failed commits.
+#[derive(Debug, Clone)]
+pub(crate) struct DiskBackupConfig {
+    /// The path where the backup database is stored.
+    path: PathBuf,
+    /// The name of the table where bundles failed commits are stored in the backup database.
     bundles_table_name: String,
+    /// The name of the table where bundle receipts failed commits are stored in the backup database.
     bundle_receipts_table_name: String,
 }
 
-impl DiskBackup {
+impl DiskBackupConfig {
     pub fn new(
         path: PathBuf,
         bundles_table_name: String,
         bundle_receipts_table_name: String,
-    ) -> Result<Self, redb::DatabaseError> {
-        let db = redb::Database::create(path)?;
-        Ok(Self { db, bundles_table_name, bundle_receipts_table_name })
+    ) -> Self {
+        Self { path, bundles_table_name, bundle_receipts_table_name }
+    }
+}
+
+impl Default for DiskBackupConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from(DISK_BACKUP_DATABASE_PATH),
+            bundles_table_name: BUNDLE_TABLE_NAME.to_string(),
+            bundle_receipts_table_name: BUNDLE_RECEIPTS_TABLE_NAME.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MemoryBackupConfig {
+    /// The maximum size in bytes for holding past failed commits in-memory. Once we go over this threshold,
+    /// pressure is applied and old commits are dropped.
+    pub memory_max_size_bytes: u64,
+}
+
+impl MemoryBackupConfig {
+    pub fn new(memory_max_size_bytes: u64) -> Self {
+        Self { memory_max_size_bytes }
+    }
+}
+
+impl Default for MemoryBackupConfig {
+    fn default() -> Self {
+        Self { memory_max_size_bytes: MAX_BACKUP_SIZE_BYTES }
+    }
+}
+
+/// Configuration for the [`Backup`] actor.
+#[derive(Debug, Default)]
+pub(crate) struct BackupConfig {
+    /// The interval at which we try to backup data.
+    pub interval: BackoffInterval,
+    /// The configuration for the disk backup.
+    pub disk_backup_config: DiskBackupConfig,
+    /// The configuration for the in-memory backup.
+    pub memory_backup_config: MemoryBackupConfig,
+}
+
+impl BackupConfig {
+    pub fn new(
+        interval: BackoffInterval,
+        disk_backup_config: DiskBackupConfig,
+        memory_backup_config: MemoryBackupConfig,
+    ) -> Self {
+        Self { interval, disk_backup_config, memory_backup_config }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct DiskBackup<T> {
+    db: Arc<RwLock<redb::Database>>,
+    config: DiskBackupConfig,
+
+    _marker: PhantomData<T>,
+}
+
+impl<T> DiskBackup<T> {
+    pub fn new(config: DiskBackupConfig) -> Result<Self, redb::DatabaseError> {
+        let db = redb::Database::create(&config.path)?;
+
+        Ok(Self { db: Arc::new(RwLock::new(db)), config, _marker: Default::default() })
+    }
+
+    /// Create a new disk backup with default configuration. Can fail if the database cannot be
+    /// created.
+    pub fn try_default() -> Result<Self, redb::DatabaseError> {
+        Self::new(DiskBackupConfig::default())
+    }
+
+    pub fn clone_to<U: ClickhouseIndexableOrder>(&self) -> DiskBackup<U> {
+        DiskBackup { db: self.db.clone(), config: self.config.clone(), _marker: Default::default() }
+    }
+}
+
+#[derive(Deref, DerefMut)]
+struct MemoryBackup<T: ClickhouseIndexableOrder> {
+    /// The in-memory cache of failed commits.
+    #[deref]
+    #[deref_mut]
+    failed_commits: FailedCommits<T>,
+
+    /// The configuration for the in-memory backup.
+    config: MemoryBackupConfig,
+}
+
+impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
+    fn new(config: MemoryBackupConfig) -> Self {
+        Self { failed_commits: FailedCommits::default(), config }
+    }
+}
+
+// Needed otherwise requires T: Default
+impl<T: ClickhouseIndexableOrder> Default for MemoryBackup<T> {
+    fn default() -> Self {
+        Self { failed_commits: FailedCommits::default(), config: MemoryBackupConfig::default() }
     }
 }
 
@@ -132,37 +248,45 @@ impl DiskBackup {
 /// is finite, there is an upper bound on how much memory this data structure holds. Once this has
 /// been hit, pressure applies, meaning that we try again a certain failed commit for a finite
 /// number of times, and then we discard it to accomdate new data.
-pub(crate) struct MemoryBackup<T: ClickhouseIndexableOrder> {
+pub(crate) struct Backup<T: ClickhouseIndexableOrder> {
     /// The receiver of failed commit attempts.
     rx: mpsc::Receiver<FailedCommit<T>>,
+    /// The disk cache of failed commits.
+    disk_backup: DiskBackup<T>,
     /// The in-memory cache of failed commits.
-    failed_commits: FailedCommits<T>,
+    memory_backup: MemoryBackup<T>,
     /// A clickhouse inserter for committing again the data.
     inserter: Inserter<T::ClickhouseRowType>,
     /// The interval at which we try to backup data.
     interval: BackoffInterval,
-    /// The maximum size in bytes for holding past failed commits. Once we go over this threshold,
-    /// pressure is applied.
-    max_size_bytes: u64,
 }
 
-impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
+impl<T: ClickhouseIndexableOrder> Backup<T> {
     pub(crate) fn new(
         rx: mpsc::Receiver<FailedCommit<T>>,
         inserter: Inserter<T::ClickhouseRowType>,
+        disk_backup: DiskBackup<T>,
     ) -> Self {
-        Self {
+        let backup = Self {
             rx,
             inserter,
             interval: Default::default(),
-            failed_commits: Default::default(),
-            max_size_bytes: MAX_BACKUP_SIZE_BYTES,
-        }
+            memory_backup: MemoryBackup::default(),
+            disk_backup,
+        };
+
+        backup
     }
 
     #[allow(dead_code)]
-    pub(crate) fn with_max_size_bytes(mut self, max_size_bytes: u64) -> Self {
-        self.max_size_bytes = max_size_bytes;
+    pub(crate) fn with_memory_backup_config(mut self, config: MemoryBackupConfig) -> Self {
+        self.memory_backup.config = config;
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_disk_backup_config(mut self, config: DiskBackupConfig) -> Self {
+        self.disk_backup.config = config;
         self
     }
 
@@ -259,7 +383,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
     }
 }
 
-impl<T: ClickhouseIndexableOrder> std::fmt::Debug for MemoryBackup<T> {
+impl<T: ClickhouseIndexableOrder> std::fmt::Debug for Backup<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InMemoryBackup")
             .field("rx", &self.rx)
@@ -311,13 +435,13 @@ mod tests {
         create_clickhouse_bundles_table(&client).await.unwrap();
 
         let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
-        let mut bundle_backup = MemoryBackup::new(
+        let mut bundle_backup = Backup::new(
             rx,
             client
                 .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
         )
-        .with_max_size_bytes(MAX_BACKUP_SIZE_BYTES);
+        .with_memory_max_size_bytes(MAX_BACKUP_SIZE_BYTES);
 
         spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
 

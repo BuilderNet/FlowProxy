@@ -2,6 +2,7 @@
 
 use std::{
     fmt::Debug,
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -16,12 +17,14 @@ use crate::{
     cli::ClickhouseArgs,
     indexer::{
         click::{
-            backup::{FailedCommit, MemoryBackup, MAX_BACKUP_SIZE_BYTES},
+            backup::{
+                Backup, DiskBackup, DiskBackupConfig, FailedCommit, DISK_BACKUP_DATABASE_PATH,
+                MAX_BACKUP_SIZE_BYTES,
+            },
             models::{BundleReceiptRow, BundleRow},
             primitives::{BuilderName, ClickhouseIndexableOrder},
         },
-        OrderReceivers, BACKUP_DATABASE_PATH, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
-        TARGET,
+        OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
     },
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, Sampler, SystemBundle},
@@ -186,22 +189,13 @@ impl ClickhouseIndexer {
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let (
-            host,
-            database,
-            username,
-            password,
-            bundles_table_name,
-            bundle_receipts_table_name,
-            backup_database_path,
-        ) = (
+        let (host, database, username, password, bundles_table_name, bundle_receipts_table_name) = (
             args.host.expect("host is set"),
             args.database.expect("database is set"),
             args.username.expect("username is set"),
             args.password.expect("password is set"),
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
             args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-            args.backup_database_path.unwrap_or(BACKUP_DATABASE_PATH.into()),
         );
 
         tracing::info!(%host, "Running with clickhouse indexer");
@@ -215,32 +209,41 @@ impl ClickhouseIndexer {
             .with_password(password)
             .with_validation(validation);
 
-        let bundle_inserter = default_inserter::<BundleRow>(&client, &bundles_table_name);
-        let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
+        let disk_backup = DiskBackup::new(DiskBackupConfig::new(
+            args.backup
+                .map(|b| b.disk_database_path)
+                .flatten()
+                .unwrap_or(PathBuf::from(DISK_BACKUP_DATABASE_PATH)),
+            bundles_table_name.clone(),
+            bundle_receipts_table_name.clone(),
+        ))
+        .expect("could not create disk backup");
+
+        let (tx, rx) = mpsc::channel(128);
+        let bundle_inserter = default_inserter(&client, &bundles_table_name);
         let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name.clone());
         let mut bundle_inserter_runner = InserterRunner::new(bundle_rx, bundle_inserter);
-        let mut bundle_backup = MemoryBackup::new(
+        let mut bundle_backup = Backup::<SystemBundle>::new(
             rx,
             client
-                .inserter::<BundleRow>(&bundles_table_name)
+                .inserter(&bundles_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
-        )
-        .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
+            disk_backup.clone_to(),
+        );
 
-        let bundle_receipt_inserter =
-            default_inserter::<BundleReceiptRow>(&client, &bundle_receipts_table_name);
-        let (tx, rx) = mpsc::channel::<FailedCommit<BundleReceipt>>(128);
+        let (tx, rx) = mpsc::channel(128);
+        let bundle_receipt_inserter = default_inserter(&client, &bundle_receipts_table_name);
         let bundle_receipt_inserter =
             ClickhouseInserter::new(bundle_receipt_inserter, tx, builder_name);
         let mut bundle_receipt_inserter_runner =
             InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter);
-        let mut bundle_receipt_backup = MemoryBackup::new(
+        let mut bundle_receipt_backup = Backup::<BundleReceipt>::new(
             rx,
             client
-                .inserter::<BundleReceiptRow>(&bundle_receipts_table_name)
+                .inserter(&bundle_receipts_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
-        )
-        .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
+            disk_backup,
+        );
 
         spawn_clickhouse_inserter!(task_executor, bundle_inserter_runner, "bundles");
         spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
