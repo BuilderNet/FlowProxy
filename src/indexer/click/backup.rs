@@ -167,8 +167,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
 
                     let quantities = failed_commit.quantities.clone();
                     let (Quantities { bytes: total_size_bytes, .. }, new_len) = self.failed_commits.push_front(failed_commit);
-                    IndexerMetrics::set_clickhouse_backup_size_bytes(total_size_bytes, T::ORDER_TYPE);
-                    IndexerMetrics::set_clickhouse_backup_size_batches(new_len, T::ORDER_TYPE);
+                    IndexerMetrics::set_clickhouse_backup_size(total_size_bytes, new_len, T::ORDER_TYPE);
 
                     tracing::debug!(target: TARGET, order = T::ORDER_TYPE,
                         bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, total_batches = self.failed_commits.len(),
@@ -185,8 +184,7 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                 _ = self.interval.tick() => {
                     let Some(oldest) = self.failed_commits.pop_back() else {
                         self.interval.reset();
-                        IndexerMetrics::set_clickhouse_backup_size_bytes(0, T::ORDER_TYPE);
-                        IndexerMetrics::set_clickhouse_backup_size_batches(0, T::ORDER_TYPE);
+                        IndexerMetrics::set_clickhouse_backup_size(0, 0, T::ORDER_TYPE);
                         continue // Nothing to do!
                     };
 
@@ -252,5 +250,77 @@ impl<T: ClickhouseIndexableOrder> std::fmt::Debug for MemoryBackup<T> {
             .field("failed_commits", &self.failed_commits.len())
             .field("max_size_bytes", &self.max_size_bytes)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    use crate::{
+        indexer::{
+            click::{
+                models::BundleRow,
+                tests::{create_clickhouse_bundles_table, create_test_clickhouse_client},
+            },
+            tests::system_bundle_example,
+            BUNDLE_TABLE_NAME,
+        },
+        primitives::SystemBundle,
+        spawn_clickhouse_backup,
+        tasks::TaskManager,
+    };
+
+    // Uncomment to enable logging during tests.
+    use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn backup_memory_e2e_works() {
+        // Uncomment to toggle logs.
+        let registry = tracing_subscriber::registry().with(
+            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+        );
+        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+
+        let task_manager = TaskManager::new(tokio::runtime::Handle::current());
+        let task_executor = task_manager.executor();
+
+        // 1. Spin up Clickhouse. No validation because we're testing both receipts and bundles,
+        // and validation on U256 is not supported.
+        let (image, client, _) = create_test_clickhouse_client(false).await.unwrap();
+        create_clickhouse_bundles_table(&client).await.unwrap();
+
+        let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
+        let mut bundle_backup = MemoryBackup::new(
+            rx,
+            client
+                .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
+                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
+        )
+        .with_max_size_bytes(MAX_BACKUP_SIZE_BYTES);
+
+        spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
+
+        let quantities = Quantities { bytes: 512, rows: 1, transactions: 1 }; // approximated
+        let bundle_row: BundleRow = (system_bundle_example(), "buildernet".to_string()).into();
+        let bundle_rows = Vec::from([bundle_row]);
+        let failed_commit = FailedCommit::<SystemBundle>::new(bundle_rows.clone(), quantities);
+
+        tx.send(failed_commit).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await; // Wait some time to let the backup process it.
+
+        let results = client
+            .query(&format!("select * from {BUNDLE_TABLE_NAME}"))
+            .fetch_all::<BundleRow>()
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(bundle_rows, results, "expected, got");
+
+        drop(image);
     }
 }

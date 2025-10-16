@@ -283,12 +283,12 @@ pub(crate) mod tests {
     use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     /// The default clickhouse image name to use for testcontainers testing.
-    const CLICKHOUSE_DEFAULT_IMAGE_NAME: &str = "clickhouse/clickhouse-server";
+    pub(crate) const CLICKHOUSE_DEFAULT_IMAGE_NAME: &str = "clickhouse/clickhouse-server";
     /// The default clickhouse image tag to use for testcontainers testing.
-    const CLICKHOUSE_DEFAULT_IMAGE_TAG: &str = "25.6.2.5";
+    pub(crate) const CLICKHOUSE_DEFAULT_IMAGE_TAG: &str = "25.6.2.5";
     /// Port that the [`ClickHouse`] container has internally, for testcontainers testing.
     /// Can be rebound externally via [`testcontainers::core::ImageExt::with_mapped_port`].
-    const CLICKHOUSE_PORT: ContainerPort = ContainerPort::Tcp(8123);
+    pub(crate) const CLICKHOUSE_PORT: ContainerPort = ContainerPort::Tcp(8123);
 
     /// A clickhouse image that can be spawn up using testcontainers.
     ///
@@ -305,7 +305,7 @@ pub(crate) mod tests {
     /// [`ClickHouse`]: https://clickhouse.com/
     /// [`Clickhouse docker image`]: https://hub.docker.com/r/clickhouse/clickhouse-server
     #[derive(Debug, Clone)]
-    struct ClickhouseImage {
+    pub(crate) struct ClickhouseImage {
         env_vars: BTreeMap<String, String>,
     }
 
@@ -346,7 +346,7 @@ pub(crate) mod tests {
 
     /// The configuration used in a [`ClickhouseClient`] for testing.
     #[derive(Debug, Clone)]
-    struct ClickhouseConfig {
+    pub(crate) struct ClickhouseConfig {
         url: String,
         user: String,
         password: String,
@@ -372,7 +372,7 @@ pub(crate) mod tests {
     ///
     /// IMPORTANT: the image must be manually `drop`ped at the end of the test, otherwise the
     /// container is cancelled prematurely.
-    async fn create_test_clickhouse_client(
+    pub(crate) async fn create_test_clickhouse_client(
         validation: bool,
     ) -> TestcontainersResult<(ContainerAsync<ClickhouseImage>, ClickhouseClient, ClickhouseConfig)>
     {
@@ -401,14 +401,16 @@ pub(crate) mod tests {
     }
 
     /// Creates the bundles table from the DDL present inside the `fixtures` folder.
-    async fn create_clickhouse_bundles_table(client: &ClickhouseClient) -> ClickhouseResult<()> {
+    pub(crate) async fn create_clickhouse_bundles_table(
+        client: &ClickhouseClient,
+    ) -> ClickhouseResult<()> {
         let create_bundles_table_ddl = fs::read_to_string("./fixtures/create_bundles_table.sql")
             .expect("could not read create_bundles_table.sql");
         client.query(&create_bundles_table_ddl).execute().await
     }
 
     /// Creates the bundle receipts table from the DDL present inside the `fixtures` folder.
-    async fn create_clickhouse_bundle_receipts_table(
+    pub(crate) async fn create_clickhouse_bundle_receipts_table(
         client: &ClickhouseClient,
     ) -> ClickhouseResult<()> {
         let create_bundle_receipts_table_ddl =
