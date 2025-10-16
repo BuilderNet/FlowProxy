@@ -279,16 +279,6 @@ async fn run_update_peers(
     disable_forwarding: bool,
     task_executor: TaskExecutor,
 ) {
-    let client = reqwest::Client::builder()
-        .tcp_nodelay(true)
-        .pool_idle_timeout(Duration::from_secs(90))
-        .http2_initial_connection_window_size(4 * 1024 * 1024)
-        .http2_initial_stream_window_size(2 * 1024 * 1024)
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-        .build()
-        .unwrap();
-
     let delay = Duration::from_secs(30);
 
     loop {
@@ -327,7 +317,19 @@ async fn run_update_peers(
 
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
-                let mut client = client.clone();
+                let mut client = reqwest::Client::builder()
+                    .https_only(true)
+                    .use_rustls_tls()
+                    .tcp_nodelay(true)
+                    .pool_idle_timeout(Duration::from_secs(90))
+                    .http2_initial_connection_window_size(4 * 1024 * 1024)
+                    .http2_initial_stream_window_size(2 * 1024 * 1024)
+                    .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
+                    .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+                        DEFAULT_CONNECTION_LIMIT_PER_HOST,
+                        builder.name.clone(),
+                    ));
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 
@@ -335,22 +337,11 @@ async fn run_update_peers(
                 if let Some(ref tls_cert) = builder.tls_certificate() {
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
-                    client = reqwest::Client::builder()
+
+                    client = client
                         .https_only(true)
                         .use_rustls_tls()
-                        .tcp_nodelay(true)
-                        .pool_idle_timeout(Duration::from_secs(90))
-                        .http2_initial_connection_window_size(4 * 1024 * 1024)
-                        .http2_initial_stream_window_size(2 * 1024 * 1024)
-                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                        .add_root_certificate(tls_cert.clone())
-                        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                            builder.name.clone(),
-                        ))
-                        .build()
-                        .expect("Valid root certificate");
+                        .add_root_certificate(tls_cert.clone());
                 }
 
                 if disable_forwarding {
@@ -361,7 +352,7 @@ async fn run_update_peers(
                 let sender = spawn_forwarder(
                     builder.name.clone(),
                     builder.system_api(),
-                    client.clone(),
+                    client.build().expect("valid client"),
                     task_executor.clone(),
                 )
                 .expect("malformed url");

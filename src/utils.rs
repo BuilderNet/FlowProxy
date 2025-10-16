@@ -72,6 +72,7 @@ pub mod limit {
     use tokio::sync::{OwnedSemaphorePermit, Semaphore};
     use tokio_util::sync::PollSemaphore;
     use tower::{Layer, Service};
+    use tracing::warn;
 
     use crate::metrics::ForwarderMetrics;
 
@@ -162,6 +163,10 @@ pub mod limit {
         type Future = ResponseFuture<S::Future>;
 
         fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.semaphore.available_permits() == 0 {
+                warn!(id = %self.id, "Connection limit reached");
+            }
+
             // If we haven't already acquired a permit from the semaphore, try to
             // acquire one first.
             if self.permit.is_none() {
