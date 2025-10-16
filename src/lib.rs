@@ -123,6 +123,7 @@ pub async fn run_with_listeners(
     info!(address = %local_signer, "Orderflow signer configured");
 
     let client = reqwest::Client::builder()
+        .use_rustls_tls()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
         .connector_layer(utils::limit::ConnectionLimiterLayer::new(
@@ -279,9 +280,15 @@ async fn run_update_peers(
     task_executor: TaskExecutor,
 ) {
     let client = reqwest::Client::builder()
+        .tcp_nodelay(true)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .http2_initial_connection_window_size(4 * 1024 * 1024)
+        .http2_initial_stream_window_size(2 * 1024 * 1024)
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
         .build()
         .unwrap();
+
     let delay = Duration::from_secs(30);
 
     loop {
@@ -329,8 +336,13 @@ async fn run_update_peers(
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
                     client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .https_only(true)
+                        .use_rustls_tls()
+                        .tcp_nodelay(true)
+                        .pool_idle_timeout(Duration::from_secs(90))
+                        .http2_initial_connection_window_size(4 * 1024 * 1024)
+                        .http2_initial_stream_window_size(2 * 1024 * 1024)
+                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                         .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                         .add_root_certificate(tls_cert.clone())
                         .connector_layer(utils::limit::ConnectionLimiterLayer::new(
