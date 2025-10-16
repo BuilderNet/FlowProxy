@@ -318,8 +318,6 @@ async fn run_update_peers(
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
                 let mut client = reqwest::Client::builder()
-                    .https_only(true)
-                    .use_rustls_tls()
                     .tcp_nodelay(true)
                     .pool_idle_timeout(Duration::from_secs(90))
                     .http2_initial_connection_window_size(4 * 1024 * 1024)
