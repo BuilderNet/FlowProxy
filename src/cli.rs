@@ -58,6 +58,15 @@ pub struct ClickhouseArgs {
         id = "CLICKHOUSE_MAX_BACKUP_SIZE_BYTES"
     )]
     pub max_backup_size_bytes: Option<u64>,
+
+    /// The path of the (redb) database used to store failed clickhouse commits for retry. If not
+    /// set, a default path of `/var/lib/buildernet-of-proxy/clickhouse-backup.db` will be used.
+    #[arg(
+        long = "indexer.clickhouse.backup-database-path",
+        env = "CLICKHOUSE_BACKUP_DATABASE_PATH",
+        id = "CLICKHOUSE_BACKUP_DATABASE_PATH"
+    )]
+    pub backup_database_path: Option<PathBuf>,
 }
 
 /// Arguments required to setup file-based parquet indexing.

@@ -103,6 +103,16 @@ impl<T: ClickhouseIndexableOrder> Default for FailedCommits<T> {
     }
 }
 
+struct DiskBackup {
+    db: redb::Database,
+}
+
+impl DiskBackup {
+    pub fn new(path: PathBuf) -> Self {
+        let db = redb::Database::create(path)
+    }
+}
+
 // Rationale for sending multiple rows instead of sending rows: the backup abstraction must
 // periodically block to write data to the inserter and try to commit it to clickhouse. Each
 // attempt results in doing the previous step. This could clog the channel which will receive

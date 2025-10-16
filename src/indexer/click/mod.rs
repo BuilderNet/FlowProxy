@@ -20,7 +20,8 @@ use crate::{
             models::{BundleReceiptRow, BundleRow},
             primitives::{BuilderName, ClickhouseIndexableOrder},
         },
-        OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
+        OrderReceivers, BACKUP_DATABASE_PATH, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
+        TARGET,
     },
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, Sampler, SystemBundle},
@@ -185,13 +186,22 @@ impl ClickhouseIndexer {
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let (host, database, username, password, bundles_table_name, bundle_receipts_table_name) = (
+        let (
+            host,
+            database,
+            username,
+            password,
+            bundles_table_name,
+            bundle_receipts_table_name,
+            backup_database_path,
+        ) = (
             args.host.expect("host is set"),
             args.database.expect("database is set"),
             args.username.expect("username is set"),
             args.password.expect("password is set"),
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
             args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
+            args.backup_database_path.unwrap_or(BACKUP_DATABASE_PATH.into()),
         );
 
         tracing::info!(%host, "Running with clickhouse indexer");
@@ -363,6 +373,7 @@ pub(crate) mod tests {
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
                 bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
                 max_backup_size_bytes: None,
+                backup_database_path: None,
             }
         }
     }

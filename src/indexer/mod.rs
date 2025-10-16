@@ -38,6 +38,9 @@ pub const BUNDLE_RECEIPTS_TABLE_NAME: &str = "bundle_receipts";
 /// The name of the Clickhouse table to store transactions in.
 pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 
+/// The path of the backup database for storing failed Clickhouse batch insertions
+pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-backup.db";
+
 /// The tracing target for this indexer crate.
 const TARGET: &str = "indexer";
 

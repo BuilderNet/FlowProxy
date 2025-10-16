@@ -59,6 +59,7 @@ clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", rev = "8cf3d
 ] }
 clickhouse-derive = { version = "0.2.0" }
 time = { version = "0.3.44" }
+redb = { version = "3.1.0" }
 
 # misc
 auto_impl = "1.3.0"
