@@ -508,9 +508,6 @@ pub struct BundleReceipt {
     pub received_at: UtcDateTime,
     /// The name of the operator which sent us the bundle.
     pub src_builder_name: String,
-    /// The name of the local operator which received the bundle, for indexing
-    /// purposes. Can be left unset and will be set by the indexer.
-    pub dst_builder_name: Option<String>,
     /// The size in bytes of the payload.
     pub payload_size: u32,
     /// The priority of the bundle.

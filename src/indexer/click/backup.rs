@@ -16,7 +16,6 @@ const TARGET: &str = "indexer::backup";
 
 /// Represents data we failed to commit to clickhouse, including the rows and some information
 /// about the size of such data.
-#[derive(Debug, Clone)]
 pub(crate) struct FailedCommit<T: ClickhouseIndexableOrder> {
     /// The actual rows we were trying to commit.
     rows: Vec<T::ClickhouseRowType>,
@@ -27,6 +26,80 @@ pub(crate) struct FailedCommit<T: ClickhouseIndexableOrder> {
 impl<T: ClickhouseIndexableOrder> FailedCommit<T> {
     pub(crate) fn new(rows: Vec<T::ClickhouseRowType>, quantities: Quantities) -> Self {
         Self { rows, quantities }
+    }
+}
+
+/// A wrapper over a [`VecDeque`] of [`FailedCommit`] with added functionality.
+///
+/// Newly failed commits are pushed to the front of the queue, so the oldest are at the back.
+struct FailedCommits<T: ClickhouseIndexableOrder> {
+    inner: VecDeque<FailedCommit<T>>,
+    /// Aggregated quantities of all the failed commits.
+    total_quantities: Quantities,
+}
+
+impl<T: ClickhouseIndexableOrder> FailedCommits<T> {
+    /// Push a new failed commit to the front of the queue, updating the aggregated quantities.
+    fn push_front(&mut self, value: FailedCommit<T>) -> (Quantities, usize) {
+        self.inner.push_front(value);
+        self.update_quantities()
+    }
+
+    /// Push back the oldest failed commit to the back of the queue, updating the aggregated
+    /// quantities.
+    fn push_back(&mut self, value: FailedCommit<T>) -> (Quantities, usize) {
+        self.inner.push_back(value);
+        self.update_quantities()
+    }
+
+    /// Get the oldest failed commit from the back of the queue, updating the aggregated quantities.
+    fn pop_back(&mut self) -> Option<FailedCommit<T>> {
+        let res = self.inner.pop_back();
+        self.update_quantities();
+        res
+    }
+
+    /// Drain all the failed commits from the queue, updating the aggregated quantities.
+    fn drain(&mut self, range: std::ops::RangeFull) -> impl Iterator<Item = FailedCommit<T>> + '_ {
+        self.zeroize_quantities();
+        let res = self.inner.drain(range);
+        res
+    }
+
+    /// Get the number of failed commits currently in the queue.
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Triggering a recalculation of the aggregated quantities.
+    fn update_quantities(&mut self) -> (Quantities, usize) {
+        let total_size_bytes = self.inner.iter().map(|c| c.quantities.bytes).sum::<u64>();
+        let total_rows = self.inner.iter().map(|c| c.quantities.rows).sum::<u64>();
+        let total_transactions = self.inner.iter().map(|c| c.quantities.transactions).sum::<u64>();
+
+        self.total_quantities = Quantities {
+            bytes: total_size_bytes,
+            rows: total_rows,
+            transactions: total_transactions,
+        };
+
+        self.quantities()
+    }
+
+    /// Zeroizing the aggregated quantities.
+    fn zeroize_quantities(&mut self) {
+        self.total_quantities = Quantities::ZERO;
+    }
+
+    /// Get the aggregated quantities and the number of failed commits.
+    fn quantities(&self) -> (Quantities, usize) {
+        (self.total_quantities.clone(), self.inner.len())
+    }
+}
+
+impl<T: ClickhouseIndexableOrder> Default for FailedCommits<T> {
+    fn default() -> Self {
+        Self { inner: VecDeque::default(), total_quantities: Quantities::ZERO }
     }
 }
 
@@ -46,7 +119,7 @@ pub(crate) struct MemoryBackup<T: ClickhouseIndexableOrder> {
     /// The receiver of failed commit attempts.
     rx: mpsc::Receiver<FailedCommit<T>>,
     /// The in-memory cache of failed commits.
-    failed_commits: VecDeque<FailedCommit<T>>,
+    failed_commits: FailedCommits<T>,
     /// A clickhouse inserter for committing again the data.
     inserter: Inserter<T::ClickhouseRowType>,
     /// The interval at which we try to backup data.
@@ -93,18 +166,18 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                     };
 
                     let quantities = failed_commit.quantities.clone();
-                    self.failed_commits.push_back(failed_commit);
-                    let total_size_bytes = self.failed_commits.iter().map(|c| c.quantities.bytes).sum::<u64>();
+                    let (Quantities { bytes: total_size_bytes, .. }, new_len) = self.failed_commits.push_front(failed_commit);
+                    IndexerMetrics::set_clickhouse_backup_size_bytes(total_size_bytes, T::ORDER_TYPE);
+                    IndexerMetrics::set_clickhouse_backup_size_batches(new_len, T::ORDER_TYPE);
 
-                    IndexerMetrics::set_clickhouse_backup_size_bytes(total_size_bytes);
-                    IndexerMetrics::set_clickhouse_backup_size_batches(self.failed_commits.len());
                     tracing::debug!(target: TARGET, order = T::ORDER_TYPE,
                         bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, total_batches = self.failed_commits.len(),
                         "received failed commit to backup"
                     );
 
                     if total_size_bytes > self.max_size_bytes && self.failed_commits.len() > 1 {
-                        tracing::warn!(target: TARGET, order = T::ORDER_TYPE, total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
+                        tracing::warn!(target: TARGET, order = T::ORDER_TYPE,
+                            total_size_bytes, max_size_bytes = self.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
                         let oldest = self.failed_commits.pop_back().expect("length checked above");
                         IndexerMetrics::process_clickhouse_backup_data_lost_quantities(&oldest.quantities);
                     }
@@ -112,8 +185,8 @@ impl<T: ClickhouseIndexableOrder> MemoryBackup<T> {
                 _ = self.interval.tick() => {
                     let Some(oldest) = self.failed_commits.pop_back() else {
                         self.interval.reset();
-                        IndexerMetrics::set_clickhouse_backup_size_bytes(0);
-                        IndexerMetrics::set_clickhouse_backup_size_batches(0);
+                        IndexerMetrics::set_clickhouse_backup_size_bytes(0, T::ORDER_TYPE);
+                        IndexerMetrics::set_clickhouse_backup_size_batches(0, T::ORDER_TYPE);
                         continue // Nothing to do!
                     };
 

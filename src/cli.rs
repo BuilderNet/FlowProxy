@@ -43,6 +43,14 @@ pub struct ClickhouseArgs {
     )]
     pub bundles_table_name: Option<String>,
 
+    /// The table name to store bundle receipts data.
+    #[arg(
+        long = "indexer.clickhouse.bundle-receipts-table-name",
+        env = "CLICKHOUSE_BUNDLE_RECEIPTS_TABLE_NAME",
+        id = "CLICKHOUSE_BUNDLE_RECEIPTS_TABLE_NAME"
+    )]
+    pub bundle_receipts_table_name: Option<String>,
+
     /// The maximum size in bytes for the in-memory backup in case of ClickHouse insertion failure.
     #[arg(
         long = "indexer.clickhouse.max-backup-size-bytes",
