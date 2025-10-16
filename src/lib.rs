@@ -323,11 +323,11 @@ async fn run_update_peers(
                     .http2_initial_connection_window_size(4 * 1024 * 1024)
                     .http2_initial_stream_window_size(2 * 1024 * 1024)
                     .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                    .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                        DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                        builder.name.clone(),
-                    ));
+                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST);
+                // .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+                //     DEFAULT_CONNECTION_LIMIT_PER_HOST,
+                //     builder.name.clone(),
+                // ));
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 
