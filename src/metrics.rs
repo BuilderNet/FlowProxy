@@ -304,8 +304,9 @@ pub trait IngressHandlerMetricsExt {
     }
 
     #[inline]
-    fn increment_json_rpc_parse_errors() {
-        counter!(ingress::JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER).increment(1);
+    fn increment_json_rpc_parse_errors(method: &'static str) {
+        counter!(ingress::JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER, "method" => method)
+            .increment(1);
     }
 
     #[inline]
@@ -615,13 +616,19 @@ impl IndexerMetrics {
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size_bytes(size: u64) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES).set(size as f64);
+    pub fn set_clickhouse_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
+        Self::set_clickhouse_backup_size_bytes(size_bytes, order);
+        Self::set_clickhouse_backup_size_batches(batches, order);
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size_batches(size: usize) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES).set(size as f64);
+    pub fn set_clickhouse_backup_size_bytes(size: u64, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "order" => order).set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_size_batches(size: usize, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "order" => order).set(size as f64);
     }
 
     #[inline]

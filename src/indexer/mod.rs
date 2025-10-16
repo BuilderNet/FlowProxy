@@ -7,14 +7,16 @@ use tokio::sync::mpsc;
 
 use crate::{
     cli::IndexerArgs,
-    indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
+    indexer::{
+        click::{primitives::BuilderName, ClickhouseIndexer},
+        parq::ParquetIndexer,
+    },
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, SystemBundle},
     tasks::TaskExecutor,
 };
 
 mod click;
-mod models;
 mod parq;
 mod ser;
 
@@ -30,14 +32,14 @@ pub const TRANSACTION_INDEXER_BUFFER_SIZE: usize = 4096;
 /// The name of the Clickhouse table to store bundles in.
 pub const BUNDLE_TABLE_NAME: &str = "bundles";
 
+/// The name of the Clickhouse table to store bundle receipts in.
+pub const BUNDLE_RECEIPTS_TABLE_NAME: &str = "bundle_receipts";
+
 /// The name of the Clickhouse table to store transactions in.
 pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 
 /// The tracing target for this indexer crate.
 const TARGET: &str = "indexer";
-
-/// A simple alias to refer to a builder name.
-pub(crate) type BuilderName = String;
 
 /// Trait for adding order indexing functionality.
 pub trait OrderIndexer: Sync + Send {
@@ -163,11 +165,24 @@ impl MockIndexer {
 #[cfg(test)]
 pub(crate) mod tests {
     use rbuilder_primitives::serialize::RawBundle;
+    use revm_primitives::B256;
+    use time::UtcDateTime;
 
     use crate::{
-        primitives::{SystemBundle, SystemBundleMetadata, UtcInstant},
+        primitives::{BundleReceipt, SystemBundle, SystemBundleMetadata, UtcInstant},
         priority::Priority,
     };
+
+    trait UtcDateTimeExt {
+        fn now_ms() -> Self;
+    }
+
+    impl UtcDateTimeExt for UtcDateTime {
+        fn now_ms() -> Self {
+            let now = UtcDateTime::now();
+            now.replace_millisecond(now.millisecond()).unwrap()
+        }
+    }
 
     /// An example raw bundle in JSON format to use for testing. The transactions are from a real
     /// bundle, along with the block number set to zero. The rest is to mainly populate some
@@ -227,5 +242,16 @@ pub(crate) mod tests {
 
         let metadata = SystemBundleMetadata { signer, received_at, priority: Priority::Medium };
         SystemBundle::try_decode(bundle, metadata).unwrap()
+    }
+
+    pub(crate) fn bundle_receipt_example() -> BundleReceipt {
+        BundleReceipt {
+            bundle_hash: B256::random(),
+            sent_at: Some(UtcDateTime::now_ms()),
+            received_at: UtcDateTime::now_ms(),
+            src_builder_name: "buildernet".to_string(),
+            payload_size: 256,
+            priority: Priority::Medium,
+        }
     }
 }
