@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, time::Instant};
+use std::{collections::VecDeque, path::PathBuf, time::Instant};
 
 use clickhouse::inserter::{Inserter, Quantities};
 use tokio::sync::mpsc;
@@ -105,11 +105,18 @@ impl<T: ClickhouseIndexableOrder> Default for FailedCommits<T> {
 
 struct DiskBackup {
     db: redb::Database,
+    bundles_table_name: String,
+    bundle_receipts_table_name: String,
 }
 
 impl DiskBackup {
-    pub fn new(path: PathBuf) -> Self {
-        let db = redb::Database::create(path)
+    pub fn new(
+        path: PathBuf,
+        bundles_table_name: String,
+        bundle_receipts_table_name: String,
+    ) -> Result<Self, redb::DatabaseError> {
+        let db = redb::Database::create(path)?;
+        Ok(Self { db, bundles_table_name, bundle_receipts_table_name })
     }
 }
 
