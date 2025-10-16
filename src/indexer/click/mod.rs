@@ -18,10 +18,9 @@ use crate::{
     indexer::{
         click::{
             backup::{
-                Backup, DiskBackup, DiskBackupConfig, FailedCommit, DISK_BACKUP_DATABASE_PATH,
-                MAX_BACKUP_SIZE_BYTES,
+                Backup, DiskBackup, DiskBackupConfig, FailedCommit, MemoryBackupConfig,
+                DISK_BACKUP_DATABASE_PATH, MAX_MEMORY_BACKUP_SIZE_BYTES,
             },
-            models::{BundleReceiptRow, BundleRow},
             primitives::{BuilderName, ClickhouseIndexableOrder},
         },
         OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
@@ -173,6 +172,28 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
     }
 }
 
+/// The configuration used in a [`ClickhouseClient`].
+#[derive(Debug, Clone)]
+pub(crate) struct ClickhouseClientConfig {
+    host: String,
+    database: String,
+    username: String,
+    password: String,
+    validation: bool,
+}
+
+impl ClickhouseClientConfig {
+    fn new(args: &ClickhouseArgs, validation: bool) -> Self {
+        Self {
+            host: args.host.clone().expect("host is set"),
+            database: args.database.clone().expect("database is set"),
+            username: args.username.clone().expect("username is set"),
+            password: args.password.clone().expect("password is set"),
+            validation,
+        }
+    }
+}
+
 /// A namespace struct to spawn a Clickhouse indexer.
 #[derive(Debug, Clone)]
 pub(crate) struct ClickhouseIndexer;
@@ -180,8 +201,8 @@ pub(crate) struct ClickhouseIndexer;
 impl ClickhouseIndexer {
     /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
     ///
-    /// NOTE: validation should be set to false for for performance reasons, and because validation
-    /// doesn't support Uint256 data types.
+    /// NOTE: In non-testing setting, validation should be set to false for for performance
+    /// reasons, and because validation doesn't support UInt256 data types.
     pub(crate) fn run(
         args: ClickhouseArgs,
         builder_name: BuilderName,
@@ -189,24 +210,27 @@ impl ClickhouseIndexer {
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let (host, database, username, password, bundles_table_name, bundle_receipts_table_name) = (
-            args.host.expect("host is set"),
-            args.database.expect("database is set"),
-            args.username.expect("username is set"),
-            args.password.expect("password is set"),
+        let client_config = ClickhouseClientConfig::new(&args, validation);
+        tracing::info!(host = %client_config.host, "Running with clickhouse indexer");
+
+        let (bundles_table_name, bundle_receipts_table_name) = (
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
             args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
         );
-
-        tracing::info!(%host, "Running with clickhouse indexer");
+        let memory_backup_max_size_bytes = args
+            .backup
+            .as_ref()
+            .map(|b| b.memory_max_size_bytes)
+            .flatten()
+            .unwrap_or(MAX_MEMORY_BACKUP_SIZE_BYTES);
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
         let client = ClickhouseClient::default()
-            .with_url(host)
-            .with_database(database)
-            .with_user(username)
-            .with_password(password)
+            .with_url(client_config.host)
+            .with_database(client_config.database)
+            .with_user(client_config.username)
+            .with_password(client_config.password)
             .with_validation(validation);
 
         let disk_backup = DiskBackup::new(DiskBackupConfig::new(
@@ -215,7 +239,6 @@ impl ClickhouseIndexer {
                 .flatten()
                 .unwrap_or(PathBuf::from(DISK_BACKUP_DATABASE_PATH)),
             bundles_table_name.clone(),
-            bundle_receipts_table_name.clone(),
         ))
         .expect("could not create disk backup");
 
@@ -228,8 +251,9 @@ impl ClickhouseIndexer {
             client
                 .inserter(&bundles_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
-            disk_backup.clone_to(),
-        );
+            disk_backup.clone_change_table(bundle_receipts_table_name.clone()),
+        )
+        .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
         let (tx, rx) = mpsc::channel(128);
         let bundle_receipt_inserter = default_inserter(&client, &bundle_receipts_table_name);
@@ -243,7 +267,8 @@ impl ClickhouseIndexer {
                 .inserter(&bundle_receipts_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
             disk_backup,
-        );
+        )
+        .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
         spawn_clickhouse_inserter!(task_executor, bundle_inserter_runner, "bundles");
         spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
@@ -274,7 +299,7 @@ pub(crate) mod tests {
         indexer::{
             click::{
                 models::{BundleReceiptRow, BundleRow},
-                ClickhouseIndexer,
+                ClickhouseClientConfig, ClickhouseIndexer,
             },
             tests::{bundle_receipt_example, system_bundle_example},
             OrderSenders, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
@@ -357,26 +382,16 @@ pub(crate) mod tests {
         }
     }
 
-    /// The configuration used in a [`ClickhouseClient`] for testing.
-    #[derive(Debug, Clone)]
-    pub(crate) struct ClickhouseConfig {
-        url: String,
-        user: String,
-        password: String,
-        validation: bool,
-    }
-
-    impl From<ClickhouseConfig> for ClickhouseArgs {
-        fn from(config: ClickhouseConfig) -> Self {
+    impl From<ClickhouseClientConfig> for ClickhouseArgs {
+        fn from(config: ClickhouseClientConfig) -> Self {
             Self {
-                host: Some(config.url),
+                host: Some(config.host),
                 database: Some("default".to_string()),
-                username: Some(config.user),
+                username: Some(config.username),
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
                 bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-                max_backup_size_bytes: None,
-                backup_database_path: None,
+                backup: None,
             }
         }
     }
@@ -388,17 +403,21 @@ pub(crate) mod tests {
     /// container is cancelled prematurely.
     pub(crate) async fn create_test_clickhouse_client(
         validation: bool,
-    ) -> TestcontainersResult<(ContainerAsync<ClickhouseImage>, ClickhouseClient, ClickhouseConfig)>
-    {
+    ) -> TestcontainersResult<(
+        ContainerAsync<ClickhouseImage>,
+        ClickhouseClient,
+        ClickhouseClientConfig,
+    )> {
         // Start a Docker client (testcontainers manages lifecycle)
         let clickhouse = ClickhouseImage::default().start().await?;
         let port = clickhouse.get_host_port_ipv4(8123).await?;
         let host = clickhouse.get_host().await?;
         let url = format!("http://{host}:{port}");
 
-        let config = ClickhouseConfig {
-            url,
-            user: "default".to_string(),
+        let config = ClickhouseClientConfig {
+            host: url,
+            database: "default".to_string(),
+            username: "default".to_string(),
             password: "password".to_string(),
             validation,
         };
@@ -406,8 +425,8 @@ pub(crate) mod tests {
         Ok((
             clickhouse,
             ClickhouseClient::default()
-                .with_url(config.url.clone())
-                .with_user(config.user.clone())
+                .with_url(config.host.clone())
+                .with_user(config.username.clone())
                 .with_password(config.password.clone())
                 .with_validation(config.validation),
             config,

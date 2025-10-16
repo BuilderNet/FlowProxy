@@ -3,21 +3,21 @@ use std::{
     marker::PhantomData,
     path::PathBuf,
     sync::{Arc, RwLock},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use clickhouse::inserter::{Inserter, Quantities};
 use derive_more::{Deref, DerefMut};
+use redb::TableDefinition;
 use tokio::sync::mpsc;
 
 use crate::{
-    indexer::{click::ClickhouseIndexableOrder, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
-    metrics::IndexerMetrics,
+    indexer::click::ClickhouseIndexableOrder, metrics::IndexerMetrics,
     primitives::backoff::BackoffInterval,
 };
 
 /// A default maximum size in bytes for the in-memory backup of failed commits.
-pub(crate) const MAX_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 
 /// The default path where the backup database is stored.
 pub(crate) const DISK_BACKUP_DATABASE_PATH: &str =
@@ -25,6 +25,10 @@ pub(crate) const DISK_BACKUP_DATABASE_PATH: &str =
 
 /// Tracing target for the backup actor.
 const TARGET: &str = "indexer::backup";
+
+fn unix_now() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).expect("time went backwards").as_millis()
+}
 
 /// Represents data we failed to commit to clickhouse, including the rows and some information
 /// about the size of such data.
@@ -120,29 +124,13 @@ impl<T: ClickhouseIndexableOrder> Default for FailedCommits<T> {
 pub(crate) struct DiskBackupConfig {
     /// The path where the backup database is stored.
     path: PathBuf,
-    /// The name of the table where bundles failed commits are stored in the backup database.
-    bundles_table_name: String,
-    /// The name of the table where bundle receipts failed commits are stored in the backup database.
-    bundle_receipts_table_name: String,
+    /// The name of the table to store data into.
+    table_name: String,
 }
 
 impl DiskBackupConfig {
-    pub fn new(
-        path: PathBuf,
-        bundles_table_name: String,
-        bundle_receipts_table_name: String,
-    ) -> Self {
-        Self { path, bundles_table_name, bundle_receipts_table_name }
-    }
-}
-
-impl Default for DiskBackupConfig {
-    fn default() -> Self {
-        Self {
-            path: PathBuf::from(DISK_BACKUP_DATABASE_PATH),
-            bundles_table_name: BUNDLE_TABLE_NAME.to_string(),
-            bundle_receipts_table_name: BUNDLE_RECEIPTS_TABLE_NAME.to_string(),
-        }
+    pub fn new(path: PathBuf, table_name: String) -> Self {
+        Self { path, table_name }
     }
 }
 
@@ -161,12 +149,12 @@ impl MemoryBackupConfig {
 
 impl Default for MemoryBackupConfig {
     fn default() -> Self {
-        Self { memory_max_size_bytes: MAX_BACKUP_SIZE_BYTES }
+        Self { memory_max_size_bytes: MAX_MEMORY_BACKUP_SIZE_BYTES }
     }
 }
 
 /// Configuration for the [`Backup`] actor.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct BackupConfig {
     /// The interval at which we try to backup data.
     pub interval: BackoffInterval,
@@ -186,7 +174,9 @@ impl BackupConfig {
     }
 }
 
-#[derive(Debug)]
+/// A disk backup for failed commits. This handle to a database allows to write only to one table
+/// for scoped access. If you want to write to another table, clone it using [`Self::clone_with_table`].
+#[derive(Debug, Clone)]
 pub(crate) struct DiskBackup<T> {
     db: Arc<RwLock<redb::Database>>,
     config: DiskBackupConfig,
@@ -201,14 +191,30 @@ impl<T> DiskBackup<T> {
         Ok(Self { db: Arc::new(RwLock::new(db)), config, _marker: Default::default() })
     }
 
-    /// Create a new disk backup with default configuration. Can fail if the database cannot be
-    /// created.
-    pub fn try_default() -> Result<Self, redb::DatabaseError> {
-        Self::new(DiskBackupConfig::default())
+    /// Like [`Clone`], but allows to change table name.
+    pub fn clone_change_table<U: ClickhouseIndexableOrder>(
+        &self,
+        table_name: String,
+    ) -> DiskBackup<U> {
+        DiskBackup {
+            db: self.db.clone(),
+            config: DiskBackupConfig { path: self.config.path.clone(), table_name },
+            _marker: Default::default(),
+        }
     }
+}
 
-    pub fn clone_to<U: ClickhouseIndexableOrder>(&self) -> DiskBackup<U> {
-        DiskBackup { db: self.db.clone(), config: self.config.clone(), _marker: Default::default() }
+impl<T: ClickhouseIndexableOrder> DiskBackup<T> {
+    pub fn write(&mut self, data: FailedCommit<T>) -> Result<(), redb::Error> {
+        let table_def = TableDefinition::<u128, FailedCommit<T>>::new(&self.config.table_name);
+
+        let writer = self.db.write().expect("not poisoned").begin_write()?;
+        {
+            let mut table = writer.open_table(table_def)?;
+            table.insert(unix_now(), data);
+        }
+
+        Ok(())
     }
 }
 
@@ -441,7 +447,7 @@ mod tests {
                 .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
         )
-        .with_memory_max_size_bytes(MAX_BACKUP_SIZE_BYTES);
+        .with_memory_max_size_bytes(MAX_MEMORY_BACKUP_SIZE_BYTES);
 
         spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
 
