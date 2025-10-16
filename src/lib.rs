@@ -2,6 +2,7 @@
 
 use crate::{
     cache::SignerCache,
+    client::HttpClient,
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
@@ -46,6 +47,7 @@ use crate::{builderhub::PeerStore, cache::OrderCache, indexer::Indexer};
 
 pub mod builderhub;
 mod cache;
+pub mod client;
 pub mod consts;
 pub mod entity;
 pub mod forwarder;
@@ -122,15 +124,11 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+    let client = HttpClient::builder("local-builder")
+        .request_timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            "local-builder".to_string(),
-        ))
-        .build()?;
+        .max_concurrent_connections(DEFAULT_CONNECTION_LIMIT_PER_HOST)
+        .build();
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
@@ -317,29 +315,25 @@ async fn run_update_peers(
 
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
-                let mut client = reqwest::Client::builder()
+                let client = HttpClient::builder(&builder.name)
                     .tcp_nodelay(true)
                     .pool_idle_timeout(Duration::from_secs(90))
-                    .http2_initial_connection_window_size(4 * 1024 * 1024)
-                    .http2_initial_stream_window_size(2 * 1024 * 1024)
-                    .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST);
-                // .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                //     DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                //     builder.name.clone(),
-                // ));
+                    .request_timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
+                    .max_concurrent_connections(DEFAULT_CONNECTION_LIMIT_PER_HOST);
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
                 if let Some(ref tls_cert) = builder.tls_certificate() {
+                    _ = tls_cert;
                     // SAFETY: We expect the certificate to be valid. It's added as a root
                     // certificate.
 
-                    client = client
-                        .https_only(true)
-                        .use_rustls_tls()
-                        .add_root_certificate(tls_cert.clone());
+                    // client = client
+                    //     .https_only(true)
+                    //     .use_rustls_tls()
+                    //     .add_root_certificate(tls_cert.clone());
                 }
 
                 if disable_forwarding {
@@ -350,7 +344,7 @@ async fn run_update_peers(
                 let sender = spawn_forwarder(
                     builder.name.clone(),
                     builder.system_api(),
-                    client.build().expect("valid client"),
+                    client.build(),
                     task_executor.clone(),
                 )
                 .expect("malformed url");

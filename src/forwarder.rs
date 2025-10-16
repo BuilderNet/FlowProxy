@@ -1,5 +1,6 @@
 use crate::{
     builderhub::BuilderHubBuilder,
+    client::{self, HttpClient},
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
@@ -179,7 +180,7 @@ pub struct PeerHandle {
 pub fn spawn_forwarder(
     name: String,
     url: String,
-    client: reqwest::Client, // request client to be reused for http senders
+    client: HttpClient, // request client to be reused for http senders
     task_executor: TaskExecutor,
 ) -> eyre::Result<pchannel::UnboundedSender<Arc<ForwardingRequest>>> {
     let (request_tx, request_rx) = pchannel::unbounded_channel();
@@ -314,22 +315,22 @@ type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = Response<Ok, Err>> + Send
 
 /// An HTTP forwarder that forwards requests to a builder.
 struct HttpForwarder {
-    client: reqwest::Client,
+    client: HttpClient,
     /// The name of the builder we're forwarding to.
     peer_name: String,
     /// The URL of the peer.
     peer_url: String,
     /// The receiver of forwarding requests.
     request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
-    /// The sender to decode [`reqwest::Response`] errors.
-    error_decoder_tx: mpsc::Sender<(reqwest::Response, Duration)>,
+    /// The sender to decode HTTP response errors.
+    error_decoder_tx: mpsc::Sender<(client::Response, Duration)>,
     /// The pending responses that need to be processed.
-    pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
+    pending: FuturesUnordered<RequestFut<client::Response, client::HttpError>>,
 }
 
 impl HttpForwarder {
     fn new(
-        client: reqwest::Client,
+        client: HttpClient,
         name: String,
         url: String,
         request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
@@ -353,7 +354,7 @@ impl HttpForwarder {
         )
     }
 
-    fn on_response(&mut self, response: Response<reqwest::Response, reqwest::Error>) {
+    fn on_response(&mut self, response: Response<client::Response, client::HttpError>) {
         let Response { start_time, response: response_result, .. } = response;
         let elapsed = start_time.elapsed();
 
@@ -366,13 +367,7 @@ impl HttpForwarder {
             Err(error) => {
                 error!(target: FORWARDER, peer_name = %self.peer_name, ?error, ?elapsed, "Error forwarding request");
 
-                // Parse the reason, which is either the status code reason of the error message
-                // itself. If the request fails for non-network reasons, the status code may be
-                // None.
-                let reason = error
-                    .status()
-                    .and_then(|s| s.canonical_reason().map(|s| s.to_owned()))
-                    .unwrap_or(error.to_string());
+                let reason = error.to_string();
 
                 ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
             }
@@ -417,7 +412,7 @@ impl Future for HttpForwarder {
     }
 }
 
-/// A [`reqwest::Response`] error decoder, associated to a certain [`HttpForwarder`] which traces
+/// A response error decoder, associated to a certain [`HttpForwarder`] which traces
 /// errors from client error responses.
 #[derive(Debug)]
 pub struct ResponseErrorDecoder {
@@ -426,7 +421,7 @@ pub struct ResponseErrorDecoder {
     /// The url of the builder
     pub peer_url: String,
     /// The receiver of the error responses.
-    pub rx: mpsc::Receiver<(reqwest::Response, Duration)>,
+    pub rx: mpsc::Receiver<(client::Response, Duration)>,
 }
 
 impl ResponseErrorDecoder {
@@ -434,16 +429,33 @@ impl ResponseErrorDecoder {
         while let Some((response, elapsed)) = self.rx.recv().await {
             let status = response.status();
 
-            match response.json::<JsonRpcResponse<serde_json::Value>>().await {
-                Ok(body) => {
-                    if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                        error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
-                        ForwarderMetrics::increment_rpc_call_failures(self.peer_name.clone(), code);
+            // Collect response body
+
+            match response.read().await {
+                Ok(body_bytes) => {
+                    // Parse as JSON-RPC
+                    match serde_json::from_slice::<JsonRpcResponse<serde_json::Value>>(&body_bytes)
+                    {
+                        Ok(body) => {
+                            if let JsonRpcResponseTy::Error { code, message } = body.result_or_error
+                            {
+                                error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
+                                ForwarderMetrics::increment_rpc_call_failures(
+                                    self.peer_name.clone(),
+                                    code,
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
+                            ForwarderMetrics::increment_json_rpc_decoding_failures(
+                                self.peer_name.clone(),
+                            );
+                        }
                     }
                 }
                 Err(e) => {
-                    warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
-                    ForwarderMetrics::increment_json_rpc_decoding_failures(self.peer_name.clone());
+                    warn!(target: FORWARDER, ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed to read response body");
                 }
             }
         }
@@ -451,11 +463,11 @@ impl ResponseErrorDecoder {
 }
 
 fn send_http_request(
-    client: reqwest::Client,
+    client: HttpClient,
     peer_name: String,
     url: String,
     request: Arc<ForwardingRequest>,
-) -> RequestFut<reqwest::Response, reqwest::Error> {
+) -> RequestFut<client::Response, client::HttpError> {
     Box::pin(async move {
         let direction = request.direction;
         let is_big = request.is_big();
@@ -506,8 +518,7 @@ fn send_http_request(
 
         let order_type = order.order_type();
         let start_time = Instant::now();
-        let response =
-            client.post(&url).body(order.encoding().to_vec()).headers(headers).send().await;
+        let response = client.post(&url, order.encoding().to_vec(), headers).await;
 
         if response.is_ok() {
             let elapsed = start_time.elapsed();
