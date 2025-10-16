@@ -8,7 +8,7 @@ use std::{
 use clickhouse::{
     error::Result as ClickhouseResult,
     inserter::{Inserter, Quantities},
-    Client as ClickhouseClient,
+    Client as ClickhouseClient, Row,
 };
 use tokio::sync::mpsc;
 
@@ -17,18 +17,36 @@ use crate::{
     indexer::{
         click::{
             backup::{FailedCommit, MemoryBackup, MAX_BACKUP_SIZE_BYTES},
-            primitives::ClickhouseIndexableOrder,
+            models::{BundleReceiptRow, BundleRow},
+            primitives::{BuilderName, ClickhouseIndexableOrder},
         },
-        models::BundleRow,
-        BuilderName, OrderReceivers, BUNDLE_TABLE_NAME, TARGET,
+        OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
     },
     metrics::IndexerMetrics,
-    primitives::{Sampler, SystemBundle},
+    primitives::{BundleReceipt, Sampler, SystemBundle},
+    spawn_clickhouse_backup, spawn_clickhouse_inserter,
     tasks::TaskExecutor,
 };
 
 mod backup;
-mod primitives;
+mod macros;
+mod models;
+pub(crate) mod primitives;
+
+/// An clickhouse inserter with some sane defaults.
+fn default_inserter<T: Row>(client: &ClickhouseClient, table_name: &str) -> Inserter<T> {
+    // TODO: make this configurable.
+    let send_timeout = Duration::from_secs(2);
+    let end_timeout = Duration::from_secs(4);
+
+    client
+        .inserter::<T>(table_name)
+        .with_period(Some(Duration::from_secs(4))) // Dump every 4s
+        .with_period_bias(0.1) // 4±(0.1*4)
+        .with_max_bytes(128 * 1024 * 1024) // 128MiB
+        .with_max_rows(65_536)
+        .with_timeouts(Some(send_timeout), Some(end_timeout))
+}
 
 /// A wrapper over a Clickhouse [`Inserter`] that supports a backup mechanism.
 struct ClickhouseInserter<T: ClickhouseIndexableOrder> {
@@ -167,17 +185,18 @@ impl ClickhouseIndexer {
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let (host, database, username, password, bundles_table_name) = (
+        let (host, database, username, password, bundles_table_name, bundle_receipts_table_name) = (
             args.host.expect("host is set"),
             args.database.expect("database is set"),
             args.username.expect("username is set"),
             args.password.expect("password is set"),
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
+            args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
         );
 
         tracing::info!(%host, "Running with clickhouse indexer");
 
-        let OrderReceivers { bundle_rx, mut bundle_receipt_rx } = receivers;
+        let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
         let client = ClickhouseClient::default()
             .with_url(host)
@@ -186,72 +205,41 @@ impl ClickhouseIndexer {
             .with_password(password)
             .with_validation(validation);
 
-        // TODO: make this configurable.
-        let send_timeout = Duration::from_secs(2);
-        let end_timeout = Duration::from_secs(4);
-
-        let bundle_inserter = client
-            .inserter::<BundleRow>(bundles_table_name.as_str())
-            .with_period(Some(Duration::from_secs(4))) // Dump every 4s
-            .with_period_bias(0.1) // 4±(0.1*4)
-            .with_max_bytes(128 * 1024 * 1024) // 128MiB
-            .with_max_rows(65_536)
-            .with_timeouts(Some(send_timeout), Some(end_timeout));
-
+        let bundle_inserter = default_inserter::<BundleRow>(&client, &bundles_table_name);
         let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
-        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name);
+        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name.clone());
         let mut bundle_inserter_runner = InserterRunner::new(bundle_rx, bundle_inserter);
-
         let mut bundle_backup = MemoryBackup::new(
             rx,
             client
-                .inserter::<BundleRow>(bundles_table_name.as_str())
-                .with_timeouts(Some(send_timeout), Some(end_timeout * 3)),
+                .inserter::<BundleRow>(&bundles_table_name)
+                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
         )
         .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 
-        // TODO: Make this generic over order types. Requires some trait bounds.
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = bundle_inserter_runner.run_loop() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle indexer channel closed");
-                }
-                guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
+        let bundle_receipt_inserter =
+            default_inserter::<BundleReceiptRow>(&client, &bundle_receipts_table_name);
+        let (tx, rx) = mpsc::channel::<FailedCommit<BundleReceipt>>(128);
+        let bundle_receipt_inserter =
+            ClickhouseInserter::new(bundle_receipt_inserter, tx, builder_name);
+        let mut bundle_receipt_inserter_runner =
+            InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter);
+        let mut bundle_receipt_backup = MemoryBackup::new(
+            rx,
+            client
+                .inserter::<BundleReceiptRow>(&bundle_receipts_table_name)
+                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
+        )
+        .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
 
-            match  bundle_inserter_runner.inserter.end().await {
-                Ok(quantities) => {
-                    tracing::info!(target: TARGET, ?quantities, "finalized clickhouse bundle inserter");
-                }
-                Err(e) => {
-                    tracing::error!(target: TARGET, ?e, "failed to write end insertion of bundles to indexer");
-                }
-            }
-            drop(shutdown_guard);
-        });
-
-        task_executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
-            let mut shutdown_guard = None;
-            tokio::select! {
-                _ = bundle_backup.run() => {
-                    tracing::info!(target: TARGET, "clickhouse bundle backup channel closed");
-                }
-                guard = shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown for bundle indexer, performing cleanup");
-                    shutdown_guard = Some(guard);
-                },
-            }
-
-            bundle_backup.end().await;
-            drop(shutdown_guard);
-        });
-
-        // TODO: support bundle receipts in Clickhouse.
-        task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
+        spawn_clickhouse_inserter!(task_executor, bundle_inserter_runner, "bundles");
+        spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
+        spawn_clickhouse_inserter!(
+            task_executor,
+            bundle_receipt_inserter_runner,
+            "bundle receipts"
+        );
+        spawn_clickhouse_backup!(task_executor, bundle_receipt_backup, "bundle receipts");
     }
 }
 
@@ -271,8 +259,12 @@ pub(crate) mod tests {
     use crate::{
         cli::ClickhouseArgs,
         indexer::{
-            click::ClickhouseIndexer, models::BundleRow, tests::system_bundle_example,
-            OrderSenders, BUNDLE_TABLE_NAME,
+            click::{
+                models::{BundleReceiptRow, BundleRow},
+                ClickhouseIndexer,
+            },
+            tests::{bundle_receipt_example, system_bundle_example},
+            OrderSenders, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
         },
         tasks::TaskManager,
     };
@@ -369,6 +361,7 @@ pub(crate) mod tests {
                 username: Some(config.user),
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
+                bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
                 max_backup_size_bytes: None,
             }
         }
@@ -410,13 +403,18 @@ pub(crate) mod tests {
     /// Creates the bundles table from the DDL present inside the `fixtures` folder.
     async fn create_clickhouse_bundles_table(client: &ClickhouseClient) -> ClickhouseResult<()> {
         let create_bundles_table_ddl = fs::read_to_string("./fixtures/create_bundles_table.sql")
-            .expect("could not read create_bundles_table.sql")
-            // NOTE: for local instances, ReplicatedMergeTree isn't supported.
-            .replace(
-                "ENGINE = ReplicatedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')",
-                "ENGINE = MergeTree()",
-            );
+            .expect("could not read create_bundles_table.sql");
         client.query(&create_bundles_table_ddl).execute().await
+    }
+
+    /// Creates the bundle receipts table from the DDL present inside the `fixtures` folder.
+    async fn create_clickhouse_bundle_receipts_table(
+        client: &ClickhouseClient,
+    ) -> ClickhouseResult<()> {
+        let create_bundle_receipts_table_ddl =
+            fs::read_to_string("./fixtures/create_bundle_receipts_table.sql")
+                .expect("could not read create_bundle_receipts_table.sql");
+        client.query(&create_bundle_receipts_table_ddl).execute().await
     }
 
     #[tokio::test]
@@ -503,6 +501,70 @@ pub(crate) mod tests {
             .unwrap();
 
         assert_eq!(select_row, system_bundle_row);
+
+        drop(image);
+    }
+
+    /// E2E where we spin up the whole indexer and we shut down the application.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn clickhouse_bundle_receipts_rows_e2e_succeds() {
+        // Uncomment to toggle logs.
+        let registry = tracing_subscriber::registry().with(
+            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+        );
+        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+
+        // 1. Spin up Clickhouse
+        let (image, client, config) = create_test_clickhouse_client(true).await.unwrap();
+        create_clickhouse_bundle_receipts_table(&client).await.unwrap();
+
+        // 2. Spin up task executor and indexer
+        let task_manager = TaskManager::new(Handle::current());
+        let task_executor = task_manager.executor();
+        let builder_name = "buildernet".to_string();
+        let (senders, receivers) = OrderSenders::new();
+
+        let validation = false;
+        ClickhouseIndexer::run(
+            config.into(),
+            builder_name.clone(),
+            receivers,
+            task_executor,
+            validation,
+        );
+
+        let mut bundle_receipts = Vec::new();
+        let mut bundle_receipts_rows = Vec::new();
+        for _ in 0..16 {
+            bundle_receipts.push(bundle_receipt_example());
+            // So we get a different `received_at` field
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        for bundle_receipt in bundle_receipts {
+            let bundle_receipt_row = (bundle_receipt.clone(), builder_name.clone()).into();
+            bundle_receipts_rows.push(bundle_receipt_row);
+            senders.bundle_receipt_tx.send(bundle_receipt.clone()).await.unwrap();
+        }
+
+        // Wait a bit for bundle to be actually processed before shutting down.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // 4. Shutdown and check results.
+        assert!(
+            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5)),
+            "shutdown timeout"
+        );
+        let select_row = client
+            .query(&format!("SELECT * FROM {BUNDLE_RECEIPTS_TABLE_NAME}"))
+            .fetch_all::<BundleReceiptRow>()
+            .await
+            .unwrap();
+
+        assert_eq!(select_row.len(), bundle_receipts_rows.len());
+
+        for (row, expected) in select_row.iter().zip(bundle_receipts_rows.iter()) {
+            assert_eq!(row, expected);
+        }
 
         drop(image);
     }

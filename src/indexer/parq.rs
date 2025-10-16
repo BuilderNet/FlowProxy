@@ -2,6 +2,7 @@
 //!
 //! Incoming orders are buffered into Arrow and then flushed every few seconds into a Parquet file.
 
+use alloy_primitives::Keccak256;
 use arrow::{
     array::{
         ArrayBuilder, FixedSizeBinaryBuilder, RecordBatch, StringBuilder,
@@ -30,22 +31,25 @@ use crate::{
 
 /// The Arrow schema for bundle receipts.
 static BUNDLE_RECEIPTS_PARQUET_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
+    const NOT_NULLABLE: bool = false;
     const NULLABLE: bool = true;
     Schema::new(vec![
         // The bundle hash.
-        Field::new("bundle_hash", DataType::FixedSizeBinary(32), !NULLABLE),
+        Field::new("bundle_hash", DataType::FixedSizeBinary(32), NOT_NULLABLE),
+        // The bundle hash.
+        Field::new("double_bundle_hash", DataType::FixedSizeBinary(32), NOT_NULLABLE),
         // The time the bundle has been sent at, as present in the JSON-RPC header.
         Field::new("sent_at", DataType::Timestamp(TimeUnit::Microsecond, None), NULLABLE),
         // The time the local operator has received the payload.
-        Field::new("received_at", DataType::Timestamp(TimeUnit::Microsecond, None), !NULLABLE),
+        Field::new("received_at", DataType::Timestamp(TimeUnit::Microsecond, None), NOT_NULLABLE),
         // This local operator.
-        Field::new("dst_builder_name", DataType::Utf8, !NULLABLE),
+        Field::new("dst_builder_name", DataType::Utf8, NOT_NULLABLE),
         // The name of the operator which sent us the payload.
         Field::new("src_builder_name", DataType::Utf8, NULLABLE),
         // The payload size. `UInt32` allows max 4GB size.
-        Field::new("payload_size", DataType::UInt32, !NULLABLE),
+        Field::new("payload_size", DataType::UInt32, NOT_NULLABLE),
         // The priority of the bundle.
-        Field::new("priority", DataType::UInt8, !NULLABLE),
+        Field::new("priority", DataType::UInt8, NOT_NULLABLE),
     ])
 });
 
@@ -55,6 +59,7 @@ static BUNDLE_RECEIPTS_PARQUET_SCHEMA: LazyLock<Schema> = LazyLock::new(|| {
 /// It ensures that when dropped, the writer is flushed and closed.
 struct BundleReceiptWriter {
     pub bundle_hash: FixedSizeBinaryBuilder,
+    pub double_bundle_hash: FixedSizeBinaryBuilder,
     pub sent_at: TimestampMicrosecondBuilder,
     pub received_at: TimestampMicrosecondBuilder,
     pub dst_builder_name: StringBuilder,
@@ -87,6 +92,7 @@ impl BundleReceiptWriter {
     fn new(writer: ArrowWriter<File>, builder_name: BuilderName) -> Self {
         BundleReceiptWriter {
             bundle_hash: FixedSizeBinaryBuilder::new(32),
+            double_bundle_hash: FixedSizeBinaryBuilder::new(32),
             sent_at: TimestampMicrosecondBuilder::new(),
             received_at: TimestampMicrosecondBuilder::new(),
             dst_builder_name: StringBuilder::new(),
@@ -102,6 +108,11 @@ impl BundleReceiptWriter {
     /// Append a new bundle receipt to the internal Arrow buffer.
     fn append(&mut self, receipt: BundleReceipt) {
         self.bundle_hash.append_value(receipt.bundle_hash).expect("bundle hash is always 32 bytes");
+        let mut hasher = Keccak256::new();
+        hasher.update(receipt.bundle_hash);
+        let double_hash = hasher.finalize();
+        self.double_bundle_hash.append_value(double_hash).expect("keccak256 is always 32 bytes");
+
         if let Some(sent_at) = receipt.sent_at {
             self.sent_at.append_value((sent_at.unix_timestamp_nanos() / 1_000) as i64);
         } else {
@@ -123,6 +134,7 @@ impl BundleReceiptWriter {
         }
 
         let bundle_hash = self.bundle_hash.finish();
+        let double_bundle_hash = self.double_bundle_hash.finish();
         let sent_at = self.sent_at.finish();
         let received_at = self.received_at.finish();
         let dst_builder_name = self.dst_builder_name.finish();
@@ -134,6 +146,7 @@ impl BundleReceiptWriter {
             Arc::new(BUNDLE_RECEIPTS_PARQUET_SCHEMA.clone()),
             vec![
                 Arc::new(bundle_hash),
+                Arc::new(double_bundle_hash),
                 Arc::new(sent_at),
                 Arc::new(received_at),
                 Arc::new(dst_builder_name),
@@ -229,7 +242,7 @@ impl ParquetRunner {
             tokio::select! {
                 maybe_receipt = self.rx.recv() => {
                     sampler.sample(|| {
-                        IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), "bundle_receipt");
+                        IndexerMetrics::set_parquet_queue_size(self.rx.len(), "bundle_receipt");
                     });
 
                     let Some(receipt) = maybe_receipt else {
@@ -299,7 +312,6 @@ mod tests {
                 sent_at: Some(sent_at),
                 received_at,
                 src_builder_name: Address::random_with(rng).to_string(),
-                dst_builder_name: Some(Address::random_with(rng).to_string()),
                 payload_size: U32::random_with(rng).to(),
                 priority: Priority::Medium,
             }
@@ -322,12 +334,13 @@ mod tests {
         let mut out = Vec::with_capacity(batch.num_rows());
 
         let bundle_hash: FixedSizeBinaryArray = batch.column(0).to_data().into();
-        let sent_at: TimestampMicrosecondArray = batch.column(1).to_data().into();
-        let received_at: TimestampMicrosecondArray = batch.column(2).to_data().into();
-        let dst_builder_name: StringArray = batch.column(3).to_data().into();
-        let src_builder_name: StringArray = batch.column(4).to_data().into();
-        let payload_size: UInt32Array = batch.column(5).to_data().into();
-        let priority: UInt8Array = batch.column(6).to_data().into();
+        let _double_bundle_hash: FixedSizeBinaryArray = batch.column(1).to_data().into();
+        let sent_at: TimestampMicrosecondArray = batch.column(2).to_data().into();
+        let received_at: TimestampMicrosecondArray = batch.column(3).to_data().into();
+        let _dst_builder_name: StringArray = batch.column(4).to_data().into();
+        let src_builder_name: StringArray = batch.column(5).to_data().into();
+        let payload_size: UInt32Array = batch.column(6).to_data().into();
+        let priority: UInt8Array = batch.column(7).to_data().into();
 
         for i in 0..batch.num_rows() {
             let bundle_hash_bytes = bundle_hash.value(i);
@@ -348,7 +361,6 @@ mod tests {
             };
 
             let src_builder_name = src_builder_name.value(i).to_string();
-            let dst_builder_name = dst_builder_name.value(i).to_string();
 
             let payload_size = payload_size.value(i);
             let priority = match priority.value(i) {
@@ -363,7 +375,6 @@ mod tests {
                 sent_at,
                 received_at,
                 src_builder_name,
-                dst_builder_name: Some(dst_builder_name),
                 payload_size,
                 priority,
             });
@@ -402,13 +413,8 @@ mod tests {
         // 2. --- Spam.
 
         let mut rng = rand::rng();
-        let example_bundle_receipts = (0..8192)
-            .map(|_| {
-                let mut r = BundleReceipt::random(&mut rng);
-                r.dst_builder_name = Some("buildernet_dst".to_string());
-                r
-            })
-            .collect::<Vec<_>>();
+        let example_bundle_receipts =
+            (0..1024).map(|_| BundleReceipt::random(&mut rng)).collect::<Vec<_>>();
 
         rt.block_on(async {
             for r in &example_bundle_receipts {

@@ -1,12 +1,15 @@
 //! Contains the model used for storing data inside Clickhouse.
 
-use crate::indexer::{
-    ser::{address, addresses, hash, hashes, u256es},
-    BuilderName,
+use crate::{
+    indexer::{
+        click::BuilderName,
+        ser::{address, addresses, hash, hashes, u256es},
+    },
+    primitives::BundleReceipt,
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use rbuilder_primitives::BundleVersion;
 use time::OffsetDateTime;
@@ -317,6 +320,51 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
     }
 }
 
+/// The clickhouse model representing a [`crate::primitives::BundleReceipt`].
+#[derive(Debug, Clone, clickhouse::Row, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub(crate) struct BundleReceiptRow {
+    #[serde(with = "hash")]
+    bundle_hash: B256,
+    /// The hash of the bundle hash.
+    #[serde(with = "hash")]
+    double_bundle_hash: B256,
+    #[serde(with = "clickhouse::serde::time::datetime64::micros::option")]
+    sent_at: Option<OffsetDateTime>,
+    #[serde(with = "clickhouse::serde::time::datetime64::micros")]
+    received_at: OffsetDateTime,
+    /// The name of the local operator indexing this data.
+    dst_builder_name: String,
+    src_builder_name: String,
+    payload_size: u32,
+    priority: u8,
+}
+
+impl From<(BundleReceipt, BuilderName)> for BundleReceiptRow {
+    fn from((receipt, dst_builder_name): (BundleReceipt, BuilderName)) -> Self {
+        let mut hasher = Keccak256::new();
+        hasher.update(receipt.bundle_hash);
+        let micros = receipt.received_at.microsecond();
+
+        BundleReceiptRow {
+            bundle_hash: receipt.bundle_hash,
+            double_bundle_hash: hasher.finalize(),
+            sent_at: receipt
+                .sent_at
+                .map(|dt| dt.replace_microsecond(micros).expect("to replace microseconds").into()),
+            received_at: receipt
+                .received_at
+                .replace_microsecond(micros)
+                .expect("to replace microseconds")
+                .into(),
+            dst_builder_name,
+            src_builder_name: receipt.src_builder_name,
+            payload_size: receipt.payload_size,
+            priority: receipt.priority as u8,
+        }
+    }
+}
+
 /// Tests to make sure round-trip conversion between raw bundle and clickhouse bundle types is
 /// feasible.
 #[cfg(test)]
@@ -327,8 +375,13 @@ pub(crate) mod tests {
     use rbuilder_primitives::serialize::{RawBundle, RawBundleMetadata};
 
     use crate::{
-        indexer::{self, models::BundleRow},
-        primitives::SystemBundle,
+        indexer::{
+            self,
+            click::models::{BundleReceiptRow, BundleRow},
+            tests::bundle_receipt_example,
+        },
+        primitives::{BundleReceipt, SystemBundle},
+        priority::Priority,
     };
 
     impl From<BundleRow> for RawBundle {
@@ -366,6 +419,30 @@ pub(crate) mod tests {
         }
     }
 
+    impl From<u8> for Priority {
+        fn from(value: u8) -> Self {
+            match value {
+                0 => Priority::High,
+                1 => Priority::Medium,
+                2 => Priority::Low,
+                _ => panic!("invalid priority value: {value}"),
+            }
+        }
+    }
+
+    impl From<BundleReceiptRow> for BundleReceipt {
+        fn from(value: BundleReceiptRow) -> Self {
+            BundleReceipt {
+                bundle_hash: value.bundle_hash,
+                sent_at: value.sent_at.map(|dt| dt.into()),
+                received_at: value.received_at.into(),
+                src_builder_name: value.src_builder_name,
+                payload_size: value.payload_size,
+                priority: value.priority.into(),
+            }
+        }
+    }
+
     #[test]
     fn clickhouse_bundle_row_conversion_round_trip_works() {
         let system_bundle = indexer::tests::system_bundle_example();
@@ -398,5 +475,16 @@ pub(crate) mod tests {
                 .unwrap();
 
         assert_eq!(system_bundle, system_bundle_round_trip);
+    }
+
+    #[test]
+    fn clickhouse_bundle_receipt_row_conversion_round_trip_works() {
+        let bundle_receipt = bundle_receipt_example();
+
+        let receipt_row: BundleReceiptRow =
+            (bundle_receipt.clone(), "buildernet".to_string()).into();
+        let bundle_receipt_round_trip: BundleReceipt = receipt_row.into();
+
+        assert_eq!(bundle_receipt, bundle_receipt_round_trip);
     }
 }

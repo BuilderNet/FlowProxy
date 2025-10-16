@@ -406,7 +406,6 @@ impl OrderflowIngress {
                     sent_at,
                     received_at: received_at.utc,
                     src_builder_name: peer,
-                    dst_builder_name: None,
                     payload_size: payload_size as u32,
                     priority,
                 };
