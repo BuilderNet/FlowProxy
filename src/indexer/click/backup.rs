@@ -41,14 +41,14 @@ struct FailedCommits<T: ClickhouseIndexableOrder> {
 impl<T: ClickhouseIndexableOrder> FailedCommits<T> {
     /// Push a new failed commit to the front of the queue, updating the aggregated quantities.
     fn push_front(&mut self, value: FailedCommit<T>) -> (Quantities, usize) {
-        self.inner.push_back(value);
+        self.inner.push_front(value);
         self.update_quantities()
     }
 
     /// Push back the oldest failed commit to the back of the queue, updating the aggregated
     /// quantities.
     fn push_back(&mut self, value: FailedCommit<T>) -> (Quantities, usize) {
-        self.inner.push_front(value);
+        self.inner.push_back(value);
         self.update_quantities()
     }
 
