@@ -1,9 +1,8 @@
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 
-/// The default pool idle timeout in seconds. HAproxy default idle timeout is 10 seconds. So make
-/// sure to set a lower timeout.
-pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 9;
+/// The default pool idle timeout in seconds.
+pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
 
 /// The default HTTP connection limit per host.
 pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 512;
