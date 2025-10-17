@@ -2,9 +2,9 @@
 
 use crate::{
     cache::SignerCache,
-    consts::{
-        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
-        DEFAULT_POOL_IDLE_TIMEOUT_SECS,
+    clients::{
+        default_forwarder_client, DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS,
+        DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_POOL_IDLE_TIMEOUT_SECS,
     },
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
@@ -49,6 +49,7 @@ use crate::{builderhub::PeerStore, cache::OrderCache, indexer::Indexer};
 
 pub mod builderhub;
 mod cache;
+pub mod clients;
 pub mod consts;
 pub mod entity;
 pub mod forwarder;
@@ -125,15 +126,6 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            "local-builder".to_string(),
-        ))
-        .build()?;
-
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
         debug!(url = builder_hub_url, "Running with BuilderHub");
@@ -181,7 +173,7 @@ pub async fn run_with_listeners(
         let local_sender = spawn_forwarder(
             String::from("local-builder"),
             builder_url.to_string(),
-            client.clone(),
+            default_forwarder_client().build()?,
             ctx.task_executor.clone(),
         )?;
 
