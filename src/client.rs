@@ -203,6 +203,8 @@ pub struct HttpClientBuilder {
     pool_idle_timeout: Duration,
     /// Request timeout (default: 2s)
     request_timeout: Duration,
+    /// Connect timeout (default: 1s)
+    connect_timeout: Duration,
     /// Maximum concurrent connections (default: None, unlimited)
     max_concurrent_connections: Option<usize>,
     /// Identifier for connection limiter metrics (default: "client")
@@ -234,6 +236,7 @@ impl HttpClientBuilder {
             pool_max_idle_per_host: 2048,
             pool_idle_timeout: Duration::from_secs(120),
             request_timeout: Duration::from_secs(2),
+            connect_timeout: Duration::from_secs(1),
             max_concurrent_connections: None,
             connection_limiter_id: id.into(),
             http2_connection_window_size: 16 * 1024 * 1024, // 16MB
@@ -367,6 +370,7 @@ impl HttpClientBuilder {
     /// Build the configured client.
     pub fn build(self) -> HttpClient {
         let mut connector = HttpConnector::new();
+        connector.set_connect_timeout(Some(self.connect_timeout));
 
         // Configure TCP socket options
         connector.set_nodelay(self.tcp_nodelay);

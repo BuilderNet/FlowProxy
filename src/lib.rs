@@ -317,8 +317,11 @@ async fn run_update_peers(
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
                 let client = HttpClient::builder(&builder.name)
                     .tcp_nodelay(true)
-                    .pool_idle_timeout(Duration::from_secs(90))
+                    // HAproxy default idle timeout is 9 seconds. So make sure to set a lower
+                    // timeout.
+                    .pool_idle_timeout(Duration::from_secs(9))
                     .request_timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                    .tcp_keepalive(Duration::from_secs(30))
                     .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                     .max_concurrent_connections(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                     .tcp_send_buffer_size(8 * 1024 * 1024) // 8MB
