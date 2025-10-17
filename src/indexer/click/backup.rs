@@ -8,7 +8,7 @@ use std::{
 
 use clickhouse::inserter::{Inserter, Quantities};
 use derive_more::{Deref, DerefMut};
-use redb::TableDefinition;
+use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition, TableStats};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -23,11 +23,28 @@ pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 Gi
 pub(crate) const DISK_BACKUP_DATABASE_PATH: &str =
     "/var/lib/buildernet-orderflow-proxy/clickhouse_backup.db";
 
+const DISK: &str = "disk";
+const MEMORY: &str = "memory";
+
 /// Tracing target for the backup actor.
 const TARGET: &str = "indexer::backup";
 
 fn unix_now() -> u128 {
     SystemTime::now().duration_since(UNIX_EPOCH).expect("time went backwards").as_millis()
+}
+
+trait BackupExt<T: ClickhouseIndexableOrder> {
+    /// Either "memory" or "disk".
+    const TYPE: &'static str;
+
+    /// The result type of the backup operation.
+    type BackupResult;
+
+    type RetrieveError;
+
+    fn backup(&mut self, data: FailedCommit<T>) -> Self::BackupResult;
+
+    fn retrieve_one(&mut self) -> Result<Vec<T::ClickhouseRowType>, Self::RetrieveError>;
 }
 
 /// Represents data we failed to commit to clickhouse, including the rows and some information
@@ -42,6 +59,12 @@ pub(crate) struct FailedCommit<T: ClickhouseIndexableOrder> {
 impl<T: ClickhouseIndexableOrder> FailedCommit<T> {
     pub(crate) fn new(rows: Vec<T::ClickhouseRowType>, quantities: Quantities) -> Self {
         Self { rows, quantities }
+    }
+}
+
+impl<T: ClickhouseIndexableOrder> Default for FailedCommit<T> {
+    fn default() -> Self {
+        Self { rows: Vec::new(), quantities: Quantities::ZERO }
     }
 }
 
@@ -138,18 +161,18 @@ impl DiskBackupConfig {
 pub(crate) struct MemoryBackupConfig {
     /// The maximum size in bytes for holding past failed commits in-memory. Once we go over this threshold,
     /// pressure is applied and old commits are dropped.
-    pub memory_max_size_bytes: u64,
+    pub max_size_bytes: u64,
 }
 
 impl MemoryBackupConfig {
-    pub fn new(memory_max_size_bytes: u64) -> Self {
-        Self { memory_max_size_bytes }
+    pub fn new(max_size_bytes: u64) -> Self {
+        Self { max_size_bytes }
     }
 }
 
 impl Default for MemoryBackupConfig {
     fn default() -> Self {
-        Self { memory_max_size_bytes: MAX_MEMORY_BACKUP_SIZE_BYTES }
+        Self { max_size_bytes: MAX_MEMORY_BACKUP_SIZE_BYTES }
     }
 }
 
@@ -172,6 +195,22 @@ impl BackupConfig {
     ) -> Self {
         Self { interval, disk_backup_config, memory_backup_config }
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DiskBackupError {
+    #[error("redb database error: {0}")]
+    Database(#[from] redb::DatabaseError),
+    #[error("redb transaction error: {0}")]
+    Transactions(#[from] redb::TransactionError),
+    #[error("redb table error: {0}")]
+    Table(#[from] redb::TableError),
+    #[error("redb storage error: {0}")]
+    Storage(#[from] redb::StorageError),
+    #[error("redb commmit error: {0}")]
+    Commit(#[from] redb::CommitError),
+    #[error("serialization error: {0}")]
+    Serde(#[from] serde_json::Error),
 }
 
 /// A disk backup for failed commits. This handle to a database allows to write only to one table
@@ -205,16 +244,36 @@ impl<T> DiskBackup<T> {
 }
 
 impl<T: ClickhouseIndexableOrder> DiskBackup<T> {
-    pub fn write(&mut self, data: FailedCommit<T>) -> Result<(), redb::Error> {
-        let table_def = TableDefinition::<u128, FailedCommit<T>>::new(&self.config.table_name);
+    fn save(&mut self, data: &FailedCommit<T>) -> Result<TableStats, DiskBackupError> {
+        let table_def = TableDefinition::<u128, Vec<u8>>::new(&self.config.table_name);
+        // NOTE: not efficient, but we don't expect to store a lot of data here.
+        let bytes = serde_json::to_vec(&data.rows)?;
 
         let writer = self.db.write().expect("not poisoned").begin_write()?;
-        {
+        let stats = {
             let mut table = writer.open_table(table_def)?;
-            table.insert(unix_now(), data);
-        }
+            table.insert(unix_now(), bytes)?;
+            table.stats()?
+        };
+        writer.commit()?;
 
-        Ok(())
+        Ok(stats)
+    }
+
+    fn retrieve_oldest(&mut self) -> Result<Vec<T::ClickhouseRowType>, DiskBackupError> {
+        let table_def = TableDefinition::<u128, Vec<u8>>::new(&self.config.table_name);
+
+        let reader = self.db.read().expect("lock not poisoned").begin_read()?;
+        let table = reader.open_table(table_def)?;
+
+        // Retreives in sorted order.
+        let Some(entry_res) = table.iter()?.next() else {
+            return Ok(Vec::new());
+        };
+        let (_, rows_raw) = entry_res?;
+        let rows: Vec<T::ClickhouseRowType> = serde_json::from_slice(&rows_raw.value())?;
+
+        Ok(rows)
     }
 }
 
@@ -302,6 +361,45 @@ impl<T: ClickhouseIndexableOrder> Backup<T> {
         self
     }
 
+    fn backup(&mut self, failed_commit: FailedCommit<T>) {
+        let quantities = failed_commit.quantities.clone();
+
+        match self.disk_backup.save(&failed_commit) {
+            Ok(stats) => {
+                tracing::debug!(target: TARGET, order = T::ORDER_TYPE, total_size_bytes = stats.stored_bytes(), "wrote failed commit to disk");
+            }
+            Err(e) => {
+                tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, "failed to write commit, trying in-memory");
+                let memory_backup = &mut self.memory_backup;
+
+                let (Quantities { bytes: total_size_bytes, .. }, new_len) =
+                    memory_backup.failed_commits.push_front(failed_commit);
+                IndexerMetrics::set_clickhouse_backup_size(
+                    total_size_bytes,
+                    new_len,
+                    T::ORDER_TYPE,
+                );
+
+                tracing::debug!(target: TARGET, order = T::ORDER_TYPE,
+                    bytes = ?quantities.bytes, rows = ?quantities.rows, total_size_bytes, total_batches = memory_backup.failed_commits.len(),
+                    "backup failed commit in-memory"
+                );
+
+                if total_size_bytes > memory_backup.config.max_size_bytes
+                    && memory_backup.failed_commits.len() > 1
+                {
+                    tracing::warn!(target: TARGET, order = T::ORDER_TYPE,
+                            total_size_bytes, max_size_bytes = memory_backup.config.max_size_bytes, "failed commits exceeded max size, dropping oldest failed commit");
+                    let oldest =
+                        memory_backup.failed_commits.pop_back().expect("length checked above");
+                    IndexerMetrics::process_clickhouse_backup_data_lost_quantities(
+                        &oldest.quantities,
+                    );
+                }
+            }
+        }
+    }
+
     /// Run the backup actor until it is possible to receive messages.
     pub(crate) async fn run(&mut self) {
         loop {
@@ -312,7 +410,6 @@ impl<T: ClickhouseIndexableOrder> Backup<T> {
                         break;
                     };
 
-                    let quantities = failed_commit.quantities.clone();
                     let (Quantities { bytes: total_size_bytes, .. }, new_len) = self.failed_commits.push_front(failed_commit);
                     IndexerMetrics::set_clickhouse_backup_size(total_size_bytes, new_len, T::ORDER_TYPE);
 

@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use clickhouse::{Row, RowWrite};
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use crate::{
     indexer::click::models::{BundleReceiptRow, BundleRow},
@@ -13,7 +13,11 @@ pub(crate) type BuilderName = String;
 /// An high-level order type that can be indexed in clickhouse.
 pub(crate) trait ClickhouseIndexableOrder: Sized {
     /// The associated inner row type that can be serialized into Clickhouse data.
-    type ClickhouseRowType: Row + RowWrite + Serialize + From<(Self, BuilderName)>;
+    type ClickhouseRowType: Row
+        + RowWrite
+        + Serialize
+        + DeserializeOwned
+        + From<(Self, BuilderName)>;
 
     /// The type of such order, e.g. "bundles" or "transactions". For informational purposes.
     const ORDER_TYPE: &'static str;
