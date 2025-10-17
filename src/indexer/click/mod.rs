@@ -33,7 +33,7 @@ use crate::{
 mod backup;
 mod macros;
 mod models;
-pub mod primitives;
+pub(crate) mod primitives;
 
 /// An clickhouse inserter with some sane defaults.
 fn default_inserter<T: Row>(client: &ClickhouseClient, table_name: &str) -> Inserter<T> {
@@ -95,7 +95,7 @@ impl<T: ClickhouseRowExt> ClickhouseInserter<T> {
                     tracing::trace!(target: TARGET, order = T::ORDER, "committed to inserter");
                 } else {
                     tracing::debug!(target: TARGET, order = T::ORDER, ?quantities, "inserted batch to clickhouse");
-                    IndexerMetrics::process_clickhouse_quantities(&quantities);
+                    IndexerMetrics::process_clickhouse_quantities(&quantities.into());
                     IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
                     // Clear the backup rows.
                     self.rows_backup.clear();
@@ -192,6 +192,17 @@ impl ClickhouseClientConfig {
     }
 }
 
+impl From<ClickhouseClientConfig> for ClickhouseClient {
+    fn from(config: ClickhouseClientConfig) -> Self {
+        ClickhouseClient::default()
+            .with_url(config.host)
+            .with_database(config.database)
+            .with_user(config.username)
+            .with_password(config.password)
+            .with_validation(config.validation)
+    }
+}
+
 /// A namespace struct to spawn a Clickhouse indexer.
 #[derive(Debug, Clone)]
 pub(crate) struct ClickhouseIndexer;
@@ -208,8 +219,8 @@ impl ClickhouseIndexer {
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let client_config = ClickhouseClientConfig::new(&args, validation);
-        tracing::info!(host = %client_config.host, "Running with clickhouse indexer");
+        let client = ClickhouseClientConfig::new(&args, validation).into();
+        tracing::info!("Running with clickhouse indexer");
 
         let (bundles_table_name, bundle_receipts_table_name) = (
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
@@ -218,23 +229,14 @@ impl ClickhouseIndexer {
         let memory_backup_max_size_bytes = args
             .backup
             .as_ref()
-            .map(|b| b.memory_max_size_bytes)
-            .flatten()
+            .and_then(|b| b.memory_max_size_bytes)
             .unwrap_or(MAX_MEMORY_BACKUP_SIZE_BYTES);
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
-        let client = ClickhouseClient::default()
-            .with_url(client_config.host)
-            .with_database(client_config.database)
-            .with_user(client_config.username)
-            .with_password(client_config.password)
-            .with_validation(validation);
-
         let disk_backup = DiskBackup::new(DiskBackupConfig::new(
             args.backup
-                .map(|b| b.disk_database_path)
-                .flatten()
+                .and_then(|b| b.disk_database_path)
                 .unwrap_or(PathBuf::from(DISK_BACKUP_DATABASE_PATH)),
             bundles_table_name.clone(),
         ))
