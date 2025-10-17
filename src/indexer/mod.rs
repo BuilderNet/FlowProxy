@@ -16,7 +16,7 @@ use crate::{
     tasks::TaskExecutor,
 };
 
-mod click;
+pub(crate) mod click;
 mod parq;
 mod ser;
 

@@ -325,19 +325,19 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleReceiptRow {
     #[serde(with = "hash")]
-    bundle_hash: B256,
+    pub(crate) bundle_hash: B256,
     /// The hash of the bundle hash.
     #[serde(with = "hash")]
-    double_bundle_hash: B256,
+    pub(crate) double_bundle_hash: B256,
     #[serde(with = "clickhouse::serde::time::datetime64::micros::option")]
-    sent_at: Option<OffsetDateTime>,
+    pub(crate) sent_at: Option<OffsetDateTime>,
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-    received_at: OffsetDateTime,
+    pub(crate) received_at: OffsetDateTime,
     /// The name of the local operator indexing this data.
-    dst_builder_name: String,
-    src_builder_name: String,
-    payload_size: u32,
-    priority: u8,
+    pub(crate) dst_builder_name: String,
+    pub(crate) src_builder_name: String,
+    pub(crate) payload_size: u32,
+    pub(crate) priority: u8,
 }
 
 impl From<(BundleReceipt, BuilderName)> for BundleReceiptRow {

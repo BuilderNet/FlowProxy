@@ -2,11 +2,10 @@
 //! label
 use std::time::Duration;
 
-use clickhouse::inserter::Quantities;
 use hyper::{Method, StatusCode};
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 
-use crate::{forwarder::ForwardingDirection, priority::Priority};
+use crate::{forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
 
 mod name {
     /// BuilderHub metrics.
