@@ -3,7 +3,7 @@
 use crate::{
     cache::SignerCache,
     consts::{
-        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS,
+        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
         DEFAULT_POOL_IDLE_TIMEOUT_SECS,
     },
     metrics::{
@@ -322,6 +322,7 @@ async fn run_update_peers(
                 // Create a new client for each peer.
                 let mut client = reqwest::Client::builder()
                     .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                    .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
                     .pool_idle_timeout(Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS))
                     .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                     .connector_layer(utils::limit::ConnectionLimiterLayer::new(
