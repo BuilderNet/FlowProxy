@@ -39,7 +39,8 @@ enum BackupSource {
     Memory,
 }
 
-/// Generates a new unique key for disk backup entries, based on current system time in milliseconds.
+/// Generates a new unique key for disk backup entries, based on current system time in
+/// milliseconds.
 fn new_disk_backup_key() -> DiskBackupKey {
     SystemTime::now().duration_since(UNIX_EPOCH).expect("time went backwards").as_millis()
 }
@@ -113,8 +114,8 @@ impl DiskBackupConfig {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MemoryBackupConfig {
-    /// The maximum size in bytes for holding past failed commits in-memory. Once we go over this threshold,
-    /// pressure is applied and old commits are dropped.
+    /// The maximum size in bytes for holding past failed commits in-memory. Once we go over this
+    /// threshold, pressure is applied and old commits are dropped.
     pub max_size_bytes: u64,
 }
 
@@ -148,7 +149,8 @@ pub(crate) enum DiskBackupError {
 }
 
 /// A disk backup for failed commits. This handle to a database allows to write only to one table
-/// for scoped access. If you want to write to another table, clone it using [`Self::clone_with_table`].
+/// for scoped access. If you want to write to another table, clone it using
+/// [`Self::clone_with_table`].
 #[derive(Debug, Clone)]
 pub(crate) struct DiskBackup<T> {
     db: Arc<RwLock<redb::Database>>,
@@ -264,7 +266,8 @@ impl<T> MemoryBackup<T> {
         self.stats.size_bytes > self.config.max_size_bytes && self.failed_commits.len() > 1
     }
 
-    /// Drops the oldest failed commit if the threshold has been exceeded, returning the updated stats
+    /// Drops the oldest failed commit if the threshold has been exceeded, returning the updated
+    /// stats
     fn drop_excess(&mut self) -> Option<(MemoryBackupStats, Quantities)> {
         if self.threhold_exceeded() {
             self.failed_commits.pop_back();
@@ -531,7 +534,8 @@ impl<T: ClickhouseRowExt> Backup<T> {
 //     async fn backup_memory_e2e_works() {
 //         // Uncomment to toggle logs.
 //         let registry = tracing_subscriber::registry().with(
-//             EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+//             
+// EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
 //         );
 //         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 //
@@ -560,7 +564,8 @@ impl<T: ClickhouseRowExt> Backup<T> {
 //         let failed_commit = FailedCommit::<SystemBundle>::new(bundle_rows.clone(), quantities);
 //
 //         tx.send(failed_commit).await.unwrap();
-//         tokio::time::sleep(Duration::from_millis(100)).await; // Wait some time to let the backup process it.
+//         tokio::time::sleep(Duration::from_millis(100)).await; // Wait some time to let the backup
+// process it.
 //
 //         let results = client
 //             .query(&format!("select * from {BUNDLE_TABLE_NAME}"))
