@@ -20,7 +20,7 @@ use crate::{
                 DISK_BACKUP_DATABASE_PATH, MAX_MEMORY_BACKUP_SIZE_BYTES,
             },
             models::{BundleReceiptRow, BundleRow},
-            primitives::{BuilderName, ClickhouseIndexableOrder, ClickhouseRowExt},
+            primitives::{ClickhouseIndexableOrder, ClickhouseRowExt},
         },
         OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
     },
@@ -138,14 +138,14 @@ struct InserterRunner<T: ClickhouseIndexableOrder> {
     /// The underlying Clickhouse inserter.
     inserter: ClickhouseInserter<T::ClickhouseRowType>,
     /// The name of the local operator to use when adding data to clickhouse.
-    builder_name: BuilderName,
+    builder_name: String,
 }
 
 impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
     fn new(
         rx: mpsc::Receiver<T>,
         inserter: ClickhouseInserter<T::ClickhouseRowType>,
-        builder_name: BuilderName,
+        builder_name: String,
     ) -> Self {
         Self { rx, inserter, builder_name }
     }
@@ -214,7 +214,7 @@ impl ClickhouseIndexer {
     /// reasons, and because validation doesn't support UInt256 data types.
     pub(crate) fn run(
         args: ClickhouseArgs,
-        builder_name: BuilderName,
+        builder_name: String,
         receivers: OrderReceivers,
         task_executor: TaskExecutor,
         validation: bool,

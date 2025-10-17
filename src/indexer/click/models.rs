@@ -1,10 +1,7 @@
 //! Contains the model used for storing data inside Clickhouse.
 
 use crate::{
-    indexer::{
-        click::BuilderName,
-        ser::{address, addresses, hash, hashes, u256es},
-    },
+    indexer::ser::{address, addresses, hash, hashes, u256es},
     primitives::BundleReceipt,
 };
 use alloy_consensus::Transaction;
@@ -127,8 +124,8 @@ pub(crate) struct BundleRow {
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
-impl From<(SystemBundle, BuilderName)> for BundleRow {
-    fn from((bundle, builder_name): (SystemBundle, BuilderName)) -> Self {
+impl From<(SystemBundle, String)> for BundleRow {
+    fn from((bundle, builder_name): (SystemBundle, String)) -> Self {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
                 let micros = bundle.metadata.received_at.utc.microsecond();
@@ -340,8 +337,8 @@ pub(crate) struct BundleReceiptRow {
     pub(crate) priority: u8,
 }
 
-impl From<(BundleReceipt, BuilderName)> for BundleReceiptRow {
-    fn from((receipt, dst_builder_name): (BundleReceipt, BuilderName)) -> Self {
+impl From<(BundleReceipt, String)> for BundleReceiptRow {
+    fn from((receipt, dst_builder_name): (BundleReceipt, String)) -> Self {
         let mut hasher = Keccak256::new();
         hasher.update(receipt.bundle_hash);
         let micros = receipt.received_at.microsecond();

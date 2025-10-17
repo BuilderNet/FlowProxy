@@ -7,10 +7,8 @@ use crate::{
     primitives::{BundleReceipt, SystemBundle},
 };
 
-/// A simple alias to refer to a builder name.
-pub(crate) type BuilderName = String;
-
 pub(crate) trait ClickhouseRowExt: Row + RowWrite + Serialize + DeserializeOwned {
+    /// The type of such row, e.g. "bundles" or "transactions". For informational purposes.
     const ORDER: &'static str;
 
     /// An identifier of such row.
@@ -58,7 +56,7 @@ pub(crate) trait ClickhouseIndexableOrder: Sized {
     fn hash(&self) -> B256;
 
     /// Converts such order into the associated Clickhouse row type.
-    fn to_row(self, builder_name: BuilderName) -> Self::ClickhouseRowType;
+    fn to_row(self, builder_name: String) -> Self::ClickhouseRowType;
 }
 
 impl ClickhouseIndexableOrder for SystemBundle {
@@ -70,7 +68,7 @@ impl ClickhouseIndexableOrder for SystemBundle {
         self.bundle_hash
     }
 
-    fn to_row(self, builder_name: BuilderName) -> Self::ClickhouseRowType {
+    fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {
         (self, builder_name).into()
     }
 }
@@ -84,7 +82,7 @@ impl ClickhouseIndexableOrder for BundleReceipt {
         self.bundle_hash
     }
 
-    fn to_row(self, builder_name: BuilderName) -> Self::ClickhouseRowType {
+    fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {
         (self, builder_name).into()
     }
 }

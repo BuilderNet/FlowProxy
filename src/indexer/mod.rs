@@ -7,10 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::{
     cli::IndexerArgs,
-    indexer::{
-        click::{primitives::BuilderName, ClickhouseIndexer},
-        parq::ParquetIndexer,
-    },
+    indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, SystemBundle},
     tasks::TaskExecutor,
@@ -82,7 +79,7 @@ pub struct Indexer;
 impl Indexer {
     pub fn run(
         args: IndexerArgs,
-        builder_name: BuilderName,
+        builder_name: String,
         task_executor: TaskExecutor,
     ) -> IndexerHandle {
         let (senders, receivers) = OrderSenders::new();
