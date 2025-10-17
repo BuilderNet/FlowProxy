@@ -323,7 +323,6 @@ async fn run_update_peers(
                 let mut client = reqwest::Client::builder()
                     .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
                     .pool_idle_timeout(Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS))
-                    .tcp_keepalive(Duration::from_secs(30))
                     .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
                     .connector_layer(utils::limit::ConnectionLimiterLayer::new(
                         DEFAULT_CONNECTION_LIMIT_PER_HOST,
