@@ -376,7 +376,10 @@ impl HttpForwarder {
 
                 if error.is_connect() {
                     warn!(target: FORWARDER, peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
-                    ForwarderMetrics::increment_http_connect_errors(self.peer_name.clone(), reason);
+                    ForwarderMetrics::increment_http_connect_failures(
+                        self.peer_name.clone(),
+                        reason,
+                    );
                 } else {
                     ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
                 }

@@ -18,7 +18,7 @@ mod name {
 
     /// Forwarder metrics.
     pub(crate) mod forwarder {
-        pub(crate) const HTTP_CONNECT_ERRORS: &str = "forwarder_http_connect_errors";
+        pub(crate) const HTTP_CONNECT_FAILURES: &str = "forwarder_http_connect_failures";
         pub(crate) const HTTP_CALL_FAILURES: &str = "forwarder_http_call_failures";
         pub(crate) const INFLIGHT_REQUESTS: &str = "forwarder_inflight_http_calls";
         pub(crate) const OPEN_HTTP_CONNECTIONS: &str = "forwarder_open_http_connections";
@@ -275,8 +275,8 @@ impl ForwarderMetrics {
     }
 
     #[inline]
-    pub fn increment_http_connect_errors(peer_name: String, reason: String) {
-        counter!(forwarder::HTTP_CONNECT_ERRORS, "peer_name" => peer_name, "reason" => reason)
+    pub fn increment_http_connect_failures(peer_name: String, reason: String) {
+        counter!(forwarder::HTTP_CONNECT_FAILURES, "peer_name" => peer_name, "reason" => reason)
             .increment(1);
     }
 
