@@ -334,10 +334,7 @@ async fn run_update_peers(
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
                 if let Some(ref tls_cert) = builder.tls_certificate() {
-                    client = client
-                        .https_only(true)
-                        .add_root_certificate(tls_cert.clone())
-                        .use_rustls_tls();
+                    client = client.https_only(true).add_root_certificate(tls_cert.clone())
                 }
 
                 if disable_forwarding {
