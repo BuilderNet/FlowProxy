@@ -374,7 +374,12 @@ impl HttpForwarder {
                     .and_then(|s| s.canonical_reason().map(|s| s.to_owned()))
                     .unwrap_or(error.to_string());
 
-                ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
+                if error.is_connect() {
+                    warn!(target: FORWARDER, peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
+                    ForwarderMetrics::increment_http_connect_errors(self.peer_name.clone(), reason);
+                } else {
+                    ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
+                }
             }
         }
     }
