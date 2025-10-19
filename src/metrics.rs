@@ -53,6 +53,8 @@ mod name {
             "indexer_clickhouse_backup_data_lost_bytes_total";
         pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_ROWS: &str =
             "indexer_clickhouse_backup_data_lost_rows_total";
+        pub(crate) const CLICKHOUSE_BACKUP_DISK_ERRORS: &str =
+            "indexer_clickhouse_backup_disk_errors";
 
         pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
     }
@@ -172,6 +174,10 @@ pub fn describe() {
     describe_counter!(
         indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS,
         "Total number of rows lost due to pressure on Clickhouse backup"
+    );
+    describe_counter!(
+        indexer::CLICKHOUSE_BACKUP_DISK_ERRORS,
+        "Errors encountered during Clickhouse disk backup"
     );
 
     describe_histogram!(
@@ -615,19 +621,53 @@ impl IndexerMetrics {
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        Self::set_clickhouse_backup_size_bytes(size_bytes, order);
-        Self::set_clickhouse_backup_size_batches(batches, order);
+    pub fn set_clickhouse_memory_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
+        Self::set_clickhouse_backup_memory_size_bytes(size_bytes, order);
+        Self::set_clickhouse_backup_memory_size_batches(batches, order);
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size_bytes(size: u64, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "order" => order).set(size as f64);
+    pub fn set_clickhouse_backup_memory_size_bytes(size: u64, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "backup" => "memory", "order" => order)
+            .set(size as f64);
     }
 
     #[inline]
-    pub fn set_clickhouse_backup_size_batches(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "order" => order).set(size as f64);
+    pub fn set_clickhouse_backup_memory_size_batches(size: usize, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "backup" => "memory", "order" => order)
+            .set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_disk_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
+        Self::set_clickhouse_backup_disk_size_bytes(size_bytes, order);
+        Self::set_clickhouse_backup_disk_size_batches(batches, order);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_disk_size_bytes(size: u64, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "backup" => "disk", "order" => order)
+            .set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_disk_size_batches(size: usize, order: &'static str) {
+        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "backup" => "disk", "order" => order)
+            .set(size as f64);
+    }
+
+    #[inline]
+    pub fn set_clickhouse_backup_empty_size(order: &'static str) {
+        Self::set_clickhouse_backup_memory_size_bytes(0, order);
+        Self::set_clickhouse_backup_memory_size_batches(0, order);
+        Self::set_clickhouse_backup_disk_size_bytes(0, order);
+        Self::set_clickhouse_backup_disk_size_batches(0, order);
+    }
+
+    #[inline]
+    pub fn increment_clickhouse_backup_disk_errors(order: &'static str, error: &str) {
+        counter!(indexer::CLICKHOUSE_BACKUP_DISK_ERRORS, "order" => order, "error" => error.to_string())
+            .increment(1);
     }
 
     #[inline]

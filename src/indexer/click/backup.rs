@@ -8,7 +8,8 @@ use std::{
 
 use clickhouse::inserter::Inserter;
 use derive_more::{Deref, DerefMut};
-use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata, TableStats};
+use redb::{ReadableDatabase, ReadableTable, ReadableTableMetadata};
+use strum::AsRefStr;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -131,8 +132,15 @@ impl Default for MemoryBackupConfig {
     }
 }
 
+/// Data retrieved from disk, along with its key and some stats.
+pub(crate) struct DiskRetrieval<K, V> {
+    pub(crate) key: K,
+    pub(crate) value: V,
+    pub(crate) stats: BackupSourceStats,
+}
+
 /// Errors that can occur during disk backup operations. Mostly wrapping redb and serde errors.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, AsRefStr)]
 pub(crate) enum DiskBackupError {
     #[error("redb database error: {0}")]
     Database(#[from] redb::DatabaseError),
@@ -180,30 +188,34 @@ impl<T> DiskBackup<T> {
 }
 
 impl<T: ClickhouseRowExt> DiskBackup<T> {
-    fn save(&mut self, data: &FailedCommit<T>) -> Result<TableStats, DiskBackupError> {
+    fn save(&mut self, data: &FailedCommit<T>) -> Result<BackupSourceStats, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
         // NOTE: not efficient, but we don't expect to store a lot of data here.
         let bytes = serde_json::to_vec(&data)?;
 
         let writer = self.db.write().expect("not poisoned").begin_write()?;
-        let stats = {
+        let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             table.insert(new_disk_backup_key(), bytes)?;
-            table.stats()?
+            (table.stats()?.stored_bytes(), table.len()?)
         };
         writer.commit()?;
 
-        Ok(stats)
+        Ok(BackupSourceStats { size_bytes: stored_bytes, total_batches: rows as usize })
     }
 
     /// Retrieves the oldest failed commit from disk, if any.
     fn retrieve_oldest(
         &mut self,
-    ) -> Result<Option<(DiskBackupKey, FailedCommit<T>)>, DiskBackupError> {
+    ) -> Result<Option<DiskRetrieval<DiskBackupKey, FailedCommit<T>>>, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
 
         let reader = self.db.read().expect("not poisoned").begin_read()?;
         let table = reader.open_table(table_def)?;
+
+        let stored_bytes = table.stats()?.stored_bytes();
+        let rows = table.len()? as usize;
+        let stats = BackupSourceStats { size_bytes: stored_bytes, total_batches: rows };
 
         // Retreives in sorted order.
         let Some(entry_res) = table.iter()?.next() else {
@@ -212,29 +224,31 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         let (key, rows_raw) = entry_res?;
         let commit: FailedCommit<T> = serde_json::from_slice(&rows_raw.value())?;
 
-        Ok(Some((key.value(), commit)))
+        Ok(Some(DiskRetrieval { key: key.value(), value: commit, stats }))
     }
 
     /// Deletes the failed commit with the given key from disk.
-    fn delete(&mut self, key: DiskBackupKey) -> Result<(), DiskBackupError> {
+    fn delete(&mut self, key: DiskBackupKey) -> Result<BackupSourceStats, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
 
         let writer = self.db.write().expect("not poisoned").begin_write()?;
-        {
+        let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             table.remove(key)?;
-        }
+            (table.stats()?.stored_bytes(), table.len()?)
+        };
         writer.commit()?;
 
-        Ok(())
+        Ok(BackupSourceStats { size_bytes: stored_bytes, total_batches: rows as usize })
     }
 }
 
-/// Statistics about the Clickhouse data stored in memory as backup.
+/// Statistics about the Clickhouse data stored in a certain backup source (disk or memory).
 #[derive(Debug, Clone, Copy, Default)]
-struct MemoryBackupStats {
+pub(crate) struct BackupSourceStats {
+    /// The total size in bytes of failed commit batches stored.
     size_bytes: u64,
-    /// The total number of failed commit batches stored in memory.
+    /// The total number of failed commit batches stored.
     total_batches: usize,
 }
 
@@ -248,16 +262,16 @@ struct MemoryBackup<T> {
     /// The configuration for the in-memory backup.
     config: MemoryBackupConfig,
     /// The statistics about the in-memory backup.
-    stats: MemoryBackupStats,
+    stats: BackupSourceStats,
 }
 
 impl<T> MemoryBackup<T> {
     /// Updates the internal statistics and returns them.
-    fn update_stats(&mut self) -> MemoryBackupStats {
+    fn update_stats(&mut self) -> BackupSourceStats {
         let quantities = self.failed_commits.quantities();
         let new_len = self.failed_commits.len();
 
-        self.stats = MemoryBackupStats { size_bytes: quantities.bytes, total_batches: new_len };
+        self.stats = BackupSourceStats { size_bytes: quantities.bytes, total_batches: new_len };
         self.stats
     }
 
@@ -268,7 +282,7 @@ impl<T> MemoryBackup<T> {
 
     /// Drops the oldest failed commit if the threshold has been exceeded, returning the updated
     /// stats
-    fn drop_excess(&mut self) -> Option<(MemoryBackupStats, Quantities)> {
+    fn drop_excess(&mut self) -> Option<(BackupSourceStats, Quantities)> {
         if self.threhold_exceeded() {
             self.failed_commits.pop_back();
             Some((self.update_stats(), self.failed_commits.quantities()))
@@ -278,7 +292,7 @@ impl<T> MemoryBackup<T> {
     }
 
     /// Saves a new failed commit into memory, updating the stats.
-    fn save(&mut self, data: FailedCommit<T>) -> MemoryBackupStats {
+    fn save(&mut self, data: FailedCommit<T>) -> BackupSourceStats {
         self.failed_commits.push_front(data);
         self.update_stats()
     }
@@ -297,7 +311,7 @@ impl<T> Default for MemoryBackup<T> {
         Self {
             failed_commits: FailedCommits::default(),
             config: MemoryBackupConfig::default(),
-            stats: MemoryBackupStats::default(),
+            stats: BackupSourceStats::default(),
         }
     }
 }
@@ -359,20 +373,27 @@ impl<T: ClickhouseRowExt> Backup<T> {
 
         match self.disk_backup.save(&failed_commit) {
             Ok(stats) => {
-                tracing::debug!(target: TARGET, order = T::ORDER, total_size_bytes = stats.stored_bytes(), "saved failed commit to disk");
-                // TODO: metrics for disk backup
+                tracing::debug!(target: TARGET, order = T::ORDER, total_size_bytes = stats.size_bytes, "saved failed commit to disk");
+                IndexerMetrics::set_clickhouse_disk_backup_size(
+                    stats.size_bytes,
+                    stats.total_batches,
+                    T::ORDER,
+                );
 
                 return;
             }
             Err(e) => {
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to write commit, trying in-memory");
-                // TODO: metrics for disk backup failur
-                e
+                IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
             }
         };
 
         let stats = self.memory_backup.save(failed_commit);
-        IndexerMetrics::set_clickhouse_backup_size(stats.size_bytes, stats.total_batches, T::ORDER);
+        IndexerMetrics::set_clickhouse_memory_backup_size(
+            stats.size_bytes,
+            stats.total_batches,
+            T::ORDER,
+        );
         tracing::debug!(target: TARGET, order = T::ORDER, bytes = ?quantities.bytes, rows = ?quantities.rows, ?stats, "saved failed commit in-memory");
 
         if let Some((stats, oldest_quantities)) = self.memory_backup.drop_excess() {
@@ -398,16 +419,17 @@ impl<T: ClickhouseRowExt> Backup<T> {
 
         match self.disk_backup.retrieve_oldest() {
             Ok(maybe_commit) => {
-                maybe_commit.inspect(|(_, c)| {
-                    tracing::debug!(target: TARGET, order = T::ORDER, rows = c.rows.len(), "retrieved oldest failed commit from disk");
+                maybe_commit.inspect(|data| {
+                    tracing::debug!(target: TARGET, order = T::ORDER, rows = data.stats.total_batches, "retrieved oldest failed commit from disk");
                 })
-                .map(|(key, commit)| RetrievedFailedCommit {
-                    source: BackupSource::Disk(key),
-                    commit,
+                .map(|data| RetrievedFailedCommit {
+                    source: BackupSource::Disk(data.key),
+                    commit: data.value,
                 })
             }
             Err(e) => {
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to retrieve oldest failed commit from disk");
+                IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
                 None
             }
         }
@@ -453,8 +475,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
                 _ = self.interval.tick() => {
                     let Some(oldest) = self.retrieve_oldest() else {
                         self.interval.reset();
-                        // TODO: fix metrics
-                        IndexerMetrics::set_clickhouse_backup_size(0, 0, T::ORDER);
+                        IndexerMetrics::set_clickhouse_backup_empty_size(T::ORDER);
                         continue // Nothing to do!
                     };
 
@@ -534,7 +555,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
 //     async fn backup_memory_e2e_works() {
 //         // Uncomment to toggle logs.
 //         let registry = tracing_subscriber::registry().with(
-//             
+//
 // EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
 //         );
 //         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
