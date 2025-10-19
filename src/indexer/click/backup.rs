@@ -211,7 +211,16 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         let table_def = Table::new(&self.config.table_name);
 
         let reader = self.db.read().expect("not poisoned").begin_read()?;
-        let table = reader.open_table(table_def)?;
+        let table = match reader.open_table(table_def) {
+            Ok(t) => t,
+            Err(redb::TableError::TableDoesNotExist(_)) => {
+                // No table means no data.
+                return Ok(None);
+            }
+            Err(e) => {
+                return Err(e.into());
+            }
+        };
 
         let stored_bytes = table.stats()?.stored_bytes();
         let rows = table.len()? as usize;
@@ -343,6 +352,10 @@ pub(crate) struct Backup<T: ClickhouseRowExt> {
 
     /// A failed commit retrieved from either disk or memory, waiting to be retried.
     last_cached: Option<RetrievedFailedCommit<T>>,
+
+    /// Whether to use only the in-memory backup (for testing purposes).
+    #[cfg(test)]
+    use_only_memory_backup: bool,
 }
 
 impl<T: ClickhouseRowExt> Backup<T> {
@@ -358,6 +371,8 @@ impl<T: ClickhouseRowExt> Backup<T> {
             memory_backup: MemoryBackup::default(),
             disk_backup,
             last_cached: None,
+            #[cfg(test)]
+            use_only_memory_backup: false,
         }
     }
 
@@ -370,6 +385,14 @@ impl<T: ClickhouseRowExt> Backup<T> {
     /// Backs up a failed commit, first trying to write to disk, then to memory.
     fn backup(&mut self, failed_commit: FailedCommit<T>) {
         let quantities = failed_commit.quantities;
+
+        #[cfg(test)]
+        if self.use_only_memory_backup {
+            self.memory_backup.save(failed_commit);
+            self.last_cached =
+                self.last_cached.take().filter(|cached| cached.source != BackupSource::Memory);
+            return;
+        }
 
         match self.disk_backup.save(&failed_commit) {
             Ok(stats) => {
@@ -527,76 +550,110 @@ impl<T: ClickhouseRowExt> Backup<T> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::time::Duration;
-//
-//     use super::*;
-//
-//     use crate::{
-//         indexer::{
-//             click::{
-//                 models::BundleRow,
-//                 tests::{create_clickhouse_bundles_table, create_test_clickhouse_client},
-//             },
-//             tests::system_bundle_example,
-//             BUNDLE_TABLE_NAME,
-//         },
-//         primitives::SystemBundle,
-//         spawn_clickhouse_backup,
-//         tasks::TaskManager,
-//     };
-//
-//     // Uncomment to enable logging during tests.
-//     use tracing::level_filters::LevelFilter;
-//     use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
-//
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn backup_memory_e2e_works() {
-//         // Uncomment to toggle logs.
-//         let registry = tracing_subscriber::registry().with(
-//
-// EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-//         );
-//         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
-//
-//         let task_manager = TaskManager::new(tokio::runtime::Handle::current());
-//         let task_executor = task_manager.executor();
-//
-//         // 1. Spin up Clickhouse. No validation because we're testing both receipts and bundles,
-//         // and validation on U256 is not supported.
-//         let (image, client, _) = create_test_clickhouse_client(false).await.unwrap();
-//         create_clickhouse_bundles_table(&client).await.unwrap();
-//
-//         let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
-//         let mut bundle_backup = Backup::new(
-//             rx,
-//             client
-//                 .inserter::<BundleRow>(BUNDLE_TABLE_NAME)
-//                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
-//         )
-//         .with_memory_max_size_bytes(MAX_MEMORY_BACKUP_SIZE_BYTES);
-//
-//         spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
-//
-//         let quantities = Quantities { bytes: 512, rows: 1, transactions: 1 }; // approximated
-//         let bundle_row: BundleRow = (system_bundle_example(), "buildernet".to_string()).into();
-//         let bundle_rows = Vec::from([bundle_row]);
-//         let failed_commit = FailedCommit::<SystemBundle>::new(bundle_rows.clone(), quantities);
-//
-//         tx.send(failed_commit).await.unwrap();
-//         tokio::time::sleep(Duration::from_millis(100)).await; // Wait some time to let the backup
-// process it.
-//
-//         let results = client
-//             .query(&format!("select * from {BUNDLE_TABLE_NAME}"))
-//             .fetch_all::<BundleRow>()
-//             .await
-//             .unwrap();
-//
-//         assert_eq!(results.len(), 1);
-//         assert_eq!(bundle_rows, results, "expected, got");
-//
-//         drop(image);
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    use crate::{
+        indexer::{
+            click::{
+                models::BundleRow,
+                tests::{create_clickhouse_bundles_table, create_test_clickhouse_client},
+            },
+            tests::system_bundle_example,
+            BUNDLE_TABLE_NAME,
+        },
+        spawn_clickhouse_backup,
+        tasks::TaskManager,
+    };
+
+    // Uncomment to enable logging during tests.
+    use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+
+    impl<T: ClickhouseRowExt> Backup<T> {
+        fn new_test(
+            rx: mpsc::Receiver<FailedCommit<T>>,
+            inserter: Inserter<T>,
+            disk_backup: DiskBackup<T>,
+            use_only_memory_backup: bool,
+        ) -> Self {
+            Self {
+                rx,
+                inserter,
+                interval: Default::default(),
+                memory_backup: MemoryBackup::default(),
+                disk_backup,
+                last_cached: None,
+                use_only_memory_backup,
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn backup_e2e_works() {
+        // Uncomment to toggle logs.
+        let registry = tracing_subscriber::registry().with(
+            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+        );
+        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+
+        let memory_backup_only = [false, true];
+
+        let task_manager = TaskManager::new(tokio::runtime::Handle::current());
+        let task_executor = task_manager.executor();
+
+        for use_memory_only in memory_backup_only {
+            println!(
+                "---- Running backup_memory_e2e_works with use_memory_only = {use_memory_only} ----"
+            );
+
+            // 1. Spin up Clickhouse. No validation because we're testing both receipts and bundles,
+            // and validation on U256 is not supported.
+            let (image, client, _) = create_test_clickhouse_client(false).await.unwrap();
+            create_clickhouse_bundles_table(&client).await.unwrap();
+
+            let tempfile = tempfile::NamedTempFile::new().unwrap();
+
+            let disk_backup = DiskBackup::new(DiskBackupConfig::new(
+                tempfile.path().to_path_buf(),
+                BUNDLE_TABLE_NAME.to_string(),
+            ))
+            .expect("could not create disk backup");
+
+            let (tx, rx) = mpsc::channel(128);
+            let mut bundle_backup = Backup::<BundleRow>::new_test(
+                rx,
+                client
+                    .inserter(BUNDLE_TABLE_NAME)
+                    .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
+                disk_backup,
+                use_memory_only,
+            );
+
+            spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
+
+            let quantities = Quantities { bytes: 512, rows: 1, transactions: 1 }; // approximated
+            let bundle_row: BundleRow = (system_bundle_example(), "buildernet".to_string()).into();
+            let bundle_rows = Vec::from([bundle_row]);
+            let failed_commit = FailedCommit::<BundleRow>::new(bundle_rows.clone(), quantities);
+
+            tx.send(failed_commit).await.unwrap();
+            // Wait some time to let the backup process it
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let results = client
+                .query(&format!("select * from {BUNDLE_TABLE_NAME}"))
+                .fetch_all::<BundleRow>()
+                .await
+                .unwrap();
+
+            assert_eq!(results.len(), 1);
+            assert_eq!(bundle_rows, results, "expected, got");
+
+            drop(image);
+        }
+    }
+}
