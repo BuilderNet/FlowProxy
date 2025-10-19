@@ -1,6 +1,12 @@
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 
+/// The default connect timeout in milliseconds.
+pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 800;
+
+/// The default pool idle timeout in seconds.
+pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
+
 /// The default HTTP connection limit per host.
 pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 512;
 

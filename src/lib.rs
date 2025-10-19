@@ -2,7 +2,10 @@
 
 use crate::{
     cache::SignerCache,
-    consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
+    consts::{
+        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
+        DEFAULT_POOL_IDLE_TIMEOUT_SECS,
+    },
     metrics::{
         BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
     },
@@ -278,10 +281,6 @@ async fn run_update_peers(
     disable_forwarding: bool,
     task_executor: TaskExecutor,
 ) {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .build()
-        .unwrap();
     let delay = Duration::from_secs(30);
 
     loop {
@@ -320,31 +319,30 @@ async fn run_update_peers(
 
             // Self-filter any new peers before connecting to them.
             if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
-                let mut client = client.clone();
+                // Create a new client for each peer.
+                let mut client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
+                    .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
+                    .pool_idle_timeout(Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS))
+                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
+                    .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+                        DEFAULT_CONNECTION_LIMIT_PER_HOST,
+                        builder.name.clone(),
+                    ));
 
                 debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
                 if let Some(ref tls_cert) = builder.tls_certificate() {
-                    // SAFETY: We expect the certificate to be valid. It's added as a root
-                    // certificate.
-                    client = reqwest::Client::builder()
-                        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                        .https_only(true)
-                        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                        .add_root_certificate(tls_cert.clone())
-                        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                            builder.name.clone(),
-                        ))
-                        .build()
-                        .expect("Valid root certificate");
+                    client = client.https_only(true).add_root_certificate(tls_cert.clone())
                 }
 
                 if disable_forwarding {
                     warn!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Skipped spawning forwarder (disabled forwarding)");
                     continue;
                 }
+
+                let client = client.build().expect("Failed to build client");
 
                 let sender = spawn_forwarder(
                     builder.name.clone(),

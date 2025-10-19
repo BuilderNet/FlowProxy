@@ -9,7 +9,7 @@ use alloy_eips::Typed2718;
 use alloy_primitives::{Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use rbuilder_primitives::BundleVersion;
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcDateTime};
 use uuid::Uuid;
 
 use crate::primitives::{DecodedBundle, SystemBundle};
@@ -341,17 +341,23 @@ impl From<(BundleReceipt, String)> for BundleReceiptRow {
     fn from((receipt, dst_builder_name): (BundleReceipt, String)) -> Self {
         let mut hasher = Keccak256::new();
         hasher.update(receipt.bundle_hash);
-        let micros = receipt.received_at.microsecond();
+
+        struct SentAt {
+            inner: UtcDateTime,
+            micros: u32,
+        }
+        let sent_at = receipt.sent_at.map(|s| SentAt { inner: s, micros: s.microsecond() });
+        let micros_received_at = receipt.received_at.microsecond();
 
         BundleReceiptRow {
             bundle_hash: receipt.bundle_hash,
             double_bundle_hash: hasher.finalize(),
-            sent_at: receipt
-                .sent_at
-                .map(|dt| dt.replace_microsecond(micros).expect("to replace microseconds").into()),
+            sent_at: sent_at.map(|dt| {
+                dt.inner.replace_microsecond(dt.micros).expect("to replace microseconds").into()
+            }),
             received_at: receipt
                 .received_at
-                .replace_microsecond(micros)
+                .replace_microsecond(micros_received_at)
                 .expect("to replace microseconds")
                 .into(),
             dst_builder_name,
