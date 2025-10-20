@@ -432,6 +432,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
     /// Backs up a failed commit, first trying to write to disk, then to memory.
     fn backup(&mut self, failed_commit: FailedCommit<T>) {
         let quantities = failed_commit.quantities;
+        tracing::debug!(target: TARGET, order = T::ORDER, bytes = ?quantities.bytes, rows = ?quantities.rows, "backing up failed commit");
 
         #[cfg(test)]
         if self.use_only_memory_backup {
