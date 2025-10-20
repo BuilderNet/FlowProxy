@@ -66,13 +66,13 @@ pub trait FormatBytes {
 impl FormatBytes for u64 {
     fn format_bytes(&self) -> String {
         if *self < 1024 {
-            format!("{} B", self)
+            format!("{}B", self)
         } else if *self < 1024 * 1024 {
-            format!("{} KiB", self / 1024)
+            format!("{}KiB", self / 1024)
         } else if *self < 1024 * 1024 * 1024 {
-            format!("{} MiB", self / 1024 / 1024)
+            format!("{}MiB", self / 1024 / 1024)
         } else {
-            format!("{} GiB", self / 1024 / 1024 / 1024)
+            format!("{}GiB", self / 1024 / 1024 / 1024)
         }
     }
 }
