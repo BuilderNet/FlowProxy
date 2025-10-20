@@ -322,7 +322,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         let table_def = Table::new(T::ORDER);
 
         let mut writer = self.db.write().expect("not poisoned").begin_write()?;
-        writer.set_durability(redb::Durability::None)?;
+        writer.set_durability(redb::Durability::Immediate)?;
 
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
