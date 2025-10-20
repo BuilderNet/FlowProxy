@@ -51,7 +51,8 @@ pub struct ClickhouseArgs {
     )]
     pub bundle_receipts_table_name: Option<String>,
 
-    /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure.
+    /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure, for a
+    /// certain data type (bundles or bundle receipts). Defaults to 1GiB.
     #[arg(
         long = "indexer.clickhouse.backup.memory-max-size-bytes",
         env = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES",
@@ -68,6 +69,7 @@ pub struct ClickhouseArgs {
     )]
     pub backup_disk_database_path: Option<PathBuf>,
 
+    /// The clickhouse table name to store disk-backed bundles data. Defaults to "bundles".
     #[arg(
         long = "indexer.clickhouse.backup.disk-bundles-table-name",
         env = "CLICKHOUSE_BACKUP_DISK_BUNDLES_TABLE_NAME",
@@ -75,12 +77,24 @@ pub struct ClickhouseArgs {
     )]
     pub backup_disk_bundles_table_name: Option<String>,
 
+    /// The clickhouse table name to store disk-backed bundle receipts data. Defaults to
+    /// "bundle_receipts".
     #[arg(
         long = "indexer.clickhouse.backup.disk-bundle-receipts-table-name",
         env = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME",
         id = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME"
     )]
     pub backup_disk_bundle_receipts_table_name: Option<String>,
+
+    /// The maximum size in bytes for the disk-backed backup database.
+    /// If the database exceeds this size, new entries will not be added until space is freed.
+    /// Defaults to 10GiB.
+    #[arg(
+        long = "indexer.clickhouse.backup.disk-max-size-bytes",
+        env = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES",
+        id = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES"
+    )]
+    pub backup_disk_max_size_bytes: Option<u64>,
 }
 
 /// Arguments required to setup file-based parquet indexing.

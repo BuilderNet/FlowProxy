@@ -20,9 +20,11 @@ use crate::{
 
 /// A default maximum size in bytes for the in-memory backup of failed commits.
 pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+/// A default maximum size in bytes for the disk backup of failed commits.
+pub(crate) const MAX_DISK_BACKUP_SIZE_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
 
 /// The default path where the backup database is stored. For tests, a temporary file is used.
-pub(crate) fn default_disk_backup_database_path() -> PathBuf {
+fn default_disk_backup_database_path() -> PathBuf {
     #[cfg(test)]
     return tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
     #[cfg(not(test))]
@@ -112,11 +114,31 @@ pub(crate) struct DiskBackupConfig {
     path: PathBuf,
     /// The name of the table to store data into.
     table_name: String,
+    /// The maximum size in bytes for holding past failed commits on disk.
+    max_size_bytes: u64,
 }
 
 impl DiskBackupConfig {
-    pub(crate) fn new(path: PathBuf, table_name: String) -> Self {
-        Self { path, table_name }
+    pub(crate) fn new(table_name: String) -> Self {
+        Self {
+            path: default_disk_backup_database_path(),
+            table_name,
+            max_size_bytes: MAX_DISK_BACKUP_SIZE_BYTES,
+        }
+    }
+
+    pub(crate) fn with_path<P: Into<PathBuf>>(mut self, path: Option<P>) -> Self {
+        if let Some(p) = path {
+            self.path = p.into();
+        }
+        self
+    }
+
+    pub(crate) fn with_max_size_bytes(mut self, max_size_bytes: Option<u64>) -> Self {
+        if let Some(max_size_bytes) = max_size_bytes {
+            self.max_size_bytes = max_size_bytes;
+        }
+        self
     }
 }
 
@@ -161,6 +183,8 @@ pub(crate) enum DiskBackupError {
     Commit(#[from] redb::CommitError),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("backup size limit exceeded: {0} bytes")]
+    SizeExceeded(u64),
 }
 
 /// A disk backup for failed commits. This handle to a database allows to write only to one table
@@ -193,7 +217,7 @@ impl<T> DiskBackup<T> {
     ) -> DiskBackup<U> {
         DiskBackup {
             db: self.db.clone(),
-            config: DiskBackupConfig { path: self.config.path.clone(), table_name },
+            config: DiskBackupConfig::new(table_name).with_path(self.config.path.clone().into()),
             _marker: Default::default(),
         }
     }
@@ -208,7 +232,12 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         let writer = self.db.write().expect("not poisoned").begin_write()?;
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
+            if table.stats()?.stored_bytes() > self.config.max_size_bytes {
+                return Err(DiskBackupError::SizeExceeded(self.config.max_size_bytes));
+            }
+
             table.insert(new_disk_backup_key(), bytes)?;
+
             (table.stats()?.stored_bytes(), table.len()?)
         };
         writer.commit()?;
@@ -629,10 +658,10 @@ mod tests {
 
             let tempfile = tempfile::NamedTempFile::new().unwrap();
 
-            let disk_backup = DiskBackup::new(DiskBackupConfig::new(
-                tempfile.path().to_path_buf(),
-                BUNDLE_TABLE_NAME.to_string(),
-            ))
+            let disk_backup = DiskBackup::new(
+                DiskBackupConfig::new(BUNDLE_TABLE_NAME.to_string())
+                    .with_path(tempfile.path().to_path_buf().into()),
+            )
             .expect("could not create disk backup");
 
             let (tx, rx) = mpsc::channel(128);

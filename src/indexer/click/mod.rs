@@ -15,8 +15,8 @@ use crate::{
     indexer::{
         click::{
             backup::{
-                default_disk_backup_database_path, Backup, DiskBackup, DiskBackupConfig,
-                FailedCommit, MemoryBackupConfig, MAX_MEMORY_BACKUP_SIZE_BYTES,
+                Backup, DiskBackup, DiskBackupConfig, FailedCommit, MemoryBackupConfig,
+                MAX_MEMORY_BACKUP_SIZE_BYTES,
             },
             models::{BundleReceiptRow, BundleRow},
             primitives::{ClickhouseIndexableOrder, ClickhouseRowExt},
@@ -230,10 +230,11 @@ impl ClickhouseIndexer {
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
-        let disk_backup = DiskBackup::new(DiskBackupConfig::new(
-            args.backup_disk_database_path.unwrap_or(default_disk_backup_database_path()),
-            bundles_table_name.clone(),
-        ))
+        let disk_backup = DiskBackup::new(
+            DiskBackupConfig::new(bundles_table_name.clone())
+                .with_path(args.backup_disk_bundles_table_name)
+                .with_max_size_bytes(args.backup_disk_max_size_bytes),
+        )
         .expect("could not create disk backup");
 
         let (tx, rx) = mpsc::channel(128);
@@ -385,10 +386,11 @@ pub(crate) mod tests {
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
                 bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-                backup_disk_database_path: None,
                 backup_memory_max_size_bytes: None,
+                backup_disk_database_path: None,
                 backup_disk_bundles_table_name: None,
                 backup_disk_bundle_receipts_table_name: None,
+                backup_disk_max_size_bytes: None,
             }
         }
     }
