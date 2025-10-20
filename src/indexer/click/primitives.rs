@@ -7,7 +7,9 @@ use crate::{
     primitives::{BundleReceipt, SystemBundle},
 };
 
-pub(crate) trait ClickhouseRowExt: Row + RowWrite + Serialize + DeserializeOwned {
+pub(crate) trait ClickhouseRowExt:
+    Row + RowWrite + Serialize + DeserializeOwned + Sync + Send + 'static
+{
     /// The type of such row, e.g. "bundles" or "transactions". For informational purposes.
     const ORDER: &'static str;
 

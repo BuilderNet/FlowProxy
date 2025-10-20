@@ -16,6 +16,7 @@ use crate::{
     indexer::click::{primitives::ClickhouseRowExt, ClickhouseIndexableOrder},
     metrics::IndexerMetrics,
     primitives::{backoff::BackoffInterval, Quantities},
+    tasks::TaskExecutor,
 };
 
 /// A default maximum size in bytes for the in-memory backup of failed commits.
@@ -108,7 +109,7 @@ impl<T> Default for FailedCommits<T> {
 }
 
 /// Configuration for the [`DiskBackup`] of failed commits.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct DiskBackupConfig {
     /// The path where the backup database is stored.
     path: PathBuf,
@@ -116,8 +117,8 @@ pub(crate) struct DiskBackupConfig {
     table_name: String,
     /// The maximum size in bytes for holding past failed commits on disk.
     max_size_bytes: u64,
-    /// The minimum interval between two [`redb::Durability::Immediate`] commits to disk.
-    immediate_commit_interval: Duration,
+    /// The interval at which buffered writes are flushed to disk.
+    flush_interval: tokio::time::Interval,
 }
 
 impl DiskBackupConfig {
@@ -126,7 +127,7 @@ impl DiskBackupConfig {
             path: default_disk_backup_database_path(),
             table_name,
             max_size_bytes: MAX_DISK_BACKUP_SIZE_BYTES,
-            immediate_commit_interval: Duration::from_secs(30),
+            flush_interval: tokio::time::interval(Duration::from_secs(30)),
         }
     }
 
@@ -147,9 +148,20 @@ impl DiskBackupConfig {
     #[allow(dead_code)]
     pub(crate) fn with_immediate_commit_interval(mut self, interval: Option<Duration>) -> Self {
         if let Some(interval) = interval {
-            self.immediate_commit_interval = interval;
+            self.flush_interval = tokio::time::interval(interval);
         }
         self
+    }
+}
+
+impl Clone for DiskBackupConfig {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            table_name: self.table_name.clone(),
+            max_size_bytes: self.max_size_bytes,
+            flush_interval: tokio::time::interval(self.flush_interval.period()),
+        }
     }
 }
 
@@ -203,18 +215,19 @@ pub(crate) enum DiskBackupError {
 /// A disk backup for failed commits. This handle to a database allows to write only to one table
 /// for scoped access. If you want to write to another table, clone it using
 /// [`Self::clone_with_table`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct DiskBackup<T> {
     db: Arc<RwLock<redb::Database>>,
     config: DiskBackupConfig,
-    /// The instant of the last [`redb::Durability::Immediate`] commit to disk.
-    last_immediate_commit: Instant,
 
     _marker: PhantomData<T>,
 }
 
-impl<T> DiskBackup<T> {
-    pub(crate) fn new(config: DiskBackupConfig) -> Result<Self, redb::DatabaseError> {
+impl<T: ClickhouseRowExt> DiskBackup<T> {
+    pub(crate) fn new(
+        config: DiskBackupConfig,
+        task_executor: &TaskExecutor,
+    ) -> Result<Self, redb::DatabaseError> {
         // Ensure all parent directories exist, so that the database can be initialized correctly.
         if let Some(parent) = config.path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -222,12 +235,17 @@ impl<T> DiskBackup<T> {
 
         let db = redb::Database::create(&config.path)?;
 
-        Ok(Self {
-            db: Arc::new(RwLock::new(db)),
-            config,
-            _marker: Default::default(),
-            last_immediate_commit: Instant::now(),
-        })
+        let disk_backup =
+            Self { db: Arc::new(RwLock::new(db)), config, _marker: Default::default() };
+
+        task_executor.spawn({
+            let disk_backup = disk_backup.clone();
+            async move {
+                disk_backup.flush_routine().await;
+            }
+        });
+
+        Ok(disk_backup)
     }
 
     /// Like [`Clone`], but allows to change table name.
@@ -238,9 +256,14 @@ impl<T> DiskBackup<T> {
         DiskBackup {
             db: self.db.clone(),
             config: DiskBackupConfig::new(table_name).with_path(self.config.path.clone().into()),
-            last_immediate_commit: Instant::now(),
             _marker: Default::default(),
         }
+    }
+}
+
+impl<T> Clone for DiskBackup<T> {
+    fn clone(&self) -> Self {
+        Self { db: self.db.clone(), config: self.config.clone(), _marker: Default::default() }
     }
 }
 
@@ -252,15 +275,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         // NOTE: not efficient, but we don't expect to store a lot of data here.
         let bytes = serde_json::to_vec(&data)?;
 
-        let mut writer = self.db.write().expect("not poisoned").begin_write()?;
-
-        if self.last_immediate_commit.elapsed() >= self.config.immediate_commit_interval {
-            writer.set_durability(redb::Durability::Immediate)?;
-            self.last_immediate_commit = Instant::now();
-        } else {
-            writer.set_durability(redb::Durability::None)?;
-        }
-
+        let writer = self.db.write().expect("not poisoned").begin_write()?;
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             if table.stats()?.stored_bytes() > self.config.max_size_bytes {
@@ -333,19 +348,20 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         Ok(())
     }
 
-    /// Flushes to disk if the immediate commit interval has elapsed.
-    ///
-    /// Returns the duration it took to flush, if a flush was performed, or `None` otherwise.
-    fn flush_if_needed(&mut self) -> Option<Result<Duration, DiskBackupError>> {
-        let start = Instant::now();
-        if self.last_immediate_commit.elapsed() >= self.config.immediate_commit_interval {
-            if let Err(e) = self.flush() {
-                return Some(Err(e));
+    /// Takes an instance of self and performs a flush routine if the immediate flush interval has
+    /// ticked.
+    async fn flush_routine(mut self) {
+        loop {
+            self.config.flush_interval.tick().await;
+            let start = Instant::now();
+            match self.flush() {
+                Ok(_) => {
+                    tracing::debug!(target: TARGET, order = T::ORDER, elapsed = ?start.elapsed(), "flushed backup to disk");
+                }
+                Err(e) => {
+                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush backup to disk");
+                }
             }
-            self.last_immediate_commit = Instant::now();
-            Some(Ok(start.elapsed()))
-        } else {
-            None
         }
     }
 }
@@ -493,18 +509,6 @@ impl<T: ClickhouseRowExt> Backup<T> {
             return;
         }
 
-        if let Some(res) = self.disk_backup.flush_if_needed() {
-            match res {
-                Ok(duration) => {
-                    tracing::debug!(target: TARGET, order = T::ORDER, ?duration, "flushed backup to disk");
-                }
-                Err(e) => {
-                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush backup to disk");
-                    IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
-                }
-            }
-        }
-
         let start = Instant::now();
         match self.disk_backup.save(&failed_commit) {
             Ok(stats) => {
@@ -586,9 +590,20 @@ impl<T: ClickhouseRowExt> Backup<T> {
     /// Purges a committed failed commit from disk, if applicable.
     async fn purge_commit(&mut self, retrieved: &RetrievedFailedCommit<T>) {
         if let BackupSource::Disk(key) = retrieved.source {
-            let _ = self.disk_backup.delete(key).inspect_err(|e|{
-                tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to purge committed failed commit from disk");
-            });
+            let start = Instant::now();
+            match self.disk_backup.delete(key) {
+                Ok(stats) => {
+                    tracing::debug!(target: TARGET, order = T::ORDER, total_size_bytes = stats.size_bytes, elapsed = ?start.elapsed(), "deleted failed commit from disk");
+                    IndexerMetrics::set_clickhouse_disk_backup_size(
+                        stats.size_bytes,
+                        stats.total_batches,
+                        T::ORDER,
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to purge committed failed commit from disk");
+                }
+            }
             tracing::debug!(target: TARGET, order = T::ORDER, "purged committed failed commit from disk");
         }
     }
@@ -742,6 +757,7 @@ mod tests {
             let disk_backup = DiskBackup::new(
                 DiskBackupConfig::new(BUNDLE_TABLE_NAME.to_string())
                     .with_path(tempfile.path().to_path_buf().into()),
+                &task_executor,
             )
             .expect("could not create disk backup");
 

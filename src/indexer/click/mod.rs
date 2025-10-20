@@ -234,6 +234,7 @@ impl ClickhouseIndexer {
             DiskBackupConfig::new(bundles_table_name.clone())
                 .with_path(args.backup_disk_bundles_table_name)
                 .with_max_size_bytes(args.backup_disk_max_size_bytes),
+            &task_executor,
         )
         .expect("could not create disk backup");
 
