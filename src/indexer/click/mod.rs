@@ -388,7 +388,7 @@ pub(crate) mod tests {
                 backup_disk_database_path: None,
                 backup_memory_max_size_bytes: None,
                 backup_disk_bundles_table_name: None,
-                backp_disk_bundle_receipts_table_name: None,
+                backup_disk_bundle_receipts_table_name: None,
             }
         }
     }
@@ -490,8 +490,8 @@ pub(crate) mod tests {
     async fn clickhouse_bundles_insert_single_row_e2e_succeds() {
         // Uncomment to toggle logs.
         // let registry = tracing_subscriber::registry().with(
-        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
-        // from_env_lossy(), );
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+        // );
         // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse
@@ -542,8 +542,8 @@ pub(crate) mod tests {
     async fn clickhouse_bundle_receipts_rows_e2e_succeds() {
         // Uncomment to toggle logs.
         // let registry = tracing_subscriber::registry().with(
-        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
-        // from_env_lossy(), );
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
+        // );
         // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse

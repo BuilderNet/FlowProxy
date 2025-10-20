@@ -297,14 +297,14 @@ impl<T> MemoryBackup<T> {
     }
 
     /// Checks whether the threshold for maximum size has been exceeded.
-    fn threhold_exceeded(&self) -> bool {
+    fn threshold_exceeded(&self) -> bool {
         self.stats.size_bytes > self.config.max_size_bytes && self.failed_commits.len() > 1
     }
 
     /// Drops the oldest failed commit if the threshold has been exceeded, returning the updated
     /// stats
     fn drop_excess(&mut self) -> Option<(BackupSourceStats, Quantities)> {
-        if self.threhold_exceeded() {
+        if self.threshold_exceeded() {
             self.failed_commits.pop_back();
             Some((self.update_stats(), self.failed_commits.quantities()))
         } else {

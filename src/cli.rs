@@ -80,7 +80,7 @@ pub struct ClickhouseArgs {
         env = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME",
         id = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME"
     )]
-    pub backp_disk_bundle_receipts_table_name: Option<String>,
+    pub backup_disk_bundle_receipts_table_name: Option<String>,
 }
 
 /// Arguments required to setup file-based parquet indexing.
