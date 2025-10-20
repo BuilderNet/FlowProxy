@@ -202,6 +202,11 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
+                IngressUserMetrics::record_request_body_size_bytes(
+                    body.len(),
+                    ETH_SEND_BUNDLE_METHOD,
+                );
+
                 ingress.on_bundle(entity, bundle, received_at).await.map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
@@ -218,6 +223,11 @@ impl OrderflowIngress {
                     return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
 
+                IngressUserMetrics::record_request_body_size_bytes(
+                    body.len(),
+                    ETH_SEND_RAW_TRANSACTION_METHOD,
+                );
+
                 ingress.send_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
             MEV_SEND_BUNDLE_METHOD => {
@@ -229,6 +239,11 @@ impl OrderflowIngress {
                     IngressUserMetrics::increment_json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD);
                     return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
+
+                IngressUserMetrics::record_request_body_size_bytes(
+                    body.len(),
+                    MEV_SEND_BUNDLE_METHOD,
+                );
 
                 ingress
                     .on_mev_share_bundle(entity, bundle, received_at)
@@ -414,6 +429,10 @@ impl OrderflowIngress {
 
                 IngressSystemMetrics::record_bundle_rpc_duration(priority, received_at.elapsed());
                 IngressSystemMetrics::record_txs_per_bundle(bundle.txs.len());
+                IngressSystemMetrics::record_request_body_size_bytes(
+                    body.len(),
+                    ETH_SEND_BUNDLE_METHOD,
+                );
 
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
@@ -457,6 +476,10 @@ impl OrderflowIngress {
                 IngressSystemMetrics::record_transaction_rpc_duration(
                     priority,
                     received_at.elapsed(),
+                );
+                IngressSystemMetrics::record_request_body_size_bytes(
+                    body.len(),
+                    ETH_SEND_RAW_TRANSACTION_METHOD,
                 );
 
                 (raw, EthResponse::TxHash(tx_hash))
@@ -503,6 +526,10 @@ impl OrderflowIngress {
                 IngressSystemMetrics::record_mev_share_bundle_rpc_duration(
                     priority,
                     received_at.elapsed(),
+                );
+                IngressSystemMetrics::record_request_body_size_bytes(
+                    body.len(),
+                    MEV_SEND_BUNDLE_METHOD,
                 );
 
                 (raw, EthResponse::BundleHash(bundle_hash))

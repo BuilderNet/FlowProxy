@@ -70,6 +70,8 @@ mod name {
         pub(crate) const RPC_REQUEST_DURATION: &str = "ingress_rpc_request_duration";
         pub(crate) const VALIDATION_ERRORS: &str = "ingress_validation_errors";
 
+        pub(crate) const REQUEST_BODY_SIZE_DECOMPRESSED: &str =
+            "ingress_request_body_size_decompressed";
         pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
         pub(crate) const TXS_PER_MEV_SHARE_BUNDLE: &str = "ingress_txs_per_mev_share_bundle";
         pub(crate) const TOTAL_EMPTY_BUNDLES: &str = "ingress_total_empty_bundles";
@@ -207,6 +209,11 @@ pub fn describe() {
         "Duration of incoming RPC requests in seconds"
     );
     describe_counter!(ingress::VALIDATION_ERRORS, "Total number of validation errors");
+
+    describe_histogram!(
+        ingress::REQUEST_BODY_SIZE_DECOMPRESSED,
+        "Size of incoming request bodies in bytes, decompressed"
+    );
     describe_histogram!(ingress::TXS_PER_BUNDLE, "Number of transactions per bundle");
     describe_histogram!(
         ingress::TXS_PER_MEV_SHARE_BUNDLE,
@@ -357,6 +364,12 @@ pub trait IngressHandlerMetricsExt {
     fn record_txs_per_mev_share_bundle(txs: usize) {
         histogram!(ingress::TXS_PER_MEV_SHARE_BUNDLE, "handler" => Self::HANDLER)
             .record(txs as f64);
+    }
+
+    #[inline]
+    fn record_request_body_size_bytes(size: usize, method: &'static str) {
+        histogram!(ingress::REQUEST_BODY_SIZE_DECOMPRESSED, "handler" => Self::HANDLER, method => "method")
+            .record(size as f64);
     }
 
     /// The duration of the `eth_sendBundle` RPC call.
