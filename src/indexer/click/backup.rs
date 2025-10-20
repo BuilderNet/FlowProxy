@@ -212,6 +212,8 @@ pub(crate) enum DiskBackupError {
     Serde(#[from] serde_json::Error),
     #[error("backup size limit exceeded: {0} bytes")]
     SizeExceeded(u64),
+    #[error("failed to join flushing task")]
+    JoinTask,
 }
 
 /// A disk backup for failed commits. This handle to a database allows to write only to one table
@@ -343,14 +345,22 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         Ok(BackupSourceStats { size_bytes: stored_bytes, total_batches: rows as usize })
     }
 
-    /// Explicity flushes any pending writes to disk.
-    fn flush(&mut self) -> Result<(), DiskBackupError> {
-        let mut writer = self.db.write().expect("not poisoned").begin_write()?;
-        writer.set_durability(redb::Durability::Immediate)?;
-        writer.commit()?;
+    /// Explicity flushes any pending writes to disk. This is async to avoid blocking the main
+    /// thread.
+    async fn flush(&mut self) -> Result<(), DiskBackupError> {
+        let db = self.db.clone();
+        // Since this can easily block by a second or two, send it to a blocking thread.
+        tokio::task::spawn_blocking(move || {
+            let mut db = db.write().expect("not poisoned");
+            let mut writer = db.begin_write()?;
+            writer.set_durability(redb::Durability::Immediate)?;
+            writer.commit()?;
 
-        self.db.write().unwrap().compact()?;
-        Ok(())
+            db.compact()?;
+            Ok(())
+        })
+        .await
+        .map_err(|_| DiskBackupError::JoinTask)?
     }
 
     /// Takes an instance of self and performs a flush routine if the immediate flush interval has
@@ -359,7 +369,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         loop {
             self.config.flush_interval.tick().await;
             let start = Instant::now();
-            match self.flush() {
+            match self.flush().await {
                 Ok(_) => {
                     tracing::debug!(target: TARGET, elapsed = ?start.elapsed(), "flushed backup write buffer to disk");
                 }
@@ -681,7 +691,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
             }
         }
 
-        if let Err(e) = self.disk_backup.flush() {
+        if let Err(e) = self.disk_backup.flush().await {
             tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush disk backup during shutdown");
             IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
         }
