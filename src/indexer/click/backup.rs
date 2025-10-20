@@ -206,6 +206,8 @@ pub(crate) enum DiskBackupError {
     Commit(#[from] redb::CommitError),
     #[error(transparent)]
     Durability(#[from] redb::SetDurabilityError),
+    #[error(transparent)]
+    Compaction(#[from] redb::CompactionError),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("backup size limit exceeded: {0} bytes")]
@@ -346,6 +348,8 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         let mut writer = self.db.write().expect("not poisoned").begin_write()?;
         writer.set_durability(redb::Durability::Immediate)?;
         writer.commit()?;
+
+        self.db.write().unwrap().compact()?;
         Ok(())
     }
 
