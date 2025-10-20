@@ -1,10 +1,7 @@
 //! Contains the model used for storing data inside Clickhouse.
 
 use crate::{
-    indexer::{
-        click::BuilderName,
-        ser::{address, addresses, hash, hashes, u256es},
-    },
+    indexer::ser::{address, addresses, hash, hashes, u256es},
     primitives::BundleReceipt,
 };
 use alloy_consensus::Transaction;
@@ -127,8 +124,8 @@ pub(crate) struct BundleRow {
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
-impl From<(SystemBundle, BuilderName)> for BundleRow {
-    fn from((bundle, builder_name): (SystemBundle, BuilderName)) -> Self {
+impl From<(SystemBundle, String)> for BundleRow {
+    fn from((bundle, builder_name): (SystemBundle, String)) -> Self {
         let bundle_row = match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(ref decoded) => {
                 let micros = bundle.metadata.received_at.utc.microsecond();
@@ -325,23 +322,23 @@ impl From<(SystemBundle, BuilderName)> for BundleRow {
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub(crate) struct BundleReceiptRow {
     #[serde(with = "hash")]
-    bundle_hash: B256,
+    pub(crate) bundle_hash: B256,
     /// The hash of the bundle hash.
     #[serde(with = "hash")]
-    double_bundle_hash: B256,
+    pub(crate) double_bundle_hash: B256,
     #[serde(with = "clickhouse::serde::time::datetime64::micros::option")]
-    sent_at: Option<OffsetDateTime>,
+    pub(crate) sent_at: Option<OffsetDateTime>,
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
-    received_at: OffsetDateTime,
+    pub(crate) received_at: OffsetDateTime,
     /// The name of the local operator indexing this data.
-    dst_builder_name: String,
-    src_builder_name: String,
-    payload_size: u32,
-    priority: u8,
+    pub(crate) dst_builder_name: String,
+    pub(crate) src_builder_name: String,
+    pub(crate) payload_size: u32,
+    pub(crate) priority: u8,
 }
 
-impl From<(BundleReceipt, BuilderName)> for BundleReceiptRow {
-    fn from((receipt, dst_builder_name): (BundleReceipt, BuilderName)) -> Self {
+impl From<(BundleReceipt, String)> for BundleReceiptRow {
+    fn from((receipt, dst_builder_name): (BundleReceipt, String)) -> Self {
         let mut hasher = Keccak256::new();
         hasher.update(receipt.bundle_hash);
 

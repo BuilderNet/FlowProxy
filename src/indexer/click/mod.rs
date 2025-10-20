@@ -6,9 +6,7 @@ use std::{
 };
 
 use clickhouse::{
-    error::Result as ClickhouseResult,
-    inserter::{Inserter, Quantities},
-    Client as ClickhouseClient, Row,
+    error::Result as ClickhouseResult, inserter::Inserter, Client as ClickhouseClient, Row,
 };
 use tokio::sync::mpsc;
 
@@ -16,14 +14,17 @@ use crate::{
     cli::ClickhouseArgs,
     indexer::{
         click::{
-            backup::{FailedCommit, MemoryBackup, MAX_BACKUP_SIZE_BYTES},
+            backup::{
+                Backup, DiskBackup, DiskBackupConfig, FailedCommit, MemoryBackupConfig,
+                MAX_MEMORY_BACKUP_SIZE_BYTES,
+            },
             models::{BundleReceiptRow, BundleRow},
-            primitives::{BuilderName, ClickhouseIndexableOrder},
+            primitives::{ClickhouseIndexableOrder, ClickhouseRowExt},
         },
         OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
     },
     metrics::IndexerMetrics,
-    primitives::{BundleReceipt, Sampler, SystemBundle},
+    primitives::{Quantities, Sampler},
     spawn_clickhouse_backup, spawn_clickhouse_inserter,
     tasks::TaskExecutor,
 };
@@ -37,7 +38,7 @@ pub(crate) mod primitives;
 fn default_inserter<T: Row>(client: &ClickhouseClient, table_name: &str) -> Inserter<T> {
     // TODO: make this configurable.
     let send_timeout = Duration::from_secs(2);
-    let end_timeout = Duration::from_secs(4);
+    let end_timeout = Duration::from_secs(3);
 
     client
         .inserter::<T>(table_name)
@@ -49,58 +50,51 @@ fn default_inserter<T: Row>(client: &ClickhouseClient, table_name: &str) -> Inse
 }
 
 /// A wrapper over a Clickhouse [`Inserter`] that supports a backup mechanism.
-struct ClickhouseInserter<T: ClickhouseIndexableOrder> {
+struct ClickhouseInserter<T: ClickhouseRowExt> {
     /// The inner Clickhouse inserter client.
-    inner: Inserter<T::ClickhouseRowType>,
+    inner: Inserter<T>,
     /// A small in-memory backup of the current data we're trying to commit. In case this fails to
     /// be inserted into Clickhouse, it is sent to the backup actor.
-    rows_backup: Vec<T::ClickhouseRowType>,
+    rows_backup: Vec<T>,
     /// The channel where to send data to be backed up.
     backup_tx: mpsc::Sender<FailedCommit<T>>,
-    /// The name of the local operator to use when adding data to clickhouse.
-    builder_name: String,
 }
 
-impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
-    fn new(
-        inner: Inserter<T::ClickhouseRowType>,
-        backup_tx: mpsc::Sender<FailedCommit<T>>,
-        builder_name: String,
-    ) -> Self {
+impl<T: ClickhouseRowExt> ClickhouseInserter<T> {
+    fn new(inner: Inserter<T>, backup_tx: mpsc::Sender<FailedCommit<T>>) -> Self {
         let rows_backup = Vec::new();
-        Self { inner, rows_backup, backup_tx, builder_name }
+        Self { inner, rows_backup, backup_tx }
     }
 
     /// Writes the provided order into the inner Clickhouse writer buffer.
-    async fn write(&mut self, order: T) {
-        let hash = order.hash();
-        let order_row: T::ClickhouseRowType = (order, self.builder_name.clone()).into();
-        let value_ref = T::to_row_ref(&order_row);
+    async fn write(&mut self, row: T) {
+        let hash = row.hash();
+        let value_ref = ClickhouseRowExt::to_row_ref(&row);
 
         if let Err(e) = self.inner.write(value_ref).await {
             IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
-            tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, %hash, "failed to write to clickhouse inserter");
+            tracing::error!(target: TARGET, order = T::ORDER, ?e, %hash, "failed to write to clickhouse inserter");
             return;
         }
 
         // NOTE: we don't backup if writing failes. The reason is that if this fails, then the same
         // writing to the backup inserter should fail.
-        self.rows_backup.push(order_row);
+        self.rows_backup.push(row);
     }
 
     /// Tries to commit to Clickhouse if the conditions are met. In case of failures, data is sent
     /// to the backup actor for retries.
     async fn commit(&mut self) {
-        let pending = self.inner.pending().clone(); // This is cheap to clone.
+        let pending = self.inner.pending().clone().into(); // This is cheap to clone.
 
         let start = Instant::now();
         match self.inner.commit().await {
             Ok(quantities) => {
-                if quantities == Quantities::ZERO {
-                    tracing::trace!(target: TARGET, order = T::ORDER_TYPE, "committed to inserter");
+                if quantities == Quantities::ZERO.into() {
+                    tracing::trace!(target: TARGET, order = T::ORDER, "committed to inserter");
                 } else {
-                    tracing::debug!(target: TARGET, order = T::ORDER_TYPE, ?quantities, "inserted batch to clickhouse");
-                    IndexerMetrics::process_clickhouse_quantities(&quantities);
+                    tracing::debug!(target: TARGET, order = T::ORDER, ?quantities, "inserted batch to clickhouse");
+                    IndexerMetrics::process_clickhouse_quantities(&quantities.into());
                     IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
                     // Clear the backup rows.
                     self.rows_backup.clear();
@@ -108,13 +102,13 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
             }
             Err(e) => {
                 IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
-                tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, "failed to commit bundle to clickhouse");
+                tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to commit bundle to clickhouse");
 
                 let rows = std::mem::take(&mut self.rows_backup);
                 let failed_commit = FailedCommit::new(rows, pending);
 
                 if let Err(e) = self.backup_tx.try_send(failed_commit) {
-                    tracing::error!(target: TARGET, order = T::ORDER_TYPE, ?e, "failed to send rows backup");
+                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to send rows backup");
                 }
             }
         }
@@ -122,16 +116,15 @@ impl<T: ClickhouseIndexableOrder> ClickhouseInserter<T> {
 
     /// Ends the current `INSERT` and whole `Inserter` unconditionally.
     async fn end(self) -> ClickhouseResult<Quantities> {
-        self.inner.end().await
+        self.inner.end().await.map(Into::into)
     }
 }
 
-impl<T: ClickhouseIndexableOrder> std::fmt::Debug for ClickhouseInserter<T> {
+impl<T: ClickhouseRowExt> std::fmt::Debug for ClickhouseInserter<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ClickhouseInserter")
-            .field("inserter", &T::ORDER_TYPE.to_string())
+            .field("inserter", &T::ORDER.to_string())
             .field("rows_backup_len", &self.rows_backup.len())
-            .field("builder_name", &self.builder_name)
             .finish()
     }
 }
@@ -142,12 +135,18 @@ struct InserterRunner<T: ClickhouseIndexableOrder> {
     /// The channel from which we can receive new orders to index.
     rx: mpsc::Receiver<T>,
     /// The underlying Clickhouse inserter.
-    inserter: ClickhouseInserter<T>,
+    inserter: ClickhouseInserter<T::ClickhouseRowType>,
+    /// The name of the local operator to use when adding data to clickhouse.
+    builder_name: String,
 }
 
 impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
-    fn new(rx: mpsc::Receiver<T>, inserter: ClickhouseInserter<T>) -> Self {
-        Self { rx, inserter }
+    fn new(
+        rx: mpsc::Receiver<T>,
+        inserter: ClickhouseInserter<T::ClickhouseRowType>,
+        builder_name: String,
+    ) -> Self {
+        Self { rx, inserter, builder_name }
     }
 
     /// Run the inserter until it is possible to receive new orders.
@@ -157,15 +156,49 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
             .with_interval(Duration::from_secs(4));
 
         while let Some(order) = self.rx.recv().await {
-            tracing::trace!(target: TARGET, order = T::ORDER_TYPE, hash = %order.hash(), "received data to index");
+            tracing::trace!(target: TARGET, order = T::ORDER, hash = %order.hash(), "received data to index");
             sampler.sample(|| {
-                IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), T::ORDER_TYPE);
+                IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), T::ORDER);
             });
 
-            self.inserter.write(order).await;
+            let row = order.to_row(self.builder_name.clone());
+            self.inserter.write(row).await;
             self.inserter.commit().await;
         }
-        tracing::error!(target: TARGET, order = T::ORDER_TYPE, "tx channel closed, indexer will stop running");
+        tracing::error!(target: TARGET, order = T::ORDER, "tx channel closed, indexer will stop running");
+    }
+}
+
+/// The configuration used in a [`ClickhouseClient`].
+#[derive(Debug, Clone)]
+pub(crate) struct ClickhouseClientConfig {
+    host: String,
+    database: String,
+    username: String,
+    password: String,
+    validation: bool,
+}
+
+impl ClickhouseClientConfig {
+    fn new(args: &ClickhouseArgs, validation: bool) -> Self {
+        Self {
+            host: args.host.clone().expect("host is set"),
+            database: args.database.clone().expect("database is set"),
+            username: args.username.clone().expect("username is set"),
+            password: args.password.clone().expect("password is set"),
+            validation,
+        }
+    }
+}
+
+impl From<ClickhouseClientConfig> for ClickhouseClient {
+    fn from(config: ClickhouseClientConfig) -> Self {
+        ClickhouseClient::default()
+            .with_url(config.host)
+            .with_database(config.database)
+            .with_user(config.username)
+            .with_password(config.password)
+            .with_validation(config.validation)
     }
 }
 
@@ -176,61 +209,63 @@ pub(crate) struct ClickhouseIndexer;
 impl ClickhouseIndexer {
     /// Create and spawn new Clickhouse indexer tasks, returning their indexer handle.
     ///
-    /// NOTE: validation should be set to false for for performance reasons, and because validation
-    /// doesn't support Uint256 data types.
+    /// NOTE: In non-testing setting, validation should be set to false for for performance
+    /// reasons, and because validation doesn't support UInt256 data types.
     pub(crate) fn run(
         args: ClickhouseArgs,
-        builder_name: BuilderName,
+        builder_name: String,
         receivers: OrderReceivers,
         task_executor: TaskExecutor,
         validation: bool,
     ) {
-        let (host, database, username, password, bundles_table_name, bundle_receipts_table_name) = (
-            args.host.expect("host is set"),
-            args.database.expect("database is set"),
-            args.username.expect("username is set"),
-            args.password.expect("password is set"),
+        let client = ClickhouseClientConfig::new(&args, validation).into();
+        tracing::info!("Running with clickhouse indexer");
+
+        let (bundles_table_name, bundle_receipts_table_name) = (
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
             args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
         );
-
-        tracing::info!(%host, "Running with clickhouse indexer");
+        let memory_backup_max_size_bytes =
+            args.backup_memory_max_size_bytes.unwrap_or(MAX_MEMORY_BACKUP_SIZE_BYTES);
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
-        let client = ClickhouseClient::default()
-            .with_url(host)
-            .with_database(database)
-            .with_user(username)
-            .with_password(password)
-            .with_validation(validation);
+        let disk_backup = DiskBackup::<BundleReceiptRow>::new(
+            DiskBackupConfig::new()
+                .with_path(args.backup_disk_database_path)
+                .with_max_size_bytes(args.backup_disk_max_size_bytes),
+            &task_executor,
+        )
+        .expect("could not create disk backup");
 
-        let bundle_inserter = default_inserter::<BundleRow>(&client, &bundles_table_name);
-        let (tx, rx) = mpsc::channel::<FailedCommit<SystemBundle>>(128);
-        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, builder_name.clone());
-        let mut bundle_inserter_runner = InserterRunner::new(bundle_rx, bundle_inserter);
-        let mut bundle_backup = MemoryBackup::new(
+        let (tx, rx) = mpsc::channel(128);
+        let bundle_inserter = default_inserter(&client, &bundles_table_name);
+        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx);
+        let mut bundle_inserter_runner =
+            InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
+
+        let mut bundle_backup = Backup::<BundleRow>::new(
             rx,
             client
-                .inserter::<BundleRow>(&bundles_table_name)
-                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
+                .inserter(&bundles_table_name)
+                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
+            disk_backup.clone_to(),
         )
-        .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
+        .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
-        let bundle_receipt_inserter =
-            default_inserter::<BundleReceiptRow>(&client, &bundle_receipts_table_name);
-        let (tx, rx) = mpsc::channel::<FailedCommit<BundleReceipt>>(128);
-        let bundle_receipt_inserter =
-            ClickhouseInserter::new(bundle_receipt_inserter, tx, builder_name);
+        let (tx, rx) = mpsc::channel(128);
+        let bundle_receipt_inserter = default_inserter(&client, &bundle_receipts_table_name);
+        let bundle_receipt_inserter = ClickhouseInserter::new(bundle_receipt_inserter, tx);
         let mut bundle_receipt_inserter_runner =
-            InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter);
-        let mut bundle_receipt_backup = MemoryBackup::new(
+            InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter, builder_name);
+        let mut bundle_receipt_backup = Backup::<BundleReceiptRow>::new(
             rx,
             client
-                .inserter::<BundleReceiptRow>(&bundle_receipts_table_name)
-                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(12))),
+                .inserter(&bundle_receipts_table_name)
+                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
+            disk_backup,
         )
-        .with_max_size_bytes(args.max_backup_size_bytes.unwrap_or(MAX_BACKUP_SIZE_BYTES));
+        .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
         spawn_clickhouse_inserter!(task_executor, bundle_inserter_runner, "bundles");
         spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles");
@@ -246,7 +281,7 @@ impl ClickhouseIndexer {
 impl<T: ClickhouseIndexableOrder> std::fmt::Debug for InserterRunner<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InserterRunner")
-            .field("inserter", &T::ORDER_TYPE.to_string())
+            .field("inserter", &T::ORDER.to_string())
             .field("rx", &self.rx)
             .finish()
     }
@@ -261,7 +296,7 @@ pub(crate) mod tests {
         indexer::{
             click::{
                 models::{BundleReceiptRow, BundleRow},
-                ClickhouseIndexer,
+                ClickhouseClientConfig, ClickhouseIndexer,
             },
             tests::{bundle_receipt_example, system_bundle_example},
             OrderSenders, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
@@ -279,8 +314,8 @@ pub(crate) mod tests {
     use tokio::runtime::Handle;
 
     // Uncomment to enable logging during tests.
-    use tracing::level_filters::LevelFilter;
-    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+    // use tracing::level_filters::LevelFilter;
+    // use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     /// The default clickhouse image name to use for testcontainers testing.
     pub(crate) const CLICKHOUSE_DEFAULT_IMAGE_NAME: &str = "clickhouse/clickhouse-server";
@@ -344,25 +379,18 @@ pub(crate) mod tests {
         }
     }
 
-    /// The configuration used in a [`ClickhouseClient`] for testing.
-    #[derive(Debug, Clone)]
-    pub(crate) struct ClickhouseConfig {
-        url: String,
-        user: String,
-        password: String,
-        validation: bool,
-    }
-
-    impl From<ClickhouseConfig> for ClickhouseArgs {
-        fn from(config: ClickhouseConfig) -> Self {
+    impl From<ClickhouseClientConfig> for ClickhouseArgs {
+        fn from(config: ClickhouseClientConfig) -> Self {
             Self {
-                host: Some(config.url),
+                host: Some(config.host),
                 database: Some("default".to_string()),
-                username: Some(config.user),
+                username: Some(config.username),
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
                 bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-                max_backup_size_bytes: None,
+                backup_memory_max_size_bytes: None,
+                backup_disk_database_path: None,
+                backup_disk_max_size_bytes: None,
             }
         }
     }
@@ -374,17 +402,21 @@ pub(crate) mod tests {
     /// container is cancelled prematurely.
     pub(crate) async fn create_test_clickhouse_client(
         validation: bool,
-    ) -> TestcontainersResult<(ContainerAsync<ClickhouseImage>, ClickhouseClient, ClickhouseConfig)>
-    {
+    ) -> TestcontainersResult<(
+        ContainerAsync<ClickhouseImage>,
+        ClickhouseClient,
+        ClickhouseClientConfig,
+    )> {
         // Start a Docker client (testcontainers manages lifecycle)
         let clickhouse = ClickhouseImage::default().start().await?;
         let port = clickhouse.get_host_port_ipv4(8123).await?;
         let host = clickhouse.get_host().await?;
         let url = format!("http://{host}:{port}");
 
-        let config = ClickhouseConfig {
-            url,
-            user: "default".to_string(),
+        let config = ClickhouseClientConfig {
+            host: url,
+            database: "default".to_string(),
+            username: "default".to_string(),
             password: "password".to_string(),
             validation,
         };
@@ -392,8 +424,8 @@ pub(crate) mod tests {
         Ok((
             clickhouse,
             ClickhouseClient::default()
-                .with_url(config.url.clone())
-                .with_user(config.user.clone())
+                .with_url(config.host.clone())
+                .with_user(config.username.clone())
                 .with_password(config.password.clone())
                 .with_validation(config.validation),
             config,
@@ -459,10 +491,10 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn clickhouse_bundles_insert_single_row_e2e_succeds() {
         // Uncomment to toggle logs.
-        let registry = tracing_subscriber::registry().with(
-            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-        );
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse
         let (image, client, config) = create_test_clickhouse_client(false).await.unwrap();
@@ -511,10 +543,10 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn clickhouse_bundle_receipts_rows_e2e_succeds() {
         // Uncomment to toggle logs.
-        let registry = tracing_subscriber::registry().with(
-            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-        );
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse
         let (image, client, config) = create_test_clickhouse_client(true).await.unwrap();

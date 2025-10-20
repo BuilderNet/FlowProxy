@@ -7,16 +7,13 @@ use tokio::sync::mpsc;
 
 use crate::{
     cli::IndexerArgs,
-    indexer::{
-        click::{primitives::BuilderName, ClickhouseIndexer},
-        parq::ParquetIndexer,
-    },
+    indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, SystemBundle},
     tasks::TaskExecutor,
 };
 
-mod click;
+pub(crate) mod click;
 mod parq;
 mod ser;
 
@@ -37,6 +34,9 @@ pub const BUNDLE_RECEIPTS_TABLE_NAME: &str = "bundle_receipts";
 
 /// The name of the Clickhouse table to store transactions in.
 pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
+
+/// The path of the backup database for storing failed Clickhouse batch insertions
+pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-backup.db";
 
 /// The tracing target for this indexer crate.
 const TARGET: &str = "indexer";
@@ -79,7 +79,7 @@ pub struct Indexer;
 impl Indexer {
     pub fn run(
         args: IndexerArgs,
-        builder_name: BuilderName,
+        builder_name: String,
         task_executor: TaskExecutor,
     ) -> IndexerHandle {
         let (senders, receivers) = OrderSenders::new();
