@@ -2,7 +2,6 @@
 
 use std::{
     fmt::Debug,
-    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -16,8 +15,8 @@ use crate::{
     indexer::{
         click::{
             backup::{
-                Backup, DiskBackup, DiskBackupConfig, FailedCommit, MemoryBackupConfig,
-                DISK_BACKUP_DATABASE_PATH, MAX_MEMORY_BACKUP_SIZE_BYTES,
+                default_disk_backup_database_path, Backup, DiskBackup, DiskBackupConfig,
+                FailedCommit, MemoryBackupConfig, MAX_MEMORY_BACKUP_SIZE_BYTES,
             },
             models::{BundleReceiptRow, BundleRow},
             primitives::{ClickhouseIndexableOrder, ClickhouseRowExt},
@@ -226,18 +225,13 @@ impl ClickhouseIndexer {
             args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
             args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
         );
-        let memory_backup_max_size_bytes = args
-            .backup
-            .as_ref()
-            .and_then(|b| b.memory_max_size_bytes)
-            .unwrap_or(MAX_MEMORY_BACKUP_SIZE_BYTES);
+        let memory_backup_max_size_bytes =
+            args.backup_memory_max_size_bytes.unwrap_or(MAX_MEMORY_BACKUP_SIZE_BYTES);
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
         let disk_backup = DiskBackup::new(DiskBackupConfig::new(
-            args.backup
-                .and_then(|b| b.disk_database_path)
-                .unwrap_or(PathBuf::from(DISK_BACKUP_DATABASE_PATH)),
+            args.backup_disk_database_path.unwrap_or(default_disk_backup_database_path()),
             bundles_table_name.clone(),
         ))
         .expect("could not create disk backup");
@@ -391,7 +385,10 @@ pub(crate) mod tests {
                 password: Some(config.password),
                 bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
                 bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-                backup: None,
+                backup_disk_database_path: None,
+                backup_memory_max_size_bytes: None,
+                backup_disk_bundles_table_name: None,
+                backp_disk_bundle_receipts_table_name: None,
             }
         }
     }
