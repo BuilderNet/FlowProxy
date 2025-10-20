@@ -230,7 +230,7 @@ impl ClickhouseIndexer {
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
-        let disk_backup = DiskBackup::new(
+        let disk_backup = DiskBackup::<BundleReceiptRow>::new(
             DiskBackupConfig::new(bundle_receipts_table_name.clone())
                 .with_path(args.backup_disk_database_path)
                 .with_max_size_bytes(args.backup_disk_max_size_bytes),
@@ -243,6 +243,7 @@ impl ClickhouseIndexer {
         let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx);
         let mut bundle_inserter_runner =
             InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
+
         let mut bundle_backup = Backup::<BundleRow>::new(
             rx,
             client

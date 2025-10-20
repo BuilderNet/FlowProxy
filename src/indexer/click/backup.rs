@@ -253,9 +253,10 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         &self,
         table_name: String,
     ) -> DiskBackup<U> {
+        let cfg = self.config.clone();
         DiskBackup {
             db: self.db.clone(),
-            config: DiskBackupConfig::new(table_name).with_path(self.config.path.clone().into()),
+            config: DiskBackupConfig { table_name, ..cfg },
             _marker: Default::default(),
         }
     }
