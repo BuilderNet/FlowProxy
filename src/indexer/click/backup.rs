@@ -441,9 +441,10 @@ impl<T: ClickhouseRowExt> Backup<T> {
             return;
         }
 
+        let start = Instant::now();
         match self.disk_backup.save(&failed_commit) {
             Ok(stats) => {
-                tracing::debug!(target: TARGET, order = T::ORDER, total_size_bytes = stats.size_bytes, "saved failed commit to disk");
+                tracing::debug!(target: TARGET, order = T::ORDER, total_size_bytes = stats.size_bytes, elapsed = ?start.elapsed(), "saved failed commit to disk");
                 IndexerMetrics::set_clickhouse_disk_backup_size(
                     stats.size_bytes,
                     stats.total_batches,
