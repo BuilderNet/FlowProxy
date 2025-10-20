@@ -1,7 +1,7 @@
 #
 # Stage 1: Build shadow
 #
-FROM rust:1.88.0-slim-trixie AS build-shadow
+FROM rust:1.89.0-slim-trixie AS build-shadow
 
 # Parameters used in follow-up installation scripts
 ENV CONTAINER="debian:"

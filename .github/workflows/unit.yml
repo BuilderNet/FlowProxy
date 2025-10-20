@@ -23,11 +23,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         # Need to specify @master above to work with toolchain var
         with:
-          toolchain: 1.88.0
+          toolchain: 1.89.0
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: cargo nextest run --lib --bins --no-tests=warn --retries 3
-
