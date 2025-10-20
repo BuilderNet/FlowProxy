@@ -26,7 +26,10 @@ pub(crate) fn default_disk_backup_database_path() -> PathBuf {
     #[cfg(test)]
     return tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
     #[cfg(not(test))]
-    return PathBuf::from("~/.buildernet-orderflow-proxy/clickhouse_backup.db");
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".buildernet-orderflow-proxy").join("clickhouse_backup.db")
+    }
 }
 
 /// Tracing target for the backup actor.
