@@ -7,41 +7,6 @@ use clap::{Args, Parser, ValueHint};
 /// The maximum request size in bytes (10 MiB).
 const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
-/// Arguments to configure the backup of Clickhouse data, in case of commit failure.
-#[derive(PartialEq, Eq, Clone, Debug, Args)]
-pub struct BackupArgs {
-    /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure.
-    #[arg(
-        long = "indexer.clickhouse.backup.memory-max-size-bytes",
-        env = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES",
-        id = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES"
-    )]
-    pub memory_max_size_bytes: Option<u64>,
-
-    /// The path of the (redb) database used to store failed clickhouse commits for retry. If not
-    /// set, a default path of `/var/lib/buildernet-of-proxy/clickhouse-backup.db` will be used.
-    #[arg(
-        long = "indexer.clickhouse.backup.disk-database-path",
-        env = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH",
-        id = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH"
-    )]
-    pub disk_database_path: Option<PathBuf>,
-
-    #[arg(
-        long = "indexer.clickhouse.backup.disk-bundles-table-name",
-        env = "CLICKHOUSE_BACKUP_DISK_BUNDLES_TABLE_NAME",
-        id = "CLICKHOUSE_BACKUP_DISK_BUNDLES_TABLE_NAME"
-    )]
-    pub disk_bundles_table_name: Option<String>,
-
-    #[arg(
-        long = "indexer.clickhouse.backup.disk-bundle-receipts-table-name",
-        env = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME",
-        id = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME"
-    )]
-    pub disk_bundle_receipts_table_name: Option<String>,
-}
-
 /// Arguments required to create a clickhouse client.
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
 #[group(id = "clickhouse", requires_all = ["CLICKHOUSE_HOST", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABASE"])]
@@ -86,8 +51,36 @@ pub struct ClickhouseArgs {
     )]
     pub bundle_receipts_table_name: Option<String>,
 
-    #[command(flatten)]
-    pub backup: Option<BackupArgs>,
+    /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure.
+    #[arg(
+        long = "indexer.clickhouse.backup.memory-max-size-bytes",
+        env = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES",
+        id = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES"
+    )]
+    pub backup_memory_max_size_bytes: Option<u64>,
+
+    /// The path of the (redb) database used to store failed clickhouse commits for retry. If not
+    /// set, a default path of `/var/lib/buildernet-of-proxy/clickhouse-backup.db` will be used.
+    #[arg(
+        long = "indexer.clickhouse.backup.disk-database-path",
+        env = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH",
+        id = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH"
+    )]
+    pub backup_disk_database_path: Option<PathBuf>,
+
+    #[arg(
+        long = "indexer.clickhouse.backup.disk-bundles-table-name",
+        env = "CLICKHOUSE_BACKUP_DISK_BUNDLES_TABLE_NAME",
+        id = "CLICKHOUSE_BACKUP_DISK_BUNDLES_TABLE_NAME"
+    )]
+    pub backup_disk_bundles_table_name: Option<String>,
+
+    #[arg(
+        long = "indexer.clickhouse.backup.disk-bundle-receipts-table-name",
+        env = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME",
+        id = "CLICKHOUSE_BACKUP_DISK_BUNDLE_RECEIPTS_TABLE_NAME"
+    )]
+    pub backp_disk_bundle_receipts_table_name: Option<String>,
 }
 
 /// Arguments required to setup file-based parquet indexing.
@@ -389,6 +382,8 @@ mod tests {
             "pronto",
             "--indexer.clickhouse.username",
             "pronto",
+            "--indexer.clickhouse.backup.memory-max-size-bytes",
+            "512",
         ];
 
         let args = OrderflowIngressArgs::try_parse_from(args)
@@ -402,6 +397,7 @@ mod tests {
         assert_eq!(clickhouse.database, Some(String::from("pronto")));
         assert_eq!(clickhouse.password, Some(String::from("pronto")));
         assert_eq!(clickhouse.username, Some(String::from("pronto")));
+        assert_eq!(clickhouse.backup_memory_max_size_bytes, Some(512));
     }
 
     #[test]
@@ -460,6 +456,8 @@ mod tests {
             "pronto",
             "--indexer.clickhouse.username",
             "pronto",
+            "--indexer.clickhouse.backup.memory-max-size-bytes",
+            "512",
         ];
 
         let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
