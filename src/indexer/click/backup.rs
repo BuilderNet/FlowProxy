@@ -181,6 +181,8 @@ pub(crate) enum DiskBackupError {
     Storage(#[from] redb::StorageError),
     #[error(transparent)]
     Commit(#[from] redb::CommitError),
+    #[error(transparent)]
+    Durability(#[from] redb::SetDurabilityError),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("backup size limit exceeded: {0} bytes")]
@@ -229,7 +231,9 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         // NOTE: not efficient, but we don't expect to store a lot of data here.
         let bytes = serde_json::to_vec(&data)?;
 
-        let writer = self.db.write().expect("not poisoned").begin_write()?;
+        let mut writer = self.db.write().expect("not poisoned").begin_write()?;
+        // By assumption we don't write very often to this DB, so we can have immediate durability.
+        writer.set_durability(redb::Durability::Immediate)?;
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             if table.stats()?.stored_bytes() > self.config.max_size_bytes {
@@ -281,7 +285,9 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
     fn delete(&mut self, key: DiskBackupKey) -> Result<BackupSourceStats, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
 
-        let writer = self.db.write().expect("not poisoned").begin_write()?;
+        let mut writer = self.db.write().expect("not poisoned").begin_write()?;
+        // We want to free space immediately.
+        writer.set_durability(redb::Durability::Immediate)?;
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             table.remove(key)?;
