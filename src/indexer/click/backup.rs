@@ -347,10 +347,17 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
     /// thread.
     async fn flush(&mut self) -> Result<(), DiskBackupError> {
         let db = self.db.clone();
+
         // Since this can easily block by a second or two, send it to a blocking thread.
         tokio::task::spawn_blocking(move || {
             let mut db = db.write().expect("not poisoned");
             let mut writer = db.begin_write()?;
+
+            // If there is no data to flush, don't do anything.
+            if writer.stats()?.stored_bytes() == 0 {
+                return Ok(());
+            }
+
             writer.set_durability(redb::Durability::Immediate)?;
             writer.commit()?;
 
