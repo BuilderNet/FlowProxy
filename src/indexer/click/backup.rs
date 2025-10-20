@@ -146,15 +146,15 @@ pub(crate) struct DiskRetrieval<K, V> {
 /// Errors that can occur during disk backup operations. Mostly wrapping redb and serde errors.
 #[derive(Debug, thiserror::Error, AsRefStr)]
 pub(crate) enum DiskBackupError {
-    #[error("redb database error: {0}")]
+    #[error(transparent)]
     Database(#[from] redb::DatabaseError),
-    #[error("redb transaction error: {0}")]
+    #[error(transparent)]
     Transactions(#[from] redb::TransactionError),
-    #[error("redb table error: {0}")]
+    #[error(transparent)]
     Table(#[from] redb::TableError),
-    #[error("redb storage error: {0}")]
+    #[error(transparent)]
     Storage(#[from] redb::StorageError),
-    #[error("redb commmit error: {0}")]
+    #[error(transparent)]
     Commit(#[from] redb::CommitError),
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
