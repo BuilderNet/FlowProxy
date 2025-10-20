@@ -23,7 +23,7 @@ use std::{
 
 use crate::{
     cli::ParquetArgs,
-    indexer::{BuilderName, OrderReceivers, TARGET},
+    indexer::{OrderReceivers, TARGET},
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, Sampler},
     tasks::TaskExecutor,
@@ -67,7 +67,7 @@ struct BundleReceiptWriter {
     pub payload_size: UInt32Builder,
     pub priority: UInt8Builder,
 
-    pub builder_name: BuilderName,
+    pub builder_name: String,
 
     /// The inner Parquet Arrow writer. It is wrapped in an `Option` to allow taking it in the
     /// `Drop` implementation. It is guaranteed to be `Some` during the lifetime of the struct.
@@ -89,7 +89,7 @@ impl Drop for BundleReceiptWriter {
 }
 
 impl BundleReceiptWriter {
-    fn new(writer: ArrowWriter<File>, builder_name: BuilderName) -> Self {
+    fn new(writer: ArrowWriter<File>, builder_name: String) -> Self {
         BundleReceiptWriter {
             bundle_hash: FixedSizeBinaryBuilder::new(32),
             double_bundle_hash: FixedSizeBinaryBuilder::new(32),
@@ -173,7 +173,7 @@ pub(crate) struct ParquetIndexer;
 impl ParquetIndexer {
     pub(crate) fn run(
         parquet_args: ParquetArgs,
-        builder_name: BuilderName,
+        builder_name: String,
         receivers: OrderReceivers,
         task_executor: TaskExecutor,
     ) -> io::Result<()> {

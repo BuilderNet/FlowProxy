@@ -35,7 +35,7 @@ pub struct ClickhouseArgs {
     )]
     pub database: Option<String>,
 
-    /// The table name to store bundles data.
+    /// The clickhouse table name to store bundles data.
     #[arg(
         long = "indexer.clickhouse.bundles-table-name",
         env = "CLICKHOUSE_BUNDLES_TABLE_NAME",
@@ -43,7 +43,7 @@ pub struct ClickhouseArgs {
     )]
     pub bundles_table_name: Option<String>,
 
-    /// The table name to store bundle receipts data.
+    /// The clickhouse table name to store bundle receipts data.
     #[arg(
         long = "indexer.clickhouse.bundle-receipts-table-name",
         env = "CLICKHOUSE_BUNDLE_RECEIPTS_TABLE_NAME",
@@ -51,13 +51,33 @@ pub struct ClickhouseArgs {
     )]
     pub bundle_receipts_table_name: Option<String>,
 
-    /// The maximum size in bytes for the in-memory backup in case of ClickHouse insertion failure.
+    /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure, for a
+    /// certain data type (bundles or bundle receipts). Defaults to 1GiB.
     #[arg(
-        long = "indexer.clickhouse.max-backup-size-bytes",
-        env = "CLICKHOUSE_MAX_BACKUP_SIZE_BYTES",
-        id = "CLICKHOUSE_MAX_BACKUP_SIZE_BYTES"
+        long = "indexer.clickhouse.backup.memory-max-size-bytes",
+        env = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES",
+        id = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES"
     )]
-    pub max_backup_size_bytes: Option<u64>,
+    pub backup_memory_max_size_bytes: Option<u64>,
+
+    /// The path of the (redb) database used to store failed clickhouse commits for retry. If not
+    /// set, a default path of `~/.buildernet-of-proxy/clickhouse-backup.db` will be used.
+    #[arg(
+        long = "indexer.clickhouse.backup.disk-database-path",
+        env = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH",
+        id = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH"
+    )]
+    pub backup_disk_database_path: Option<PathBuf>,
+
+    /// The maximum size in bytes for the disk-backed backup database.
+    /// If the database exceeds this size, new entries will not be added until space is freed.
+    /// Defaults to 10GiB.
+    #[arg(
+        long = "indexer.clickhouse.backup.disk-max-size-bytes",
+        env = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES",
+        id = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES"
+    )]
+    pub backup_disk_max_size_bytes: Option<u64>,
 }
 
 /// Arguments required to setup file-based parquet indexing.
@@ -359,6 +379,8 @@ mod tests {
             "pronto",
             "--indexer.clickhouse.username",
             "pronto",
+            "--indexer.clickhouse.backup.memory-max-size-bytes",
+            "512",
         ];
 
         let args = OrderflowIngressArgs::try_parse_from(args)
@@ -372,6 +394,7 @@ mod tests {
         assert_eq!(clickhouse.database, Some(String::from("pronto")));
         assert_eq!(clickhouse.password, Some(String::from("pronto")));
         assert_eq!(clickhouse.username, Some(String::from("pronto")));
+        assert_eq!(clickhouse.backup_memory_max_size_bytes, Some(512));
     }
 
     #[test]
@@ -430,6 +453,8 @@ mod tests {
             "pronto",
             "--indexer.clickhouse.username",
             "pronto",
+            "--indexer.clickhouse.backup.memory-max-size-bytes",
+            "512",
         ];
 
         let err = OrderflowIngressArgs::try_parse_from(args).unwrap_err();
