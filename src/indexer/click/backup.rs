@@ -332,9 +332,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
     fn delete(&mut self, key: DiskBackupKey) -> Result<BackupSourceStats, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
 
-        let mut writer = self.db.write().expect("not poisoned").begin_write()?;
-        // We want to free space immediately.
-        writer.set_durability(redb::Durability::Immediate)?;
+        let writer = self.db.write().expect("not poisoned").begin_write()?;
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             table.remove(key)?;
