@@ -47,7 +47,7 @@ enum BackupSource {
 /// Generates a new unique key for disk backup entries, based on current system time in
 /// milliseconds.
 fn new_disk_backup_key() -> DiskBackupKey {
-    SystemTime::now().duration_since(UNIX_EPOCH).expect("time went backwards").as_millis()
+    SystemTime::now().duration_since(UNIX_EPOCH).expect("time went backwards").as_micros()
 }
 
 /// Represents data we failed to commit to clickhouse, including the rows and some information
