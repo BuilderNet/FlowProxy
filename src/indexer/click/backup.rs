@@ -356,10 +356,10 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
             let start = Instant::now();
             match self.flush() {
                 Ok(_) => {
-                    tracing::debug!(target: TARGET, order = T::ORDER, elapsed = ?start.elapsed(), "flushed backup write buffer to disk");
+                    tracing::debug!(target: TARGET, elapsed = ?start.elapsed(), "flushed backup write buffer to disk");
                 }
                 Err(e) => {
-                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush backup write buffer to disk");
+                    tracing::error!(target: TARGET, ?e, "failed to flush backup write buffer to disk");
                 }
             }
         }

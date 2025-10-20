@@ -248,7 +248,7 @@ impl ClickhouseIndexer {
             client
                 .inserter(&bundles_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
-            disk_backup.clone_change_table(bundle_receipts_table_name.clone()),
+            disk_backup.clone_change_table(bundles_table_name.clone()),
         )
         .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
