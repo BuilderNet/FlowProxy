@@ -694,10 +694,14 @@ impl<T: ClickhouseRowExt> Backup<T> {
         if let Err(e) = self.disk_backup.flush().await {
             tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush disk backup during shutdown");
             IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+        } else {
+            tracing::info!(target: TARGET, order = T::ORDER, "flushed disk backup during shutdown");
         }
 
         if let Err(e) = self.inserter.end().await {
             tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to end backup inserter during shutdown");
+        } else {
+            tracing::info!(target: TARGET, order = T::ORDER, "successfully ended backup inserter during shutdown");
         }
     }
 }
