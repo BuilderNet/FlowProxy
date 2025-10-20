@@ -3,7 +3,7 @@ use std::{
     marker::PhantomData,
     path::PathBuf,
     sync::{Arc, RwLock},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use clickhouse::inserter::Inserter;
@@ -116,6 +116,8 @@ pub(crate) struct DiskBackupConfig {
     table_name: String,
     /// The maximum size in bytes for holding past failed commits on disk.
     max_size_bytes: u64,
+    /// The minimum interval between two [`redb::Durability::Immediate`] commits to disk.
+    immediate_commit_interval: Duration,
 }
 
 impl DiskBackupConfig {
@@ -124,6 +126,7 @@ impl DiskBackupConfig {
             path: default_disk_backup_database_path(),
             table_name,
             max_size_bytes: MAX_DISK_BACKUP_SIZE_BYTES,
+            immediate_commit_interval: Duration::from_secs(30),
         }
     }
 
@@ -137,6 +140,14 @@ impl DiskBackupConfig {
     pub(crate) fn with_max_size_bytes(mut self, max_size_bytes: Option<u64>) -> Self {
         if let Some(max_size_bytes) = max_size_bytes {
             self.max_size_bytes = max_size_bytes;
+        }
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_immediate_commit_interval(mut self, interval: Option<Duration>) -> Self {
+        if let Some(interval) = interval {
+            self.immediate_commit_interval = interval;
         }
         self
     }
@@ -196,6 +207,8 @@ pub(crate) enum DiskBackupError {
 pub(crate) struct DiskBackup<T> {
     db: Arc<RwLock<redb::Database>>,
     config: DiskBackupConfig,
+    /// The instant of the last [`redb::Durability::Immediate`] commit to disk.
+    last_immediate_commit: Instant,
 
     _marker: PhantomData<T>,
 }
@@ -209,7 +222,12 @@ impl<T> DiskBackup<T> {
 
         let db = redb::Database::create(&config.path)?;
 
-        Ok(Self { db: Arc::new(RwLock::new(db)), config, _marker: Default::default() })
+        Ok(Self {
+            db: Arc::new(RwLock::new(db)),
+            config,
+            _marker: Default::default(),
+            last_immediate_commit: Instant::now(),
+        })
     }
 
     /// Like [`Clone`], but allows to change table name.
@@ -220,20 +238,29 @@ impl<T> DiskBackup<T> {
         DiskBackup {
             db: self.db.clone(),
             config: DiskBackupConfig::new(table_name).with_path(self.config.path.clone().into()),
+            last_immediate_commit: Instant::now(),
             _marker: Default::default(),
         }
     }
 }
 
 impl<T: ClickhouseRowExt> DiskBackup<T> {
+    /// Saves a new failed commit to disk. `commit_immediately` indicates whether to force durability
+    /// on write.
     fn save(&mut self, data: &FailedCommit<T>) -> Result<BackupSourceStats, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
         // NOTE: not efficient, but we don't expect to store a lot of data here.
         let bytes = serde_json::to_vec(&data)?;
 
         let mut writer = self.db.write().expect("not poisoned").begin_write()?;
-        // By assumption we don't write very often to this DB, so we can have immediate durability.
-        writer.set_durability(redb::Durability::Immediate)?;
+
+        if self.last_immediate_commit.elapsed() >= self.config.immediate_commit_interval {
+            writer.set_durability(redb::Durability::Immediate)?;
+            self.last_immediate_commit = Instant::now();
+        } else {
+            writer.set_durability(redb::Durability::None)?;
+        }
+
         let (stored_bytes, rows) = {
             let mut table = writer.open_table(table_def)?;
             if table.stats()?.stored_bytes() > self.config.max_size_bytes {
@@ -296,6 +323,30 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         writer.commit()?;
 
         Ok(BackupSourceStats { size_bytes: stored_bytes, total_batches: rows as usize })
+    }
+
+    /// Explicity flushes any pending writes to disk.
+    fn flush(&mut self) -> Result<(), DiskBackupError> {
+        let mut writer = self.db.write().expect("not poisoned").begin_write()?;
+        writer.set_durability(redb::Durability::Immediate)?;
+        writer.commit()?;
+        Ok(())
+    }
+
+    /// Flushes to disk if the immediate commit interval has elapsed.
+    ///
+    /// Returns the duration it took to flush, if a flush was performed, or `None` otherwise.
+    fn flush_if_needed(&mut self) -> Option<Result<Duration, DiskBackupError>> {
+        let start = Instant::now();
+        if self.last_immediate_commit.elapsed() >= self.config.immediate_commit_interval {
+            if let Err(e) = self.flush() {
+                return Some(Err(e));
+            }
+            self.last_immediate_commit = Instant::now();
+            Some(Ok(start.elapsed()))
+        } else {
+            None
+        }
     }
 }
 
@@ -440,6 +491,18 @@ impl<T: ClickhouseRowExt> Backup<T> {
             self.last_cached =
                 self.last_cached.take().filter(|cached| cached.source != BackupSource::Memory);
             return;
+        }
+
+        if let Some(res) = self.disk_backup.flush_if_needed() {
+            match res {
+                Ok(duration) => {
+                    tracing::debug!(target: TARGET, order = T::ORDER, ?duration, "flushed backup to disk");
+                }
+                Err(e) => {
+                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush backup to disk");
+                    IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+                }
+            }
         }
 
         let start = Instant::now();
@@ -588,9 +651,19 @@ impl<T: ClickhouseRowExt> Backup<T> {
                 }
             }
             if let Err(e) = self.inserter.force_commit().await {
-                tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to commit backup during shutdown");
+                tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to commit backup to CH during shutdown, trying disk");
                 IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
             }
+
+            if let Err(e) = self.disk_backup.save(&failed_commit) {
+                tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to write commit to disk backup during shutdown");
+                IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+            }
+        }
+
+        if let Err(e) = self.disk_backup.flush() {
+            tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush disk backup during shutdown");
+            IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
         }
 
         if let Err(e) = self.inserter.end().await {
