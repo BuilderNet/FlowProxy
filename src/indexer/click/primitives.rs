@@ -10,7 +10,8 @@ use crate::{
 pub(crate) trait ClickhouseRowExt:
     Row + RowWrite + Serialize + DeserializeOwned + Sync + Send + 'static
 {
-    /// The type of such row, e.g. "bundles" or "transactions". For informational purposes.
+    /// The type of such row, e.g. "bundles" or "bundle_receipts". Used as backup db table name and
+    /// for informational purposes.
     const ORDER: &'static str;
 
     /// An identifier of such row.

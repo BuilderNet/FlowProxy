@@ -113,8 +113,6 @@ impl<T> Default for FailedCommits<T> {
 pub(crate) struct DiskBackupConfig {
     /// The path where the backup database is stored.
     path: PathBuf,
-    /// The name of the table to store data into.
-    table_name: String,
     /// The maximum size in bytes for holding past failed commits on disk.
     max_size_bytes: u64,
     /// The interval at which buffered writes are flushed to disk.
@@ -122,10 +120,9 @@ pub(crate) struct DiskBackupConfig {
 }
 
 impl DiskBackupConfig {
-    pub(crate) fn new(table_name: String) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             path: default_disk_backup_database_path(),
-            table_name,
             max_size_bytes: MAX_DISK_BACKUP_SIZE_BYTES,
             flush_interval: tokio::time::interval(Duration::from_secs(30)),
         }
@@ -158,7 +155,6 @@ impl Clone for DiskBackupConfig {
     fn clone(&self) -> Self {
         Self {
             path: self.path.clone(),
-            table_name: self.table_name.clone(),
             max_size_bytes: self.max_size_bytes,
             flush_interval: tokio::time::interval(self.flush_interval.period()),
         }
@@ -243,7 +239,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
             Self { db: Arc::new(RwLock::new(db)), config, _marker: Default::default() };
 
         task_executor.spawn({
-            let disk_backup = disk_backup.clone();
+            let disk_backup: Self = disk_backup.clone();
             async move {
                 disk_backup.flush_routine().await;
             }
@@ -252,17 +248,9 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
         Ok(disk_backup)
     }
 
-    /// Like [`Clone`], but allows to change table name.
-    pub(crate) fn clone_change_table<U: ClickhouseRowExt>(
-        &self,
-        table_name: String,
-    ) -> DiskBackup<U> {
-        let cfg = self.config.clone();
-        DiskBackup {
-            db: self.db.clone(),
-            config: DiskBackupConfig { table_name, ..cfg },
-            _marker: Default::default(),
-        }
+    /// Like `clone`, but allows to change the type parameter `U`.
+    pub(crate) fn clone_to<U>(&self) -> DiskBackup<U> {
+        DiskBackup { db: self.db.clone(), config: self.config.clone(), _marker: Default::default() }
     }
 }
 
@@ -276,7 +264,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
     /// Saves a new failed commit to disk. `commit_immediately` indicates whether to force
     /// durability on write.
     fn save(&mut self, data: &FailedCommit<T>) -> Result<BackupSourceStats, DiskBackupError> {
-        let table_def = Table::new(&self.config.table_name);
+        let table_def = Table::new(T::ORDER);
         // NOTE: not efficient, but we don't expect to store a lot of data here.
         let bytes = serde_json::to_vec(&data)?;
 
@@ -300,7 +288,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
     fn retrieve_oldest(
         &mut self,
     ) -> Result<Option<DiskRetrieval<DiskBackupKey, FailedCommit<T>>>, DiskBackupError> {
-        let table_def = Table::new(&self.config.table_name);
+        let table_def = Table::new(T::ORDER);
 
         let reader = self.db.read().expect("not poisoned").begin_read()?;
         let table = match reader.open_table(table_def) {
@@ -330,7 +318,7 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
 
     /// Deletes the failed commit with the given key from disk.
     fn delete(&mut self, key: DiskBackupKey) -> Result<BackupSourceStats, DiskBackupError> {
-        let table_def = Table::new(&self.config.table_name);
+        let table_def = Table::new(T::ORDER);
 
         let writer = self.db.write().expect("not poisoned").begin_write()?;
         let (stored_bytes, rows) = {
@@ -779,8 +767,7 @@ mod tests {
             let tempfile = tempfile::NamedTempFile::new().unwrap();
 
             let disk_backup = DiskBackup::new(
-                DiskBackupConfig::new(BUNDLE_TABLE_NAME.to_string())
-                    .with_path(tempfile.path().to_path_buf().into()),
+                DiskBackupConfig::new().with_path(tempfile.path().to_path_buf().into()),
                 &task_executor,
             )
             .expect("could not create disk backup");

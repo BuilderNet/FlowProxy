@@ -231,7 +231,7 @@ impl ClickhouseIndexer {
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
         let disk_backup = DiskBackup::<BundleReceiptRow>::new(
-            DiskBackupConfig::new(bundle_receipts_table_name.clone())
+            DiskBackupConfig::new()
                 .with_path(args.backup_disk_database_path)
                 .with_max_size_bytes(args.backup_disk_max_size_bytes),
             &task_executor,
@@ -249,7 +249,7 @@ impl ClickhouseIndexer {
             client
                 .inserter(&bundles_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
-            disk_backup.clone_change_table(bundles_table_name.clone()),
+            disk_backup.clone_to(),
         )
         .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
@@ -390,8 +390,6 @@ pub(crate) mod tests {
                 bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
                 backup_memory_max_size_bytes: None,
                 backup_disk_database_path: None,
-                backup_disk_bundles_table_name: None,
-                backup_disk_bundle_receipts_table_name: None,
                 backup_disk_max_size_bytes: None,
             }
         }
