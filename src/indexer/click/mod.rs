@@ -231,8 +231,8 @@ impl ClickhouseIndexer {
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
         let disk_backup = DiskBackup::new(
-            DiskBackupConfig::new(bundles_table_name.clone())
-                .with_path(args.backup_disk_bundles_table_name)
+            DiskBackupConfig::new(bundle_receipts_table_name.clone())
+                .with_path(args.backup_disk_database_path)
                 .with_max_size_bytes(args.backup_disk_max_size_bytes),
             &task_executor,
         )

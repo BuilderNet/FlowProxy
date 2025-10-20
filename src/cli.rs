@@ -61,7 +61,7 @@ pub struct ClickhouseArgs {
     pub backup_memory_max_size_bytes: Option<u64>,
 
     /// The path of the (redb) database used to store failed clickhouse commits for retry. If not
-    /// set, a default path of `/var/lib/buildernet-of-proxy/clickhouse-backup.db` will be used.
+    /// set, a default path of `~/.buildernet-of-proxy/clickhouse-backup.db` will be used.
     #[arg(
         long = "indexer.clickhouse.backup.disk-database-path",
         env = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH",
