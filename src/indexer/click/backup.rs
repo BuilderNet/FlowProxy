@@ -21,9 +21,13 @@ use crate::{
 /// A default maximum size in bytes for the in-memory backup of failed commits.
 pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 
-/// The default path where the backup database is stored.
-pub(crate) const DISK_BACKUP_DATABASE_PATH: &str =
-    "/var/lib/buildernet-orderflow-proxy/clickhouse_backup.db";
+/// The default path where the backup database is stored. For tests, a temporary file is used.
+pub(crate) fn default_disk_backup_database_path() -> PathBuf {
+    #[cfg(test)]
+    return tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
+    #[cfg(not(test))]
+    return PathBuf::from("~/.buildernet-orderflow-proxy/clickhouse_backup.db");
+}
 
 /// Tracing target for the backup actor.
 const TARGET: &str = "indexer::backup";
@@ -169,6 +173,11 @@ pub(crate) struct DiskBackup<T> {
 
 impl<T> DiskBackup<T> {
     pub(crate) fn new(config: DiskBackupConfig) -> Result<Self, redb::DatabaseError> {
+        // Ensure all parent directories exist, so that the database can be initialized correctly.
+        if let Some(parent) = config.path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let db = redb::Database::create(&config.path)?;
 
         Ok(Self { db: Arc::new(RwLock::new(db)), config, _marker: Default::default() })
