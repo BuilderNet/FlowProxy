@@ -245,8 +245,8 @@ impl<T> DiskBackup<T> {
 }
 
 impl<T: ClickhouseRowExt> DiskBackup<T> {
-    /// Saves a new failed commit to disk. `commit_immediately` indicates whether to force durability
-    /// on write.
+    /// Saves a new failed commit to disk. `commit_immediately` indicates whether to force
+    /// durability on write.
     fn save(&mut self, data: &FailedCommit<T>) -> Result<BackupSourceStats, DiskBackupError> {
         let table_def = Table::new(&self.config.table_name);
         // NOTE: not efficient, but we don't expect to store a lot of data here.
