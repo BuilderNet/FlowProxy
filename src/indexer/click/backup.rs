@@ -356,10 +356,10 @@ impl<T: ClickhouseRowExt> DiskBackup<T> {
             let start = Instant::now();
             match self.flush() {
                 Ok(_) => {
-                    tracing::debug!(target: TARGET, order = T::ORDER, elapsed = ?start.elapsed(), "flushed backup to disk");
+                    tracing::debug!(target: TARGET, order = T::ORDER, elapsed = ?start.elapsed(), "flushed backup write buffer to disk");
                 }
                 Err(e) => {
-                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush backup to disk");
+                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush backup write buffer to disk");
                 }
             }
         }
@@ -601,7 +601,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
                     );
                 }
                 Err(e) => {
-                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to purge committed failed commit from disk");
+                    tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to purge failed commit from disk");
                 }
             }
             tracing::debug!(target: TARGET, order = T::ORDER, "purged committed failed commit from disk");
