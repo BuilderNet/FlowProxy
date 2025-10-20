@@ -579,8 +579,8 @@ mod tests {
     };
 
     // Uncomment to enable logging during tests.
-    use tracing::level_filters::LevelFilter;
-    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+    // use tracing::level_filters::LevelFilter;
+    // use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     impl<T: ClickhouseRowExt> Backup<T> {
         fn new_test(
@@ -604,10 +604,10 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn backup_e2e_works() {
         // Uncomment to toggle logs.
-        let registry = tracing_subscriber::registry().with(
-            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-        );
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         let memory_backup_only = [false, true];
 

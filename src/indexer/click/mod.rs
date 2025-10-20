@@ -311,8 +311,8 @@ pub(crate) mod tests {
     use tokio::runtime::Handle;
 
     // Uncomment to enable logging during tests.
-    use tracing::level_filters::LevelFilter;
-    use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
+    // use tracing::level_filters::LevelFilter;
+    // use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _, EnvFilter};
 
     /// The default clickhouse image name to use for testcontainers testing.
     pub(crate) const CLICKHOUSE_DEFAULT_IMAGE_NAME: &str = "clickhouse/clickhouse-server";
@@ -489,10 +489,10 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn clickhouse_bundles_insert_single_row_e2e_succeds() {
         // Uncomment to toggle logs.
-        let registry = tracing_subscriber::registry().with(
-            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-        );
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse
         let (image, client, config) = create_test_clickhouse_client(false).await.unwrap();
@@ -541,10 +541,10 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn clickhouse_bundle_receipts_rows_e2e_succeds() {
         // Uncomment to toggle logs.
-        let registry = tracing_subscriber::registry().with(
-            EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).from_env_lossy(),
-        );
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
+        // let registry = tracing_subscriber::registry().with(
+        //     EnvFilter::builder().with_default_directive(LevelFilter::DEBUG.into()).
+        // from_env_lossy(), );
+        // let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
 
         // 1. Spin up Clickhouse
         let (image, client, config) = create_test_clickhouse_client(true).await.unwrap();
