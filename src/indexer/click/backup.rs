@@ -13,28 +13,15 @@ use strum::AsRefStr;
 use tokio::sync::mpsc;
 
 use crate::{
-    indexer::click::{primitives::ClickhouseRowExt, ClickhouseIndexableOrder},
+    indexer::click::{
+        default_disk_backup_database_path, primitives::ClickhouseRowExt, ClickhouseIndexableOrder,
+        MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
+    },
     metrics::IndexerMetrics,
     primitives::{backoff::BackoffInterval, Quantities},
     tasks::TaskExecutor,
     utils::FormatBytes,
 };
-
-/// A default maximum size in bytes for the in-memory backup of failed commits.
-pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
-/// A default maximum size in bytes for the disk backup of failed commits.
-pub(crate) const MAX_DISK_BACKUP_SIZE_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
-
-/// The default path where the backup database is stored. For tests, a temporary file is used.
-fn default_disk_backup_database_path() -> PathBuf {
-    #[cfg(test)]
-    return tempfile::NamedTempFile::new().unwrap().path().to_path_buf();
-    #[cfg(not(test))]
-    {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".buildernet-orderflow-proxy").join("clickhouse_backup.db")
-    }
-}
 
 /// Tracing target for the backup actor.
 const TARGET: &str = "indexer::backup";
@@ -123,7 +110,7 @@ pub(crate) struct DiskBackupConfig {
 impl DiskBackupConfig {
     pub(crate) fn new() -> Self {
         Self {
-            path: default_disk_backup_database_path(),
+            path: default_disk_backup_database_path().into(),
             max_size_bytes: MAX_DISK_BACKUP_SIZE_BYTES,
             flush_interval: tokio::time::interval(Duration::from_secs(30)),
         }
