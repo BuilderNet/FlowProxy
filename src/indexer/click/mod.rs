@@ -14,14 +14,11 @@ use crate::{
     cli::ClickhouseArgs,
     indexer::{
         click::{
-            backup::{
-                Backup, DiskBackup, DiskBackupConfig, FailedCommit, MemoryBackupConfig,
-                MAX_MEMORY_BACKUP_SIZE_BYTES,
-            },
+            backup::{Backup, DiskBackup, DiskBackupConfig, FailedCommit, MemoryBackupConfig},
             models::{BundleReceiptRow, BundleRow},
             primitives::{ClickhouseIndexableOrder, ClickhouseRowExt},
         },
-        OrderReceivers, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
+        OrderReceivers, TARGET,
     },
     metrics::IndexerMetrics,
     primitives::{Quantities, Sampler},
@@ -33,6 +30,28 @@ mod backup;
 mod macros;
 mod models;
 pub(crate) mod primitives;
+
+/// A default maximum size in bytes for the in-memory backup of failed commits.
+pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
+/// A default maximum size in bytes for the disk backup of failed commits.
+pub(crate) const MAX_DISK_BACKUP_SIZE_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
+
+/// The default path where the backup database is stored. For tests, a temporary file is used.
+pub(crate) fn default_disk_backup_database_path() -> String {
+    #[cfg(test)]
+    return tempfile::NamedTempFile::new().unwrap().path().to_string_lossy().to_string();
+    #[cfg(not(test))]
+    {
+        use std::path::PathBuf;
+
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home)
+            .join(".buildernet-orderflow-proxy")
+            .join("clickhouse_backup.db")
+            .to_string_lossy()
+            .to_string()
+    }
+}
 
 /// An clickhouse inserter with some sane defaults.
 fn default_inserter<T: Row>(client: &ClickhouseClient, table_name: &str) -> Inserter<T> {
@@ -221,19 +240,16 @@ impl ClickhouseIndexer {
         let client = ClickhouseClientConfig::new(&args, validation).into();
         tracing::info!("Running with clickhouse indexer");
 
-        let (bundles_table_name, bundle_receipts_table_name) = (
-            args.bundles_table_name.unwrap_or(BUNDLE_TABLE_NAME.to_string()),
-            args.bundle_receipts_table_name.unwrap_or(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-        );
-        let memory_backup_max_size_bytes =
-            args.backup_memory_max_size_bytes.unwrap_or(MAX_MEMORY_BACKUP_SIZE_BYTES);
+        let (bundles_table_name, bundle_receipts_table_name) =
+            (args.bundles_table_name, args.bundle_receipts_table_name);
+        let memory_backup_max_size_bytes = args.backup_memory_max_size_bytes;
 
         let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
 
         let disk_backup = DiskBackup::<BundleReceiptRow>::new(
             DiskBackupConfig::new()
-                .with_path(args.backup_disk_database_path)
-                .with_max_size_bytes(args.backup_disk_max_size_bytes),
+                .with_path(args.backup_disk_database_path.into())
+                .with_max_size_bytes(args.backup_disk_max_size_bytes.into()),
             &task_executor,
         )
         .expect("could not create disk backup");
@@ -295,6 +311,7 @@ pub(crate) mod tests {
         cli::ClickhouseArgs,
         indexer::{
             click::{
+                default_disk_backup_database_path,
                 models::{BundleReceiptRow, BundleRow},
                 ClickhouseClientConfig, ClickhouseIndexer,
             },
@@ -386,11 +403,11 @@ pub(crate) mod tests {
                 database: Some("default".to_string()),
                 username: Some(config.username),
                 password: Some(config.password),
-                bundles_table_name: Some(BUNDLE_TABLE_NAME.to_string()),
-                bundle_receipts_table_name: Some(BUNDLE_RECEIPTS_TABLE_NAME.to_string()),
-                backup_memory_max_size_bytes: None,
-                backup_disk_database_path: None,
-                backup_disk_max_size_bytes: None,
+                bundles_table_name: BUNDLE_TABLE_NAME.to_string(),
+                bundle_receipts_table_name: BUNDLE_RECEIPTS_TABLE_NAME.to_string(),
+                backup_memory_max_size_bytes: 1024 * 1024 * 10, // 10MiB
+                backup_disk_database_path: default_disk_backup_database_path(),
+                backup_disk_max_size_bytes: 1024 * 1024 * 100, // 100MiB
             }
         }
     }

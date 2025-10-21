@@ -4,6 +4,13 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
 
+use crate::indexer::{
+    click::{
+        default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
+    },
+    BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
+};
+
 /// The maximum request size in bytes (10 MiB).
 const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
@@ -39,35 +46,39 @@ pub struct ClickhouseArgs {
     #[arg(
         long = "indexer.clickhouse.bundles-table-name",
         env = "CLICKHOUSE_BUNDLES_TABLE_NAME",
-        id = "CLICKHOUSE_BUNDLES_TABLE_NAME"
+        id = "CLICKHOUSE_BUNDLES_TABLE_NAME",
+        default_value = BUNDLE_TABLE_NAME
     )]
-    pub bundles_table_name: Option<String>,
+    pub bundles_table_name: String,
 
     /// The clickhouse table name to store bundle receipts data.
     #[arg(
         long = "indexer.clickhouse.bundle-receipts-table-name",
         env = "CLICKHOUSE_BUNDLE_RECEIPTS_TABLE_NAME",
-        id = "CLICKHOUSE_BUNDLE_RECEIPTS_TABLE_NAME"
+        id = "CLICKHOUSE_BUNDLE_RECEIPTS_TABLE_NAME",
+        default_value = BUNDLE_RECEIPTS_TABLE_NAME,
     )]
-    pub bundle_receipts_table_name: Option<String>,
+    pub bundle_receipts_table_name: String,
 
     /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure, for a
     /// certain data type (bundles or bundle receipts). Defaults to 1GiB.
     #[arg(
         long = "indexer.clickhouse.backup.memory-max-size-bytes",
         env = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES",
-        id = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES"
+        id = "CLICKHOUSE_BACKUP_MEMORY_SIZE_BYTES",
+        default_value_t = MAX_MEMORY_BACKUP_SIZE_BYTES,
     )]
-    pub backup_memory_max_size_bytes: Option<u64>,
+    pub backup_memory_max_size_bytes: u64,
 
     /// The path of the (redb) database used to store failed clickhouse commits for retry. If not
     /// set, a default path of `~/.buildernet-of-proxy/clickhouse-backup.db` will be used.
     #[arg(
         long = "indexer.clickhouse.backup.disk-database-path",
         env = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH",
-        id = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH"
+        id = "CLICKHOUSE_BACKUP_DISK_DATABASE_PATH",
+        default_value_t = default_disk_backup_database_path()
     )]
-    pub backup_disk_database_path: Option<PathBuf>,
+    pub backup_disk_database_path: String,
 
     /// The maximum size in bytes for the disk-backed backup database.
     /// If the database exceeds this size, new entries will not be added until space is freed.
@@ -75,9 +86,10 @@ pub struct ClickhouseArgs {
     #[arg(
         long = "indexer.clickhouse.backup.disk-max-size-bytes",
         env = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES",
-        id = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES"
+        id = "CLICKHOUSE_BACKUP_DISK_MAX_SIZE_BYTES",
+        default_value_t = MAX_DISK_BACKUP_SIZE_BYTES
     )]
-    pub backup_disk_max_size_bytes: Option<u64>,
+    pub backup_disk_max_size_bytes: u64,
 }
 
 /// Arguments required to setup file-based parquet indexing.
@@ -306,7 +318,7 @@ mod tests {
     use crate::cli::OrderflowIngressArgs;
 
     #[test]
-    fn indexing_args_optional_succeds() {
+    fn cli_indexing_args_optional_succeds() {
         let args = vec![
             "test", // binary name
             "--user-listen-url",
@@ -323,12 +335,15 @@ mod tests {
             "buildernet",
         ];
 
-        OrderflowIngressArgs::try_parse_from(args)
+        let args = OrderflowIngressArgs::try_parse_from(args)
             .unwrap_or_else(|e| panic!("optional indexing arg: {e}"));
+
+        assert!(args.indexing.clickhouse.is_none(), "clickhouse args should not be set");
+        assert!(args.indexing.parquet.is_none(), "parquet args should not be set");
     }
 
     #[test]
-    fn indexing_args_partial_fail() {
+    fn cli_indexing_args_partial_fail() {
         let args = vec![
             "test", // binary name
             "--user-listen-url",
@@ -356,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn indexing_args_clickhouse_provided_succeds() {
+    fn cli_indexing_args_clickhouse_provided_succeds() {
         let args = vec![
             "test", // binary name
             "--user-listen-url",
@@ -394,11 +409,11 @@ mod tests {
         assert_eq!(clickhouse.database, Some(String::from("pronto")));
         assert_eq!(clickhouse.password, Some(String::from("pronto")));
         assert_eq!(clickhouse.username, Some(String::from("pronto")));
-        assert_eq!(clickhouse.backup_memory_max_size_bytes, Some(512));
+        assert_eq!(clickhouse.backup_memory_max_size_bytes, 512);
     }
 
     #[test]
-    fn indexing_args_parquet_provided_succeds() {
+    fn cli_indexing_args_parquet_provided_succeds() {
         let args = vec![
             "test", // binary name
             "--user-listen-url",
@@ -428,7 +443,7 @@ mod tests {
     }
 
     #[test]
-    fn indexing_args_provided_both_clickhouse_parquet_fails() {
+    fn cli_indexing_args_provided_both_clickhouse_parquet_fails() {
         let args = vec![
             "test", // binary name
             "--user-listen-url",
