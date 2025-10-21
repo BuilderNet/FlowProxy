@@ -11,20 +11,27 @@ const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
 #[group(id = "clickhouse", requires_all = ["CLICKHOUSE_HOST", "CLICKHOUSE_USERNAME", "CLICKHOUSE_PASSWORD", "CLICKHOUSE_DATABASE"])]
 pub struct ClickhouseArgs {
-    #[arg(long = "indexer.clickhouse.host", env = "CLICKHOUSE_HOST", id = "CLICKHOUSE_HOST")]
+    #[arg(
+        long = "indexer.clickhouse.host",
+        env = "CLICKHOUSE_HOST",
+        id = "CLICKHOUSE_HOST",
+        hide_env_values = true
+    )]
     pub host: Option<String>,
 
     #[arg(
         long = "indexer.clickhouse.username",
         env = "CLICKHOUSE_USERNAME",
-        id = "CLICKHOUSE_USERNAME"
+        id = "CLICKHOUSE_USERNAME",
+        hide_env_values = true
     )]
     pub username: Option<String>,
 
     #[arg(
         long = "indexer.clickhouse.password",
         env = "CLICKHOUSE_PASSWORD",
-        id = "CLICKHOUSE_PASSWORD"
+        id = "CLICKHOUSE_PASSWORD",
+        hide_env_values = true
     )]
     pub password: Option<String>,
 
@@ -159,7 +166,12 @@ pub struct OrderflowIngressArgs {
     pub metrics: Option<String>,
 
     /// The orderflow signer of this proxy.
-    #[clap(long, env = "FLASHBOTS_ORDERFLOW_SIGNER", id = "FLASHBOTS_ORDERFLOW_SIGNER")]
+    #[clap(
+        long,
+        env = "FLASHBOTS_ORDERFLOW_SIGNER",
+        id = "FLASHBOTS_ORDERFLOW_SIGNER",
+        hide_env_values = true
+    )]
     pub orderflow_signer: Option<PrivateKeySigner>,
 
     /// The flashbots signer of this proxy.
