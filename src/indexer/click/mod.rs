@@ -35,7 +35,7 @@ pub(crate) mod primitives;
 pub(crate) const MAX_MEMORY_BACKUP_SIZE_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 /// A default maximum size in bytes for the disk backup of failed commits.
 pub(crate) const MAX_DISK_BACKUP_SIZE_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
-                                                                            //
+
 /// The default path where the backup database is stored. For tests, a temporary file is used.
 pub(crate) fn default_disk_backup_database_path() -> String {
     #[cfg(test)]
