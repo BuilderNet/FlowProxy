@@ -2,15 +2,16 @@ use std::process::Command;
 
 fn main() {
     // Capture the git commit hash at build time
-    let output = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .output()
-        .expect("Failed to execute git command");
-
-    let git_hash = String::from_utf8(output.stdout)
-        .expect("Invalid UTF-8 sequence from git")
-        .trim()
-        .to_string();
+    let git_hash = match Command::new("git").args(["rev-parse", "--short", "HEAD"]).output() {
+        Ok(output) => String::from_utf8(output.stdout)
+            .expect("Invalid UTF-8 sequence from git")
+            .trim()
+            .to_string(),
+        Err(e) => {
+            eprintln!("Failed to get git hash, building with unknown hash: {e:?}");
+            "unknown".to_string()
+        }
+    };
 
     // Set the GIT_HASH environment variable for use in the binary
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
