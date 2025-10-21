@@ -143,6 +143,7 @@ pub struct CacheArgs {
 }
 
 #[derive(Parser, Debug)]
+#[command(version = concat!(env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 pub struct OrderflowIngressArgs {
     /// Listen URL for receiving user flow.
     #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
