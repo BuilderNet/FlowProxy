@@ -295,6 +295,10 @@ impl SystemBundleDecoder {
         metadata: SystemBundleMetadata,
         lookup: Option<impl Fn(B256) -> Option<Address>>,
     ) -> Result<SystemBundle, SystemBundleDecodingError> {
+        if bundle.txs.len() > self.max_txs_per_bundle {
+            return Err(SystemBundleDecodingError::TooManyTransactions);
+        }
+
         let raw_bundle_hash = bundle.bundle_hash();
         // Set the bundle hash in the metadata.
         bundle.metadata.bundle_hash = Some(raw_bundle_hash);
@@ -306,10 +310,6 @@ impl SystemBundleDecoder {
         };
 
         if let DecodedBundle::Bundle(bundle) = &mut decoded {
-            if bundle.txs.len() > self.max_txs_per_bundle {
-                return Err(SystemBundleDecodingError::TooManyTransactions);
-            }
-
             bundle.signer = Some(metadata.signer);
         }
 
