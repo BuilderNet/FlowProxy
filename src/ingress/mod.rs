@@ -15,8 +15,8 @@ use crate::{
     },
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleMetadata,
-        SystemMevShareBundle, SystemTransaction, UtcInstant,
+        EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleDecoder,
+        SystemBundleMetadata, SystemMevShareBundle, SystemTransaction, UtcInstant,
     },
     priority::{pqueue::PriorityQueues, Priority},
     rate_limit::CounterOverTime,
@@ -62,6 +62,7 @@ pub struct OrderflowIngress {
     pub rate_limit_count: u64,
     pub score_lookback_s: u64,
     pub score_bucket_s: u64,
+    pub bundle_decoder: SystemBundleDecoder,
     pub spam_thresholds: SpamThresholds,
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
@@ -568,8 +569,8 @@ impl OrderflowIngress {
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
-            bundle.metadata.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
+            && bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
@@ -605,11 +606,12 @@ impl OrderflowIngress {
         self.record_queue_capacity_metrics(priority);
 
         // Decode and validate the bundle.
+        let decoder = self.bundle_decoder;
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
                 let metadata = SystemBundleMetadata { signer, received_at, priority };
-                SystemBundle::try_decode_with_lookup(bundle, metadata, lookup)
+                decoder.try_decode_with_lookup(bundle, metadata, lookup)
             })
             .await
             .inspect_err(|e| {

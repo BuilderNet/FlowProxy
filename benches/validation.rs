@@ -6,7 +6,7 @@ use alloy_signer_local::PrivateKeySigner;
 use buildernet_orderflow_proxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_verify_signature,
-    primitives::{SystemBundle, SystemBundleMetadata, UtcInstant},
+    primitives::{SystemBundleDecoder, SystemBundleMetadata, UtcInstant},
     priority::Priority,
     utils::testutils::Random,
 };
@@ -81,6 +81,8 @@ pub fn bench_validation(c: &mut Criterion) {
     group.bench_function(BenchmarkId::from_parameter(size), |b| {
         let mut rng = StdRng::seed_from_u64(12);
 
+        let decoder = SystemBundleDecoder::default();
+
         // We use iter_batched here so we have an owned value for the benchmarked function (second
         // closure)
         b.iter_batched(
@@ -92,7 +94,7 @@ pub fn bench_validation(c: &mut Criterion) {
                         signer: input.signer,
                         priority: Priority::Medium,
                     };
-                    let result = SystemBundle::try_decode(input.raw_bundle, metadata).unwrap();
+                    let result = decoder.try_decode(input.raw_bundle, metadata).unwrap();
                     black_box(result);
                 }
             },
