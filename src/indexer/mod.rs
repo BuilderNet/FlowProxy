@@ -169,7 +169,9 @@ pub(crate) mod tests {
     use time::UtcDateTime;
 
     use crate::{
-        primitives::{BundleReceipt, SystemBundle, SystemBundleMetadata, UtcInstant},
+        primitives::{
+            BundleReceipt, SystemBundle, SystemBundleDecoder, SystemBundleMetadata, UtcInstant,
+        },
         priority::Priority,
     };
 
@@ -231,7 +233,8 @@ pub(crate) mod tests {
 
         let metadata = SystemBundleMetadata { signer, received_at, priority: Priority::Medium };
 
-        SystemBundle::try_decode(bundle, metadata).unwrap()
+        let decoder = SystemBundleDecoder::default();
+        decoder.try_decode(bundle, metadata).unwrap()
     }
 
     /// An example cancel bundle to use for testing.
@@ -241,7 +244,8 @@ pub(crate) mod tests {
         let received_at = UtcInstant::now();
 
         let metadata = SystemBundleMetadata { signer, received_at, priority: Priority::Medium };
-        SystemBundle::try_decode(bundle, metadata).unwrap()
+        let decoder = SystemBundleDecoder::default();
+        decoder.try_decode(bundle, metadata).unwrap()
     }
 
     pub(crate) fn bundle_receipt_example() -> BundleReceipt {

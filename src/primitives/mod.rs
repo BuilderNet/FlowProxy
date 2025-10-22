@@ -59,6 +59,14 @@ pub struct SystemBundle {
     pub metadata: SystemBundleMetadata,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SystemBundleDecodingError {
+    #[error(transparent)]
+    RawBundleConvertError(#[from] RawBundleConvertError),
+    #[error("bundle contains too many transactions")]
+    TooManyTransactions,
+}
+
 /// Decoded bundle type. Either a new, full bundle or an empty replacement bundle.
 #[allow(clippy::large_enum_variant)]
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -241,33 +249,56 @@ impl BundleHash for RawShareBundle {
     }
 }
 
-impl SystemBundle {
+/// Decoder for system bundles with additional constraints.
+#[derive(Debug, Clone, Copy)]
+pub struct SystemBundleDecoder {
+    /// Maximum number of transactions allowed in a bundle.
+    pub max_txs_per_bundle: usize,
+}
+
+impl Default for SystemBundleDecoder {
+    fn default() -> Self {
+        Self { max_txs_per_bundle: Self::DEFAULT_MAX_TXS_PER_BUNDLE }
+    }
+}
+
+impl SystemBundleDecoder {
+    /// The maximum number of transactions allowed in a bundle received via `eth_sendBundle`.
+    pub const DEFAULT_MAX_TXS_PER_BUNDLE: usize = 100;
+
     /// Create a new system bundle from a raw bundle and additional data.
     /// Returns an error if the raw bundle fails to decode.
     pub fn try_decode(
+        &self,
         bundle: RawBundle,
         metadata: SystemBundleMetadata,
-    ) -> Result<Self, RawBundleConvertError> {
-        Self::try_decode_inner(bundle, metadata, None::<fn(B256) -> Option<Address>>)
+    ) -> Result<SystemBundle, SystemBundleDecodingError> {
+        self.try_decode_inner(bundle, metadata, None::<fn(B256) -> Option<Address>>)
     }
 
     /// Create a new system bundle from a raw bundle and additional data, using a signer lookup
     /// function for the transaction signers.
     pub fn try_decode_with_lookup(
+        &self,
         bundle: RawBundle,
         metadata: SystemBundleMetadata,
         lookup: impl Fn(B256) -> Option<Address>,
-    ) -> Result<Self, RawBundleConvertError> {
-        Self::try_decode_inner(bundle, metadata, Some(lookup))
+    ) -> Result<SystemBundle, SystemBundleDecodingError> {
+        self.try_decode_inner(bundle, metadata, Some(lookup))
     }
 
     /// Create a new system bundle from a raw bundle and additional data, using a signer lookup
     /// function for the transaction signers. Returns an error if the raw bundle fails to decode.
     fn try_decode_inner(
+        &self,
         mut bundle: RawBundle,
         metadata: SystemBundleMetadata,
         lookup: Option<impl Fn(B256) -> Option<Address>>,
-    ) -> Result<Self, RawBundleConvertError> {
+    ) -> Result<SystemBundle, SystemBundleDecodingError> {
+        if bundle.txs.len() > self.max_txs_per_bundle {
+            return Err(SystemBundleDecodingError::TooManyTransactions);
+        }
+
         let raw_bundle_hash = bundle.bundle_hash();
         // Set the bundle hash in the metadata.
         bundle.metadata.bundle_hash = Some(raw_bundle_hash);
@@ -282,14 +313,16 @@ impl SystemBundle {
             bundle.signer = Some(metadata.signer);
         }
 
-        Ok(Self {
+        Ok(SystemBundle {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded),
             bundle_hash: raw_bundle_hash,
             metadata,
         })
     }
+}
 
+impl SystemBundle {
     /// Returns `true` if the bundle is a replacement.
     pub fn is_replacement(&self) -> bool {
         matches!(self.decoded_bundle.as_ref(), DecodedBundle::EmptyReplacement(_))
@@ -760,5 +793,40 @@ mod tests {
         let response = EthResponse::TxHash(hash);
         let json = serde_json::to_value(response).unwrap();
         assert_eq!(json, json!(hash));
+    }
+
+    #[test]
+    fn too_many_txs_error() {
+        let decoder = SystemBundleDecoder::default();
+        let raw_bundle = RawBundle {
+            txs: vec![Bytes::from(vec![0u8; 8]); decoder.max_txs_per_bundle + 1],
+            metadata: RawBundleMetadata {
+                version: None,
+                block_number: None,
+                reverting_tx_hashes: vec![],
+                dropping_tx_hashes: vec![],
+                replacement_uuid: None,
+                uuid: None,
+                signing_address: None,
+                refund_identity: None,
+                min_timestamp: None,
+                max_timestamp: None,
+                replacement_nonce: None,
+                refund_percent: None,
+                refund_recipient: None,
+                refund_tx_hashes: None,
+                delayed_refund: None,
+                bundle_hash: None,
+            },
+        };
+        let metadata = SystemBundleMetadata {
+            signer: Address::ZERO,
+            received_at: UtcInstant::now(),
+            priority: Priority::Medium,
+        };
+
+        // This should be the first reason decoding of such garbage data fails.
+        let result = decoder.try_decode(raw_bundle.clone(), metadata.clone());
+        assert!(matches!(result, Err(SystemBundleDecodingError::TooManyTransactions)));
     }
 }

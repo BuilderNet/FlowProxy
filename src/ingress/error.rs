@@ -1,7 +1,9 @@
-use crate::{jsonrpc::JsonRpcError, validation::ValidationError};
+use crate::{
+    jsonrpc::JsonRpcError, primitives::SystemBundleDecodingError, validation::ValidationError,
+};
 use alloy_consensus::crypto::RecoveryError;
 use alloy_eips::eip2718::Eip2718Error;
-use rbuilder_primitives::serialize::{RawBundleConvertError, RawShareBundleConvertError};
+use rbuilder_primitives::serialize::RawShareBundleConvertError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IngressError {
@@ -16,7 +18,7 @@ pub enum IngressError {
     Decode2718(#[from] Eip2718Error),
     /// Bundle decoding error.
     #[error(transparent)]
-    BundleDecode(#[from] RawBundleConvertError),
+    SystemBundleDecoding(#[from] SystemBundleDecodingError),
     /// MEV Share bundle decoding error.
     #[error(transparent)]
     ShareBundleDecode(#[from] RawShareBundleConvertError),
@@ -26,6 +28,8 @@ pub enum IngressError {
     /// Serde error.
     #[error(transparent)]
     Serde(#[from] serde_json::Error),
+    #[error("too many transactions in bundle")]
+    TooManyTransactions,
 }
 
 impl IngressError {
@@ -35,8 +39,9 @@ impl IngressError {
             Self::EmptyRawTransaction |
             Self::Validation(_) |
             Self::Decode2718(_) |
-            Self::BundleDecode(_) |
+            Self::SystemBundleDecoding(_) |
             Self::ShareBundleDecode(_) |
+            Self::TooManyTransactions |
             Self::Recovery(_) => JsonRpcError::InvalidParams,
             Self::Serde(_) => JsonRpcError::ParseError,
         }
