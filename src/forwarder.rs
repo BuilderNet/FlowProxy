@@ -363,19 +363,32 @@ impl HttpForwarder {
 
         match response_result {
             Ok(response) => {
+                let status = response.status();
+
                 // Print warning if the RPC call took more than 1 second.
                 if elapsed > Duration::from_secs(1) {
-                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, "Long RPC call");
+                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Long RPC call");
                 }
 
-                ForwarderMetrics::record_rpc_call(
-                    self.peer_name.clone(),
-                    order_type,
-                    elapsed,
-                    is_big,
-                );
-                if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
-                    error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
+                if status.is_success() {
+                    // Only record success if the status is OK.
+                    ForwarderMetrics::record_rpc_call(
+                        self.peer_name.clone(),
+                        order_type,
+                        elapsed,
+                        is_big,
+                    );
+                } else {
+                    // If we have a non-OK status code, also record it.
+                    error!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Error forwarding request");
+                    ForwarderMetrics::increment_http_call_failures(
+                        self.peer_name.clone(),
+                        status.canonical_reason().map(String::from).unwrap_or(status.to_string()),
+                    );
+
+                    if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
+                        error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
+                    }
                 }
             }
             Err(error) => {
