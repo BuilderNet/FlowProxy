@@ -363,11 +363,9 @@ impl HttpForwarder {
 
         match response_result {
             Ok(response) => {
-                let elapsed = start_time.elapsed();
-
                 // Print warning if the RPC call took more than 1 second.
                 if elapsed > Duration::from_secs(1) {
-                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, "Long RPC call");
+                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, "Long RPC call");
                 }
 
                 ForwarderMetrics::record_rpc_call(
