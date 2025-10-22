@@ -206,7 +206,7 @@ pub async fn run_with_listeners(
         rate_limit_count: args.rate_limit_count,
         score_lookback_s: args.score_lookback_s,
         score_bucket_s: args.score_bucket_s,
-        bundle_decoder: SystemBundleDecoder { max_txs_per_bundle: args.max_txs_per_bundle },
+        system_bundle_decoder: SystemBundleDecoder { max_txs_per_bundle: args.max_txs_per_bundle },
         spam_thresholds: SpamThresholds::default(),
         flashbots_signer: args.flashbots_signer,
         pqueues: Default::default(),

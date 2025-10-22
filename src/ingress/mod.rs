@@ -62,7 +62,7 @@ pub struct OrderflowIngress {
     pub rate_limit_count: u64,
     pub score_lookback_s: u64,
     pub score_bucket_s: u64,
-    pub bundle_decoder: SystemBundleDecoder,
+    pub system_bundle_decoder: SystemBundleDecoder,
     pub spam_thresholds: SpamThresholds,
     pub pqueues: PriorityQueues,
     pub entities: DashMap<Entity, EntityData>,
@@ -606,7 +606,7 @@ impl OrderflowIngress {
         self.record_queue_capacity_metrics(priority);
 
         // Decode and validate the bundle.
-        let decoder = self.bundle_decoder;
+        let decoder = self.system_bundle_decoder;
         let bundle = self
             .pqueues
             .spawn_with_priority(priority, move || {
