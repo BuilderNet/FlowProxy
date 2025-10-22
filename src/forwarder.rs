@@ -21,7 +21,7 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::http::HeaderValue;
 use dashmap::DashMap;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::{header::CONTENT_TYPE, HeaderMap};
+use hyper::{header::CONTENT_TYPE, HeaderMap, StatusCode};
 use reqwest::Url;
 use revm_primitives::keccak256;
 use serde_json::json;
@@ -304,6 +304,10 @@ impl ForwardingRequest {
 
 #[derive(Debug)]
 struct Response<Ok, Err> {
+    /// Whether this was a big request.
+    is_big: bool,
+    /// The type of the order.
+    order_type: &'static str,
     /// The instant at which request was sent.
     start_time: Instant,
     /// Builder response.
@@ -354,13 +358,41 @@ impl HttpForwarder {
     }
 
     fn on_response(&mut self, response: Response<reqwest::Response, reqwest::Error>) {
-        let Response { start_time, response: response_result, .. } = response;
+        let Response { start_time, response: response_result, order_type, is_big } = response;
         let elapsed = start_time.elapsed();
 
         match response_result {
             Ok(response) => {
-                if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
-                    error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
+                let status = response.status();
+
+                // Print warning if the RPC call took more than 1 second.
+                if elapsed > Duration::from_secs(1) {
+                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Long RPC call");
+                }
+
+                if status.is_success() {
+                    if status != StatusCode::OK {
+                        warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Non-OK status code");
+                    }
+
+                    // Only record success if the status is OK.
+                    ForwarderMetrics::record_rpc_call(
+                        self.peer_name.clone(),
+                        order_type,
+                        elapsed,
+                        is_big,
+                    );
+                } else {
+                    // If we have a non-OK status code, also record it.
+                    error!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Error forwarding request");
+                    ForwarderMetrics::increment_http_call_failures(
+                        self.peer_name.clone(),
+                        status.canonical_reason().map(String::from).unwrap_or(status.to_string()),
+                    );
+
+                    if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
+                        error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
+                    }
                 }
             }
             Err(error) => {
@@ -371,8 +403,8 @@ impl HttpForwarder {
                 // None.
                 let reason = error
                     .status()
-                    .and_then(|s| s.canonical_reason().map(|s| s.to_owned()))
-                    .unwrap_or(error.to_string());
+                    .and_then(|s| s.canonical_reason().map(String::from))
+                    .unwrap_or(format!("{error:?}"));
 
                 if error.is_connect() {
                     warn!(target: FORWARDER, peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
@@ -411,7 +443,6 @@ impl Future for HttpForwarder {
                 trace!(target: FORWARDER, name = %this.peer_name, ?request, "Sending request");
                 this.pending.push(send_http_request(
                     this.client.clone(),
-                    this.peer_name.clone(),
                     this.peer_url.clone(),
                     request,
                 ));
@@ -460,7 +491,6 @@ impl ResponseErrorDecoder {
 
 fn send_http_request(
     client: reqwest::Client,
-    peer_name: String,
     url: String,
     request: Arc<ForwardingRequest>,
 ) -> RequestFut<reqwest::Response, reqwest::Error> {
@@ -517,18 +547,7 @@ fn send_http_request(
         let response =
             client.post(&url).body(order.encoding().to_vec()).headers(headers).send().await;
 
-        if response.is_ok() {
-            let elapsed = start_time.elapsed();
-
-            // Print warning if the RPC call took more than 1 second.
-            if elapsed > Duration::from_secs(1) {
-                warn!(target: FORWARDER, name = %url, ?elapsed, is_big, size = order.encoding().len(), order_type, "Long RPC call");
-            }
-
-            ForwarderMetrics::record_rpc_call(peer_name, order_type, elapsed, is_big);
-        }
-
-        Response { start_time, response }
+        Response { start_time, response, is_big, order_type }
     })
 }
 
