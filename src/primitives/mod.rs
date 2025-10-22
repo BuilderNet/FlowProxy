@@ -794,4 +794,39 @@ mod tests {
         let json = serde_json::to_value(response).unwrap();
         assert_eq!(json, json!(hash));
     }
+
+    #[test]
+    fn too_many_txs_error() {
+        let decoder = SystemBundleDecoder::default();
+        let raw_bundle = RawBundle {
+            txs: vec![Bytes::from(vec![0u8; 8]); decoder.max_txs_per_bundle + 1],
+            metadata: RawBundleMetadata {
+                version: None,
+                block_number: None,
+                reverting_tx_hashes: vec![],
+                dropping_tx_hashes: vec![],
+                replacement_uuid: None,
+                uuid: None,
+                signing_address: None,
+                refund_identity: None,
+                min_timestamp: None,
+                max_timestamp: None,
+                replacement_nonce: None,
+                refund_percent: None,
+                refund_recipient: None,
+                refund_tx_hashes: None,
+                delayed_refund: None,
+                bundle_hash: None,
+            },
+        };
+        let metadata = SystemBundleMetadata {
+            signer: Address::ZERO,
+            received_at: UtcInstant::now(),
+            priority: Priority::Medium,
+        };
+
+        // This should be the first reason decoding of such garbage data fails.
+        let result = decoder.try_decode(raw_bundle.clone(), metadata.clone());
+        assert!(matches!(result, Err(SystemBundleDecodingError::TooManyTransactions)));
+    }
 }
