@@ -21,7 +21,7 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::http::HeaderValue;
 use dashmap::DashMap;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::{header::CONTENT_TYPE, HeaderMap};
+use hyper::{header::CONTENT_TYPE, HeaderMap, StatusCode};
 use reqwest::Url;
 use revm_primitives::keccak256;
 use serde_json::json;
@@ -371,6 +371,10 @@ impl HttpForwarder {
                 }
 
                 if status.is_success() {
+                    if status != StatusCode::OK {
+                        warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Non-OK status code");
+                    }
+
                     // Only record success if the status is OK.
                     ForwarderMetrics::record_rpc_call(
                         self.peer_name.clone(),
