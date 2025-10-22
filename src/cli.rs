@@ -4,11 +4,15 @@ use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
 
-use crate::indexer::{
-    click::{
-        default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
+use crate::{
+    indexer::{
+        click::{
+            default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES,
+            MAX_MEMORY_BACKUP_SIZE_BYTES,
+        },
+        BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
     },
-    BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
+    SystemBundleDecoder,
 };
 
 /// The maximum request size in bytes (10 MiB).
@@ -199,6 +203,10 @@ pub struct OrderflowIngressArgs {
     #[clap(long, default_value_t = MAX_REQUEST_SIZE_BYTES)]
     pub max_request_size: usize,
 
+    /// The maximum number of raw transactions per bundle.
+    #[clap(long, default_value_t = SystemBundleDecoder::DEFAULT_MAX_TXS_PER_BUNDLE)]
+    pub max_txs_per_bundle: usize,
+
     /// Enable rate limiting.
     #[clap(long, default_value_t = false)]
     pub enable_rate_limiting: bool,
@@ -249,6 +257,7 @@ impl Default for OrderflowIngressArgs {
             builder_name: String::from("buildernet"),
             builder_hub_url: None,
             flashbots_signer: None,
+            max_txs_per_bundle: 100,
             enable_rate_limiting: false,
             metrics: None,
             orderflow_signer: None,
