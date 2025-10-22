@@ -358,7 +358,7 @@ impl HttpForwarder {
     }
 
     fn on_response(&mut self, response: Response<reqwest::Response, reqwest::Error>) {
-        let Response { start_time, response: response_result, order_type, is_big, .. } = response;
+        let Response { start_time, response: response_result, order_type, is_big } = response;
         let elapsed = start_time.elapsed();
 
         match response_result {
