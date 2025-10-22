@@ -12,7 +12,7 @@ use crate::{
         },
         BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
     },
-    primitives::MAX_TXS_PER_BUNDLE,
+    SystemBundleDecoder,
 };
 
 /// The maximum request size in bytes (10 MiB).
@@ -204,7 +204,7 @@ pub struct OrderflowIngressArgs {
     pub max_request_size: usize,
 
     /// The maximum number of raw transactions per bundle.
-    #[clap(long, default_value_t = MAX_TXS_PER_BUNDLE)]
+    #[clap(long, default_value_t = SystemBundleDecoder::DEFAULT_MAX_TXS_PER_BUNDLE)]
     pub max_txs_per_bundle: usize,
 
     /// Enable rate limiting.

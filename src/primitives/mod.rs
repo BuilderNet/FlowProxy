@@ -35,9 +35,6 @@ use crate::{
 
 pub mod backoff;
 
-/// The maximum number of transactions allowed in a bundle received via `eth_sendBundle`.
-pub const MAX_TXS_PER_BUNDLE: usize = 100;
-
 /// Metadata about a [`SystemBundle`].
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct SystemBundleMetadata {
@@ -261,11 +258,14 @@ pub struct SystemBundleDecoder {
 
 impl Default for SystemBundleDecoder {
     fn default() -> Self {
-        Self { max_txs_per_bundle: MAX_TXS_PER_BUNDLE }
+        Self { max_txs_per_bundle: Self::DEFAULT_MAX_TXS_PER_BUNDLE }
     }
 }
 
 impl SystemBundleDecoder {
+    /// The maximum number of transactions allowed in a bundle received via `eth_sendBundle`.
+    pub const DEFAULT_MAX_TXS_PER_BUNDLE: usize = 100;
+
     /// Create a new system bundle from a raw bundle and additional data.
     /// Returns an error if the raw bundle fails to decode.
     pub fn try_decode(
