@@ -403,7 +403,7 @@ impl HttpForwarder {
                 // None.
                 let reason = error
                     .status()
-                    .and_then(|s| s.canonical_reason().map(|s| s.to_owned()))
+                    .and_then(|s| s.canonical_reason().map(String::from))
                     .unwrap_or(format!("{error:?}"));
 
                 if error.is_connect() {
