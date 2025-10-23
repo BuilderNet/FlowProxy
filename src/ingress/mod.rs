@@ -569,8 +569,8 @@ impl OrderflowIngress {
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
-            bundle.metadata.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
+            && bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =

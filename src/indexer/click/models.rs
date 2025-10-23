@@ -19,7 +19,7 @@ use crate::primitives::{DecodedBundle, SystemBundle};
 /// NOTE: Make sure the fields are in the same order as the columns in the Clickhouse table.
 #[derive(Clone, clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub(crate) struct BundleRow {
+pub struct BundleRow {
     /// The timestamp at which the bundle was observed.
     #[serde(with = "clickhouse::serde::time::datetime64::micros")]
     pub received_at: OffsetDateTime,
@@ -320,7 +320,7 @@ impl From<(SystemBundle, String)> for BundleRow {
 /// The clickhouse model representing a [`crate::primitives::BundleReceipt`].
 #[derive(Debug, Clone, clickhouse::Row, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub(crate) struct BundleReceiptRow {
+pub struct BundleReceiptRow {
     #[serde(with = "hash")]
     pub(crate) bundle_hash: B256,
     /// The hash of the bundle hash.

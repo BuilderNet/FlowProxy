@@ -12,7 +12,6 @@ use crate::{
     primitives::SystemBundleDecoder,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
-    tasks::TaskExecutor,
 };
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -29,6 +28,7 @@ use eyre::Context as _;
 use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
+use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use std::{
     net::SocketAddr,
@@ -61,7 +61,6 @@ pub mod priority;
 pub mod rate_limit;
 pub mod runner;
 pub mod statics;
-pub mod tasks;
 pub mod utils;
 pub mod validation;
 

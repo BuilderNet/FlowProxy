@@ -2,7 +2,7 @@
 
 use std::{future::Future, time::Duration};
 
-use crate::tasks::{self, TaskExecutor, TaskManager};
+use rbuilder_utils::tasks::{PanickedTaskError, TaskExecutor, TaskManager};
 
 #[derive(Debug, Clone)]
 pub struct CliContext {
@@ -39,7 +39,7 @@ impl CliRunner {
     ) -> Result<(), E>
     where
         F: Future<Output = Result<(), E>>,
-        E: Send + Sync + From<std::io::Error> + From<tasks::PanickedTaskError> + 'static,
+        E: Send + Sync + From<std::io::Error> + From<PanickedTaskError> + 'static,
     {
         let tokio_runtime = self.tokio_runtime;
         let mut task_manager = TaskManager::new(tokio_runtime.handle().clone());
@@ -118,7 +118,7 @@ where
 async fn run_to_completion_or_panic<F, E>(tasks: &mut TaskManager, fut: F) -> Result<(), E>
 where
     F: Future<Output = Result<(), E>>,
-    E: Send + Sync + From<tasks::PanickedTaskError> + 'static,
+    E: Send + Sync + From<PanickedTaskError> + 'static,
 {
     {
         let fut = Box::pin(fut);
