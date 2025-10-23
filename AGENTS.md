@@ -167,7 +167,7 @@ When adding new configuration:
 ### Runtime Behavior
 - The proxy uses Tokio's multi-threaded runtime for async operations.
 - Jemalloc is the default allocator for better memory performance.
-- Graceful shutdown is coordinated through `src/tasks/` using `CancellationToken`.
+- Graceful shutdown is coordinated through `src/tasks/` using `TaskExecutor` and `TaskManager`.
 - HTTP servers bind to configured addresses and serve JSON-RPC requests via Axum.
 
 ### Observability
@@ -201,7 +201,7 @@ When adding new configuration:
 - Return structured errors from public APIs; log internal errors with context.
 
 #### Async Patterns
-- Spawn long-running tasks using `tokio::spawn` with `CancellationToken` for graceful shutdown.
+- Spawn long-running tasks using `TaskExecutor` and `TaskManager` for graceful shutdown.
 - Use `tokio::select!` for concurrent operations with cancellation support.
 - Prefer bounded channels (`tokio::sync::mpsc`) over unbounded to prevent memory growth.
 - Use `Arc<RwLock>` or `Arc<Mutex>` for shared mutable state; prefer immutable sharing when possible.
