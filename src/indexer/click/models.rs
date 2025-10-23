@@ -8,7 +8,11 @@ use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::{Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
+use clickhouse::Row;
 use rbuilder_primitives::BundleVersion;
+use rbuilder_utils::clickhouse_with_backup::primitives::{
+    ClickhouseIndexableOrder, ClickhouseRowExt,
+};
 use time::{OffsetDateTime, UtcDateTime};
 use uuid::Uuid;
 
@@ -121,6 +125,18 @@ pub struct BundleRow {
     pub builder_name: String,
     /// The bundle version, or `None` in case of a replacement bundle with no transactions.
     pub version: u8,
+}
+
+impl ClickhouseRowExt for BundleRow {
+    const ORDER: &'static str = "bundle";
+
+    fn hash(&self) -> B256 {
+        self.hash
+    }
+
+    fn to_row_ref(row: &Self) -> &<Self as Row>::Value<'_> {
+        row
+    }
 }
 
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
@@ -337,6 +353,18 @@ pub struct BundleReceiptRow {
     pub(crate) priority: u8,
 }
 
+impl ClickhouseRowExt for BundleReceiptRow {
+    const ORDER: &'static str = "bundle_receipt";
+
+    fn hash(&self) -> B256 {
+        self.bundle_hash
+    }
+
+    fn to_row_ref(row: &Self) -> &<Self as Row>::Value<'_> {
+        row
+    }
+}
+
 impl From<(BundleReceipt, String)> for BundleReceiptRow {
     fn from((receipt, dst_builder_name): (BundleReceipt, String)) -> Self {
         let mut hasher = Keccak256::new();
@@ -365,6 +393,34 @@ impl From<(BundleReceipt, String)> for BundleReceiptRow {
             payload_size: receipt.payload_size,
             priority: receipt.priority as u8,
         }
+    }
+}
+
+impl ClickhouseIndexableOrder for SystemBundle {
+    type ClickhouseRowType = BundleRow;
+
+    const ORDER: &'static str = <BundleRow as ClickhouseRowExt>::ORDER;
+
+    fn hash(&self) -> B256 {
+        self.bundle_hash
+    }
+
+    fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {
+        (self, builder_name).into()
+    }
+}
+
+impl ClickhouseIndexableOrder for BundleReceipt {
+    type ClickhouseRowType = BundleReceiptRow;
+
+    const ORDER: &'static str = <BundleReceiptRow as ClickhouseRowExt>::ORDER;
+
+    fn hash(&self) -> B256 {
+        self.bundle_hash
+    }
+
+    fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {
+        (self, builder_name).into()
     }
 }
 
