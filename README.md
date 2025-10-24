@@ -1,11 +1,11 @@
-# FlowLink
+# FlowProxy
 
-[![Lints](https://github.com/buildernet/flowlink/actions/workflows/lint.yml/badge.svg)](https://github.com/buildernet/flowlink/actions/workflows/lint.yml)
-[![Unit Tests](https://github.com/buildernet/flowlink/actions/workflows/unit.yml/badge.svg)](https://github.com/buildernet/flowlink/actions/workflows/unit.yml)
-[![Integration Tests](https://github.com/buildernet/flowlink/actions/workflows/integration.yml/badge.svg)](https://github.com/buildernet/flowlink/actions/workflows/integration.yml)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/buildernet/flowlink)
+[![Lints](https://github.com/buildernet/flowproxy/actions/workflows/lint.yml/badge.svg)](https://github.com/buildernet/flowproxy/actions/workflows/lint.yml)
+[![Unit Tests](https://github.com/buildernet/flowproxy/actions/workflows/unit.yml/badge.svg)](https://github.com/buildernet/flowproxy/actions/workflows/unit.yml)
+[![Integration Tests](https://github.com/buildernet/flowproxy/actions/workflows/integration.yml/badge.svg)](https://github.com/buildernet/flowproxy/actions/workflows/integration.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/buildernet/flowproxy)
 
-![](logo.png)
+![](logo.jpg)
 
 This is the second version of the [BuilderNet](https://buildernet.org) orderflow proxy, designed to be highly performant, reliable and efficient. The proxy is responsible for receiving, validating, prioritizing, and forwarding orderflow to all BuilderNet builders. It is built in Rust and uses the [Tokio](https://tokio.rs) asynchronous runtime.
 
