@@ -40,17 +40,17 @@ FROM build-shadow AS build-proxy
 RUN apt-get install -y libssl-dev
 
 # Note: the docker context must be the root of the git project due to this COPY
-COPY . /root/buildernet-orderflow-proxy
+COPY . /root/flowproxy
 
 # Build the orderflow proxy
-WORKDIR /root/buildernet-orderflow-proxy
+WORKDIR /root/flowproxy
 RUN cargo build --profile profiling
 
 # Build the mock of the hub used in shadow
-WORKDIR /root/buildernet-orderflow-proxy/simulation/mockhub
+WORKDIR /root/flowproxy/simulation/mockhub
 RUN cargo build --release
 
-WORKDIR /root/buildernet-orderflow-proxy/simulation/submitter
+WORKDIR /root/flowproxy/simulation/submitter
 RUN cargo build --release
 
 RUN cargo install --locked flamegraph
@@ -69,9 +69,9 @@ COPY simulation/testdata/ /root/testdata/
 
 # Copy the compiled binaries and libraries to the fresh image
 COPY --from=build-proxy /root/.local/bin/shadow .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/target/profiling/buildernet-orderflow-proxy .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/mockhub/target/release/mockhub .
-COPY --from=build-proxy /root/buildernet-orderflow-proxy/simulation/submitter/target/release/submitter .
+COPY --from=build-proxy /root/flowproxy/target/profiling/flowproxy .
+COPY --from=build-proxy /root/flowproxy/simulation/mockhub/target/release/mockhub .
+COPY --from=build-proxy /root/flowproxy/simulation/submitter/target/release/submitter .
 # These shadow libraries have to be in /lib according to readelf
 COPY --from=build-proxy /root/.local/lib /lib
 
