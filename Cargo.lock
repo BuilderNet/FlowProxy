@@ -2830,7 +2830,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "flowlink"
+name = "flowproxy"
 version = "1.1.2"
 dependencies = [
  "alloy-consensus",

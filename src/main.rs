@@ -1,5 +1,5 @@
 use clap::Parser;
-use flowlink::{
+use flowproxy::{
     cli::OrderflowIngressArgs,
     init_tracing,
     runner::{CliContext, CliRunner},
@@ -32,7 +32,7 @@ fn main() {
 
     let runner = CliRunner::from_runtime(tokio_runtime);
 
-    let command = |ctx: CliContext| flowlink::run(OrderflowIngressArgs::parse(), ctx);
+    let command = |ctx: CliContext| flowproxy::run(OrderflowIngressArgs::parse(), ctx);
 
     if let Err(e) = runner.run_command_until_exit(command) {
         eprintln!("Orderflow proxy terminated with error: {e}");

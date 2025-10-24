@@ -63,7 +63,7 @@ pub mod shutdown;
 ///
 /// ```
 /// # async fn t() {
-/// use flowlink::tasks::{TaskSpawner, TokioTaskExecutor};
+/// use flowproxy::tasks::{TaskSpawner, TokioTaskExecutor};
 /// let executor = TokioTaskExecutor::default();
 ///
 /// let task = executor.spawn(Box::pin(async {
@@ -76,9 +76,9 @@ pub mod shutdown;
 /// Use the [`TaskExecutor`] that spawns task directly onto the tokio runtime via the [Handle].
 ///
 /// ```
-/// # use flowlink::tasks::TaskManager;
+/// # use flowproxy::tasks::TaskManager;
 /// fn t() {
-///  use flowlink::tasks::TaskSpawner;
+///  use flowproxy::tasks::TaskSpawner;
 /// let rt = tokio::runtime::Runtime::new().unwrap();
 /// let manager = TaskManager::new(rt.handle().clone());
 /// let executor = manager.executor();
@@ -500,7 +500,7 @@ impl TaskExecutor {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn t(executor: flowlink::tasks::TaskExecutor) {
+    /// # async fn t(executor: flowproxy::tasks::TaskExecutor) {
     ///
     /// executor.spawn_critical_with_graceful_shutdown_signal("grace", |shutdown| async move {
     ///     // await the shutdown signal
@@ -548,7 +548,7 @@ impl TaskExecutor {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn t(executor: flowlink::tasks::TaskExecutor) {
+    /// # async fn t(executor: flowproxy::tasks::TaskExecutor) {
     ///
     /// executor.spawn_with_graceful_shutdown_signal(|shutdown| async move {
     ///     // await the shutdown signal
