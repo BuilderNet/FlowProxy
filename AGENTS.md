@@ -173,7 +173,7 @@ When adding new configuration:
 ### Observability
 - **Logs**: Structured logging via `tracing` (text or JSON format with `--log.json`).
 - **Metrics**: Prometheus metrics exposed at `--metrics` endpoint (default: disabled).
-- **Tracing**: Use `RUST_LOG` environment variable for log level control (e.g., `RUST_LOG=info,buildernet_orderflow_proxy=debug`).
+- **Tracing**: Use `RUST_LOG` environment variable for log level control (e.g., `RUST_LOG=info,flowlink=debug`).
 
 ### Performance Considerations
 - Rate limiting is disabled by default; enable with `--enable-rate-limiting`.
