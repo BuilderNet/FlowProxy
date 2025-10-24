@@ -11,12 +11,6 @@ use crate::{
     indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
     SystemBundleDecoder,
 };
-use alloy_primitives::Address;
-use alloy_signer_local::PrivateKeySigner;
-use clap::{Args, Parser, ValueHint};
-use rbuilder_utils::clickhouse::indexer::{
-    default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
-};
 
 /// The maximum request size in bytes (10 MiB).
 const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
