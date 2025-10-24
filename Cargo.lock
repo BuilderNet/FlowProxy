@@ -5367,7 +5367,7 @@ dependencies = [
 [[package]]
 name = "rbuilder-primitives"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rbuilder?rev=1a9eeb6e22f764f285e4c3185d04e193608d1d3b#1a9eeb6e22f764f285e4c3185d04e193608d1d3b"
+source = "git+https://github.com/flashbots/rbuilder?rev=77f35b4ecd39ac547e92de2f11a7497676d3bfd4#77f35b4ecd39ac547e92de2f11a7497676d3bfd4"
 dependencies = [
  "ahash",
  "alloy-consensus",
@@ -5412,7 +5412,7 @@ dependencies = [
 [[package]]
 name = "rbuilder-utils"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rbuilder?rev=1a9eeb6e22f764f285e4c3185d04e193608d1d3b#1a9eeb6e22f764f285e4c3185d04e193608d1d3b"
+source = "git+https://github.com/flashbots/rbuilder?rev=77f35b4ecd39ac547e92de2f11a7497676d3bfd4#77f35b4ecd39ac547e92de2f11a7497676d3bfd4"
 dependencies = [
  "ahash",
  "alloy-primitives 1.4.0",
@@ -5430,6 +5430,7 @@ dependencies = [
  "rand 0.9.2",
  "redb",
  "reqwest",
+ "reth-tasks",
  "serde",
  "serde_json",
  "serde_with",

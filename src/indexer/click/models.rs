@@ -10,9 +10,7 @@ use alloy_primitives::{Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use clickhouse::Row;
 use rbuilder_primitives::BundleVersion;
-use rbuilder_utils::clickhouse_with_backup::primitives::{
-    ClickhouseIndexableOrder, ClickhouseRowExt,
-};
+use rbuilder_utils::clickhouse::backup::primitives::{ClickhouseIndexableOrder, ClickhouseRowExt};
 use time::{OffsetDateTime, UtcDateTime};
 use uuid::Uuid;
 
