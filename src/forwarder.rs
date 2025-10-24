@@ -1,10 +1,10 @@
 use crate::{
-    builderhub::BuilderHubBuilder,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
         MEV_SEND_BUNDLE_METHOD,
     },
+    ingress::builderhub,
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::{ForwarderMetrics, SystemMetrics},
     primitives::{
@@ -171,7 +171,7 @@ impl IngressForwarders {
 #[derive(Debug)]
 pub struct PeerHandle {
     /// Peer info.
-    pub info: BuilderHubBuilder,
+    pub info: builderhub::Peer,
     /// Sender to the peer forwarder.
     pub sender: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
 }

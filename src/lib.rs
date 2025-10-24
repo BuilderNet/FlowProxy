@@ -2,19 +2,13 @@
 
 use crate::{
     cache::SignerCache,
-    consts::{
-        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
-        DEFAULT_POOL_IDLE_TIMEOUT_SECS,
-    },
-    metrics::{
-        BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
-    },
+    consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
+    ingress::builderhub::{self, run_update_peers},
+    metrics::{IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics},
     primitives::SystemBundleDecoder,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
-    tasks::TaskExecutor,
 };
-use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
     extract::{DefaultBodyLimit, Request},
@@ -37,7 +31,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::net::TcpListener;
-use tracing::{level_filters::LevelFilter, *};
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
 
 pub mod cli;
@@ -46,9 +40,8 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{builderhub::PeerStore, cache::OrderCache, indexer::Indexer};
+use crate::{cache::OrderCache, indexer::Indexer};
 
-pub mod builderhub;
 mod cache;
 pub mod consts;
 pub mod entity;
@@ -119,12 +112,12 @@ pub async fn run_with_listeners(
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => signer,
         None => {
-            warn!("No orderflow signer was configured, using a random signer. Fix this by passing `--orderflow-signer <PRIVATE KEY>`");
+            tracing::warn!("No orderflow signer was configured, using a random signer. Fix this by passing `--orderflow-signer <PRIVATE KEY>`");
             PrivateKeySigner::random()
         }
     };
     let local_signer = orderflow_signer.address();
-    info!(address = %local_signer, "Orderflow signer configured");
+    tracing::info!(address = %local_signer, "Orderflow signer configured");
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
@@ -137,9 +130,9 @@ pub async fn run_with_listeners(
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
     if let Some(builder_hub_url) = args.builder_hub_url {
-        debug!(url = builder_hub_url, "Running with BuilderHub");
-        let builder_hub = builderhub::BuilderHub::new(builder_hub_url);
-        builder_hub.register(local_signer, None).await?;
+        tracing::debug!(url = builder_hub_url, "Running with BuilderHub");
+        let builder_hub = builderhub::Client::new(builder_hub_url);
+        builder_hub.register(local_signer).await?;
 
         let peers = peers.clone();
         let task_executor = ctx.task_executor.clone();
@@ -154,7 +147,7 @@ pub async fn run_with_listeners(
             .await
         });
     } else {
-        warn!("No BuilderHub URL provided, running with local peer store");
+        tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
 
         let peer_store =
@@ -237,7 +230,7 @@ pub async fn run_with_listeners(
         .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressUserMetrics>))
         .with_state(ingress.clone());
     let addr = user_listener.local_addr()?;
-    info!(target: "ingress", ?addr, "Starting user ingress server");
+    tracing::info!(target: "ingress", ?addr, "Starting user ingress server");
 
     // Spawn system facing HTTP server for accepting bundles and raw transactions.
     let system_router = Router::new()
@@ -251,7 +244,7 @@ pub async fn run_with_listeners(
         .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
-    info!(target: "ingress", ?addr, "Starting system ingress server");
+    tracing::info!(target: "ingress", ?addr, "Starting system ingress server");
 
     if let Some(builder_listener) = builder_listener {
         let builder_router = Router::new()
@@ -259,7 +252,7 @@ pub async fn run_with_listeners(
             .route("/health", get(|| async { Ok::<_, ()>(()) }))
             .with_state(ingress);
         let addr = builder_listener.local_addr()?;
-        info!(target: "ingress", ?addr, "Starting builder server");
+        tracing::info!(target: "ingress", ?addr, "Starting builder server");
 
         tokio::try_join!(
             axum::serve(user_listener, user_router),
@@ -274,95 +267,6 @@ pub async fn run_with_listeners(
     }
 
     Ok(())
-}
-
-async fn run_update_peers(
-    local_signer: Address,
-    peer_store: impl PeerStore,
-    peers: Arc<DashMap<String, PeerHandle>>,
-    disable_forwarding: bool,
-    task_executor: TaskExecutor,
-) {
-    let delay = Duration::from_secs(30);
-
-    loop {
-        let builders = match peer_store.get_peers().await {
-            Ok(builders) => builders,
-            Err(error) => {
-                BuilderHubMetrics::increment_builderhub_peer_request_failures(error.to_string());
-                error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
-                tokio::time::sleep(delay).await;
-                continue;
-            }
-        };
-
-        // Remove all peers that are no longer present in BuilderHub
-        peers.retain(|name, handle| {
-            let is_present = builders.iter().any(|b| &b.name == name);
-            if !is_present {
-                info!(target: "ingress::builderhub", peer = %name, info = ?handle.info, "Peer was removed from configuration");
-            }
-            is_present
-        });
-
-        // Update or insert builder information.
-        for builder in builders {
-            let entry = peers.entry(builder.name.clone());
-            let new_peer = match &entry {
-                dashmap::Entry::Occupied(entry) => {
-                    info!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Peer configuration was updated");
-                    entry.get().info != builder
-                }
-                dashmap::Entry::Vacant(_) => {
-                    info!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "New peer configuration");
-                    true
-                }
-            };
-
-            // Self-filter any new peers before connecting to them.
-            if new_peer && builder.orderflow_proxy.ecdsa_pubkey_address != local_signer {
-                // Create a new client for each peer.
-                let mut client = reqwest::Client::builder()
-                    .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                    .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
-                    .pool_idle_timeout(Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS))
-                    .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                    .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                        DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                        builder.name.clone(),
-                    ));
-
-                debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Spawning forwarder");
-
-                // If the TLS certificate is present, use HTTPS and configure the client to use it.
-                if let Some(ref tls_cert) = builder.tls_certificate() {
-                    client = client.https_only(true).add_root_certificate(tls_cert.clone())
-                }
-
-                if disable_forwarding {
-                    warn!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Skipped spawning forwarder (disabled forwarding)");
-                    continue;
-                }
-
-                let client = client.build().expect("Failed to build client");
-
-                let sender = spawn_forwarder(
-                    builder.name.clone(),
-                    builder.system_api(),
-                    client.clone(),
-                    task_executor.clone(),
-                )
-                .expect("malformed url");
-
-                debug!(target: "ingress::builderhub", peer = %builder.name, info = ?builder, "Inserting peer configuration");
-                entry.insert(PeerHandle { info: builder, sender });
-            }
-        }
-
-        BuilderHubMetrics::builderhub_peer_count(peers.len());
-
-        tokio::time::sleep(delay).await;
-    }
 }
 
 /// Start prometheus at provider address.
