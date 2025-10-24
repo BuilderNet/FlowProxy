@@ -60,7 +60,7 @@ hosts:
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
-        RUST_LOG: buildernet_orderflow_proxy=info,ingress=info,forwarder=info
+        RUST_LOG: flowlink=info,ingress=info,forwarder=info
   proxy2:
     network_node_id: 1
     ip_addr: 10.0.0.4
@@ -75,4 +75,4 @@ hosts:
       shutdown_time: 4m
       expected_final_state: { exited: 0 }
       environment:
-        RUST_LOG: buildernet_orderflow_proxy=info,ingress=info,forwarder=info
+        RUST_LOG: flowlink=info,ingress=info,forwarder=info

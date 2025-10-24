@@ -1,12 +1,12 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
-use buildernet_orderflow_proxy::{
+use flate2::{write::GzEncoder, Compression};
+use flowlink::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
     utils::testutils::Random,
 };
-use flate2::{write::GzEncoder, Compression};
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use reqwest::{header, StatusCode};
 use serde_json::json;
@@ -18,7 +18,7 @@ use common::spawn_ingress;
 use crate::common::BuilderReceiver;
 
 mod assert {
-    use buildernet_orderflow_proxy::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
+    use flowlink::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
 
     pub(crate) async fn jsonrpc_error(response: reqwest::Response, expected: JsonRpcError) {
         let body = response.bytes().await.unwrap();

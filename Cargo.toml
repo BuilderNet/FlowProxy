@@ -1,5 +1,5 @@
 [package]
-name = "buildernet-orderflow-proxy"
+name = "flowlink"
 version = "1.1.2"
 edition = "2021"
 publish = false

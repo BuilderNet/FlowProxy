@@ -1,9 +1,9 @@
-use buildernet_orderflow_proxy::{
+use clap::Parser;
+use flowlink::{
     cli::OrderflowIngressArgs,
     init_tracing,
     runner::{CliContext, CliRunner},
 };
-use clap::Parser;
 
 #[cfg(all(feature = "jemalloc", unix))]
 type AllocatorInner = tikv_jemallocator::Jemalloc;
@@ -32,8 +32,7 @@ fn main() {
 
     let runner = CliRunner::from_runtime(tokio_runtime);
 
-    let command =
-        |ctx: CliContext| buildernet_orderflow_proxy::run(OrderflowIngressArgs::parse(), ctx);
+    let command = |ctx: CliContext| flowlink::run(OrderflowIngressArgs::parse(), ctx);
 
     if let Err(e) = runner.run_command_until_exit(command) {
         eprintln!("Orderflow proxy terminated with error: {e}");
