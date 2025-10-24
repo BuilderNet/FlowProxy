@@ -24,7 +24,7 @@ use rbuilder_primitives::{
     Bundle, BundleReplacementData, ShareBundle,
 };
 use revm_primitives::B256;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -32,8 +32,6 @@ use crate::{
     consts::{ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
     priority::Priority,
 };
-
-pub mod backoff;
 
 /// Metadata about a [`SystemBundle`].
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -531,8 +529,8 @@ impl SystemTransaction {
 
 /// The receipt of a bundle received from the system endpoint, to be indexed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// The hash of the raw bundle.
 pub struct BundleReceipt {
-    /// The hash of the raw bundle.
     pub bundle_hash: B256,
     /// The time the bundle has been sent, according to the field provided in the JSON-RPC request
     /// header. `None` if the bundle was sent on the user endpoint.
@@ -695,76 +693,6 @@ impl Samplable for B256 {
         first.copy_from_slice(&self.0[..8]);
         let every = every as u64;
         u64::from_be_bytes(first) % every == 0
-    }
-}
-
-/// A simple sampler that executes a closure every `sample_size` calls, or if a certain amount of
-/// time has passed since last sampling call.
-#[derive(Debug, Clone)]
-pub struct Sampler {
-    sample_size: usize,
-    counter: usize,
-    start: Instant,
-    interval: Duration,
-}
-
-impl Default for Sampler {
-    fn default() -> Self {
-        Self {
-            sample_size: 4096,
-            counter: 0,
-            start: Instant::now(),
-            interval: Duration::from_secs(10),
-        }
-    }
-}
-
-impl Sampler {
-    pub fn with_sample_size(mut self, sample_size: usize) -> Self {
-        self.sample_size = sample_size;
-        self
-    }
-
-    pub fn with_interval(mut self, interval: Duration) -> Self {
-        self.start = Instant::now() - interval;
-        self
-    }
-
-    /// Call this function to potentially execute the sample closure if we have reached the sample
-    /// size, or enough time has passed. Otherwise, it increments the internal counter.
-    pub fn sample(&mut self, f: impl FnOnce()) {
-        if self.counter >= self.sample_size || self.start.elapsed() >= self.interval {
-            self.counter = 0;
-            self.start = Instant::now();
-            f();
-        } else {
-            self.counter += 1;
-        }
-    }
-}
-
-/// Equilalent of `clickhouse::inserter::Quantities` with more traits derived.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct Quantities {
-    pub bytes: u64,
-    pub rows: u64,
-    pub transactions: u64,
-}
-
-impl Quantities {
-    /// Just zero quantities, nothing special.
-    pub const ZERO: Quantities = Quantities { bytes: 0, rows: 0, transactions: 0 };
-}
-
-impl From<clickhouse::inserter::Quantities> for Quantities {
-    fn from(value: clickhouse::inserter::Quantities) -> Self {
-        Self { bytes: value.bytes, rows: value.rows, transactions: value.transactions }
-    }
-}
-
-impl From<Quantities> for clickhouse::inserter::Quantities {
-    fn from(value: Quantities) -> Self {
-        Self { bytes: value.bytes, rows: value.rows, transactions: value.transactions }
     }
 }
 

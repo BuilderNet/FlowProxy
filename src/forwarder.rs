@@ -12,7 +12,6 @@ use crate::{
         UtcInstant, WithEncoding,
     },
     priority::{pchannel, Priority},
-    tasks::TaskExecutor,
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::Address;
@@ -22,6 +21,7 @@ use axum::http::HeaderValue;
 use dashmap::DashMap;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{header::CONTENT_TYPE, HeaderMap, StatusCode};
+use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use revm_primitives::keccak256;
 use serde_json::json;
@@ -68,7 +68,7 @@ impl IngressForwarders {
     }
 
     /// Broadcast bundle to all forwarders.
-    pub fn broadcast_bundle(&self, bundle: SystemBundle) {
+    pub(crate) fn broadcast_bundle(&self, bundle: SystemBundle) {
         let encoded_bundle = bundle.encode();
 
         // Create local request first

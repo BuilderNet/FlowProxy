@@ -3,15 +3,12 @@ use std::path::PathBuf;
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
+use rbuilder_utils::clickhouse::indexer::{
+    default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
+};
 
 use crate::{
-    indexer::{
-        click::{
-            default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES,
-            MAX_MEMORY_BACKUP_SIZE_BYTES,
-        },
-        BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
-    },
+    indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
     SystemBundleDecoder,
 };
 

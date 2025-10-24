@@ -12,6 +12,7 @@ use arrow::{
     error::Result as ArrowResult,
 };
 use parquet::{arrow::ArrowWriter, file::properties::WriterPropertiesBuilder};
+use rbuilder_utils::{metrics::Sampler, tasks::TaskExecutor};
 use tokio::{sync::mpsc, time::Instant};
 
 use std::{
@@ -25,8 +26,7 @@ use crate::{
     cli::ParquetArgs,
     indexer::{OrderReceivers, TARGET},
     metrics::IndexerMetrics,
-    primitives::{BundleReceipt, Sampler},
-    tasks::TaskExecutor,
+    primitives::BundleReceipt,
 };
 
 /// The Arrow schema for bundle receipts.
@@ -270,6 +270,7 @@ impl ParquetRunner {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, B256, U32};
+    use rbuilder_utils::tasks::TaskManager;
     use time::UtcDateTime;
 
     // Uncomment to enable logging during tests.
@@ -281,7 +282,6 @@ mod tests {
         indexer::{self, parq::ParquetIndexer},
         primitives::BundleReceipt,
         priority::Priority,
-        tasks::TaskManager,
         utils::testutils::Random,
     };
 
