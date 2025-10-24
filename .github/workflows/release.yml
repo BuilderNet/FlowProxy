@@ -46,5 +46,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: buildernet-orderflow-proxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
-          path: target/x86_64-unknown-linux-gnu/reproducible/buildernet-orderflow-proxy
+          name: flowproxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/reproducible/flowproxy

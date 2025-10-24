@@ -22,12 +22,12 @@ jobs:
       - name: Build reproducible binary
         run: |
           just build-reproducible
-          mv target/x86_64-unknown-linux-gnu/reproducible/buildernet-orderflow-proxy buildernet-orderflow-proxy-1
+          mv target/x86_64-unknown-linux-gnu/reproducible/flowproxy flowproxy-1
       - name: Clean cache
         run: cargo clean && cargo cache -a
       - name: Build reproducible binary again
         run: |
           just build-reproducible
-          mv target/x86_64-unknown-linux-gnu/reproducible/buildernet-orderflow-proxy buildernet-orderflow-proxy-2
+          mv target/x86_64-unknown-linux-gnu/reproducible/flowproxy flowproxy-2
       - name: Compare binaries
-        run: cmp buildernet-orderflow-proxy-1 buildernet-orderflow-proxy-2
+        run: cmp flowproxy-1 flowproxy-2

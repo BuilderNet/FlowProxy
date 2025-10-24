@@ -46,7 +46,7 @@ pub(crate) fn default_disk_backup_database_path() -> String {
 
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         PathBuf::from(home)
-            .join(".buildernet-orderflow-proxy")
+            .join(".flowproxy")
             .join("clickhouse_backup.db")
             .to_string_lossy()
             .to_string()
