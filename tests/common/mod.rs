@@ -7,7 +7,7 @@ use alloy_primitives::Bytes;
 use alloy_signer::Signer;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{extract::State, routing::post, Router};
-use flowlink::{
+use flowproxy::{
     cli::OrderflowIngressArgs,
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_decompress,
@@ -36,11 +36,11 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
-    let task_manager = flowlink::tasks::TaskManager::current();
+    let task_manager = flowproxy::tasks::TaskManager::current();
 
     tokio::spawn(
         async move {
-            flowlink::run_with_listeners(
+            flowproxy::run_with_listeners(
                 args,
                 user_listener,
                 system_listener,

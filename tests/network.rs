@@ -6,7 +6,7 @@ mod common;
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use common::{spawn_ingress, BuilderReceiver};
-use flowlink::utils::testutils::Random as _;
+use flowproxy::utils::testutils::Random as _;
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 
 /// This tests proper order propagation between 2 proxies.

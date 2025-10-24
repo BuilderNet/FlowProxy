@@ -3,14 +3,14 @@ use std::hint::black_box;
 use alloy_primitives::{keccak256, Address};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use flowlink::{
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use flowproxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_verify_signature,
     primitives::{SystemBundleDecoder, SystemBundleMetadata, UtcInstant},
     priority::Priority,
     utils::testutils::Random,
 };
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use hyper::HeaderMap;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rbuilder_primitives::serialize::RawBundle;

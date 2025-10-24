@@ -2,7 +2,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
 use flate2::{write::GzEncoder, Compression};
-use flowlink::{
+use flowproxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
     jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
     utils::testutils::Random,
@@ -18,7 +18,7 @@ use common::spawn_ingress;
 use crate::common::BuilderReceiver;
 
 mod assert {
-    use flowlink::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
+    use flowproxy::jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy};
 
     pub(crate) async fn jsonrpc_error(response: reqwest::Response, expected: JsonRpcError) {
         let body = response.bytes().await.unwrap();
