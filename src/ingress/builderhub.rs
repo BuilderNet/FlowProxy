@@ -274,11 +274,13 @@ pub async fn run_update_peers(
 
                 tracing::debug!("inserting configuration");
                 entry.insert(PeerHandle { info: builder, sender });
+                drop(_peer_guard);
             }
         }
 
         BuilderHubMetrics::builderhub_peer_count(peers.len());
 
+        drop(_guard);
         tokio::time::sleep(delay).await;
     }
 }
