@@ -6,7 +6,7 @@ use revm_primitives::Address;
 use serde::{Deserialize, Serialize};
 use tracing::error;
 
-use crate::{consts::DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SYSTEM_PORT};
+use crate::{clients::DEFAULT_HTTP_TIMEOUT_SECS, DEFAULT_SYSTEM_PORT};
 
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct BuilderHubOrderflowProxyCredentials {
