@@ -1,8 +1,8 @@
 # FlowProxy
 
-[![Lints](https://github.com/buildernet/flowproxy/actions/workflows/lint.yml/badge.svg)](https://github.com/buildernet/flowproxy/actions/workflows/lint.yml)
-[![Unit Tests](https://github.com/buildernet/flowproxy/actions/workflows/unit.yml/badge.svg)](https://github.com/buildernet/flowproxy/actions/workflows/unit.yml)
-[![Integration Tests](https://github.com/buildernet/flowproxy/actions/workflows/integration.yml/badge.svg)](https://github.com/buildernet/flowproxy/actions/workflows/integration.yml)
+[![Lints](https://github.com/buildernet/flowproxy/actions/workflows/lint.yml/badge.svg?branch=main)](https://github.com/buildernet/flowproxy/actions/workflows/lint.yml)
+[![Unit Tests](https://github.com/buildernet/flowproxy/actions/workflows/unit.yml/badge.svg?branch=main)](https://github.com/buildernet/flowproxy/actions/workflows/unit.yml)
+[![Integration Tests](https://github.com/buildernet/flowproxy/actions/workflows/integration.yml/badge.svg?branch=main)](https://github.com/buildernet/flowproxy/actions/workflows/integration.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/buildernet/flowproxy)
 
 ![](logo.jpg)
