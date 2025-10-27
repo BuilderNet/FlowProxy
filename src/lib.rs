@@ -210,7 +210,10 @@ pub async fn run_with_listeners(
     tokio::spawn({
         let ingress = ingress.clone();
         async move {
-            ingress.maintain(Duration::from_secs(60)).await;
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                ingress.maintenance().await;
+            }
         }
     });
 
