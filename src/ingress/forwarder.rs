@@ -1,10 +1,10 @@
 use crate::{
+    builderhub,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
         ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
         MEV_SEND_BUNDLE_METHOD,
     },
-    ingress::builderhub,
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::{ForwarderMetrics, SystemMetrics},
     primitives::{
@@ -36,8 +36,6 @@ use std::{
 use time::UtcDateTime;
 use tokio::sync::mpsc;
 use tracing::*;
-
-const FORWARDER: &str = "ingress::forwarder";
 
 #[derive(Debug)]
 pub struct IngressForwarders {
@@ -84,7 +82,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: FORWARDER, name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -104,7 +102,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: FORWARDER, name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -124,7 +122,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(target: FORWARDER, name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        debug!(name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
         self.broadcast(forward);
     }
 
@@ -180,7 +178,7 @@ pub fn spawn_forwarder(
     name: String,
     url: String,
     client: reqwest::Client, // request client to be reused for http senders
-    task_executor: TaskExecutor,
+    task_executor: &TaskExecutor,
 ) -> eyre::Result<pchannel::UnboundedSender<Arc<ForwardingRequest>>> {
     let (request_tx, request_rx) = pchannel::unbounded_channel();
     match Url::parse(&url)?.scheme() {
@@ -367,12 +365,12 @@ impl HttpForwarder {
 
                 // Print warning if the RPC call took more than 1 second.
                 if elapsed > Duration::from_secs(1) {
-                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Long RPC call");
+                    warn!(name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Long RPC call");
                 }
 
                 if status.is_success() {
                     if status != StatusCode::OK {
-                        warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Non-OK status code");
+                        warn!(name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Non-OK status code");
                     }
 
                     // Only record success if the status is OK.
@@ -384,19 +382,19 @@ impl HttpForwarder {
                     );
                 } else {
                     // If we have a non-OK status code, also record it.
-                    error!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Error forwarding request");
+                    error!(name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Error forwarding request");
                     ForwarderMetrics::increment_http_call_failures(
                         self.peer_name.clone(),
                         status.canonical_reason().map(String::from).unwrap_or(status.to_string()),
                     );
 
                     if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
-                        error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
+                        error!(peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
                     }
                 }
             }
             Err(error) => {
-                error!(target: FORWARDER, peer_name = %self.peer_name, ?error, ?elapsed, "Error forwarding request");
+                error!(peer_name = %self.peer_name, ?error, ?elapsed, "Error forwarding request");
 
                 // Parse the reason, which is either the status code reason of the error message
                 // itself. If the request fails for non-network reasons, the status code may be
@@ -407,7 +405,7 @@ impl HttpForwarder {
                     .unwrap_or(format!("{error:?}"));
 
                 if error.is_connect() {
-                    warn!(target: FORWARDER, peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
+                    warn!(peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
                     ForwarderMetrics::increment_http_connect_failures(
                         self.peer_name.clone(),
                         reason,
@@ -436,11 +434,11 @@ impl Future for HttpForwarder {
             // Then accept new requests.
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
-                    info!(target: FORWARDER, name = %this.peer_name, "Terminating forwarder");
+                    info!(name = %this.peer_name, "Terminating forwarder");
                     return Poll::Ready(());
                 };
 
-                trace!(target: FORWARDER, name = %this.peer_name, ?request, "Sending request");
+                trace!(name = %this.peer_name, ?request, "Sending request");
                 this.pending.push(send_http_request(
                     this.client.clone(),
                     this.peer_url.clone(),
@@ -476,12 +474,12 @@ impl ResponseErrorDecoder {
             match response.json::<JsonRpcResponse<serde_json::Value>>().await {
                 Ok(body) => {
                     if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                        error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
+                        error!(peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
                         ForwarderMetrics::increment_rpc_call_failures(self.peer_name.clone(), code);
                     }
                 }
                 Err(e) => {
-                    warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
+                    warn!(?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
                     ForwarderMetrics::increment_json_rpc_decoding_failures(self.peer_name.clone());
                 }
             }

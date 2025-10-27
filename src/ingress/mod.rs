@@ -7,8 +7,8 @@ use crate::{
         UNKNOWN, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
-    forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
+    ingress::forwarder::IngressForwarders,
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{
         IngressHandlerMetricsExt as _, IngressSystemMetrics, IngressUserMetrics, SystemMetrics,
@@ -48,8 +48,8 @@ use std::{
 use time::UtcDateTime;
 use tracing::*;
 
-pub mod builderhub;
 pub mod error;
+pub mod forwarder;
 use error::IngressError;
 
 const INGRESS: &str = "ingress";

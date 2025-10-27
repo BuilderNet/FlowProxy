@@ -5,7 +5,7 @@ use std::time::Duration;
 use hyper::{Method, StatusCode};
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 
-use crate::{forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
+use crate::{ingress::forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
 
 mod name {
     /// BuilderHub metrics.

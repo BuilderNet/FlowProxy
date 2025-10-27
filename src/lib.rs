@@ -1,9 +1,9 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
+    builderhub::PeersUpdater,
     cache::SignerCache,
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
-    ingress::builderhub::{self, run_update_peers},
     metrics::{IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics},
     primitives::SystemBundleDecoder,
     runner::CliContext,
@@ -20,7 +20,7 @@ use axum::{
 use dashmap::DashMap;
 use entity::SpamThresholds;
 use eyre::Context as _;
-use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use ingress::forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
@@ -42,10 +42,10 @@ use ingress::OrderflowIngress;
 
 use crate::{cache::OrderCache, indexer::Indexer};
 
+pub mod builderhub;
 mod cache;
 pub mod consts;
 pub mod entity;
-pub mod forwarder;
 pub mod indexer;
 pub mod jsonrpc;
 pub mod metrics;
@@ -129,23 +129,21 @@ pub async fn run_with_listeners(
         .build()?;
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
+
     if let Some(builder_hub_url) = args.builder_hub_url {
         tracing::debug!(url = builder_hub_url, "Running with BuilderHub");
         let builder_hub = builderhub::Client::new(builder_hub_url);
         builder_hub.register(local_signer).await?;
 
-        let peers = peers.clone();
-        let task_executor = ctx.task_executor.clone();
-        ctx.task_executor.spawn_critical("run_update_peers", async move {
-            run_update_peers(
-                local_signer,
-                builder_hub,
-                peers,
-                args.disable_forwarding,
-                task_executor,
-            )
-            .await
-        });
+        let peer_updater = PeersUpdater::new(
+            local_signer,
+            builder_hub,
+            peers.clone(),
+            args.disable_forwarding,
+            ctx.task_executor.clone(),
+        );
+
+        ctx.task_executor.spawn_critical("run_update_peers", peer_updater.run());
     } else {
         tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
@@ -154,19 +152,15 @@ pub async fn run_with_listeners(
             local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
 
         let peers = peers.clone();
-        let task_executor = ctx.task_executor.clone();
-        ctx.task_executor.spawn_critical("local_update_peers", {
-            async move {
-                run_update_peers(
-                    local_signer,
-                    peer_store,
-                    peers,
-                    args.disable_forwarding,
-                    task_executor.clone(),
-                )
-                .await
-            }
-        });
+        let peer_updater = PeersUpdater::new(
+            local_signer,
+            peer_store,
+            peers.clone(),
+            args.disable_forwarding,
+            ctx.task_executor.clone(),
+        );
+
+        ctx.task_executor.spawn_critical("local_update_peers", peer_updater.run());
     }
 
     // Spawn forwarders
@@ -176,7 +170,7 @@ pub async fn run_with_listeners(
             String::from("local-builder"),
             builder_url.to_string(),
             client.clone(),
-            ctx.task_executor.clone(),
+            &ctx.task_executor,
         )?;
 
         IngressForwarders::new(local_sender, peers, orderflow_signer)
