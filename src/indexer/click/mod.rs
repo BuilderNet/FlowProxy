@@ -166,7 +166,7 @@ pub(crate) mod tests {
         indexer::{
             click::{
                 models::{BundleReceiptRow, BundleRow},
-                ClickhouseClientConfig, ClickhouseIndexer, NullMetrics,
+                ClickhouseClientConfig, ClickhouseIndexer,
             },
             tests::{bundle_receipt_example, system_bundle_example},
             OrderSenders, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET,
@@ -174,7 +174,13 @@ pub(crate) mod tests {
     };
     use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
     use rbuilder_utils::{
-        clickhouse::indexer::default_disk_backup_database_path, tasks::TaskManager,
+        clickhouse::{
+            backup::{metrics::NullMetrics, Backup, DiskBackup, DiskBackupConfig, FailedCommit},
+            indexer::default_disk_backup_database_path,
+            Quantities,
+        },
+        spawn_clickhouse_backup,
+        tasks::TaskManager,
     };
     use testcontainers::{
         core::{
