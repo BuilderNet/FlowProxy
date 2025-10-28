@@ -135,10 +135,12 @@ impl OrderflowIngress {
         tracing::info!(entries = len_after, num_removed, "performed state maintenance");
     }
 
-    #[tracing::instrument(
-        skip_all, 
-        name = "ingress", 
-        fields(handler = "user", id = %short_uuid_v4()))]
+    #[tracing::instrument(skip_all, name = "ingress",
+        fields(
+            handler = "user", 
+            id = %short_uuid_v4(),
+            method = tracing::field::Empty,
+        ))]
     pub async fn user_handler(
         State(ingress): State<Arc<Self>>,
         headers: HeaderMap,
@@ -186,22 +188,20 @@ impl OrderflowIngress {
                 return JsonRpcResponse::error(Value::Null, e);
             }
         };
-        tracing::Span::current().record("method", &request.method);
+        tracing::Span::current().record("method", tracing::field::display(&request.method));
 
         // Explicitly change the mutability of the `entity` variable.
         if let Some(mut data) = ingress.entity_data(entity) {
             data.scores.score_mut(received_at.into()).number_of_requests += 1;
         }
 
-
         tracing::trace!(?entity, params = ?request.params, "serving user json-rpc request");
 
         let result = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
                 let Some(Ok(bundle)) = request.take_single_param().map(|p| {
-                    serde_json::from_value::<RawBundle>(p).inspect_err(
-                        |e| tracing::trace!(?e, body_utf8, "failed to parse bundle"),
-                    )
+                    serde_json::from_value::<RawBundle>(p)
+                        .inspect_err(|e| tracing::trace!(?e, body_utf8, "failed to parse bundle"))
                 }) else {
                     IngressUserMetrics::increment_json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD);
                     return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
@@ -232,14 +232,14 @@ impl OrderflowIngress {
                     ETH_SEND_RAW_TRANSACTION_METHOD,
                 );
 
-                ingress.send_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
+                ingress.on_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
             MEV_SEND_BUNDLE_METHOD => {
-                let Some(Ok(bundle)) =
-                    request.take_single_param().map(|p| serde_json::from_value::<RawShareBundle>(p).inspect_err(
-                        |e| tracing::trace!(?e, body_utf8, "failed to parse mev share bundle"),
-                    ))
-                else {
+                let Some(Ok(bundle)) = request.take_single_param().map(|p| {
+                    serde_json::from_value::<RawShareBundle>(p).inspect_err(|e| {
+                        tracing::trace!(?e, body_utf8, "failed to parse mev share bundle")
+                    })
+                }) else {
                     IngressUserMetrics::increment_json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD);
                     return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
                 };
@@ -314,10 +314,14 @@ impl OrderflowIngress {
         Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
     }
 
-    #[tracing::instrument(
-        skip_all, 
-        name = "ingress", 
-        fields(handler = "system", id = %short_uuid_v4()))]
+    #[tracing::instrument(skip_all, name = "ingress", 
+        fields(
+            handler = "system", 
+            id = %short_uuid_v4(),
+            method = tracing::field::Empty,
+            hash = tracing::field::Empty,
+            peer = tracing::field::Empty
+        ))]
     pub async fn system_handler(
         State(ingress): State<Arc<Self>>,
         headers: HeaderMap,
@@ -388,7 +392,11 @@ impl OrderflowIngress {
                 let bundle = match serde_json::from_value::<RawBundle>(raw.clone()) {
                     Ok(b) => b,
                     Err(e) => {
-                        tracing::error!(?e, body_utf8 = body_utf8(), "failed to parse raw bundle from system request");
+                        tracing::error!(
+                            ?e,
+                            body_utf8 = body_utf8(),
+                            "failed to parse raw bundle from system request"
+                        );
                         IngressSystemMetrics::increment_json_rpc_parse_errors(
                             ETH_SEND_BUNDLE_METHOD,
                         );
@@ -560,6 +568,13 @@ impl OrderflowIngress {
     }
 
     /// Handles a new bundle.
+    #[tracing::instrument(skip_all, name = "bundle", 
+        fields(
+            hash = tracing::field::Empty,
+            signer = tracing::field::Empty,
+            priority = tracing::field::Empty,
+            uuid = tracing::field::Empty,
+        ))]
     async fn on_bundle(
         &self,
         entity: Entity,
@@ -577,9 +592,9 @@ impl OrderflowIngress {
         // above).
         let bundle_hash = bundle.bundle_hash();
 
-        tracing::Span::current().record("hash", format!("{bundle_hash:?}"));
-        tracing::Span::current().record("signer", format!("{signer:?}"));
-        tracing::Span::current().record("priority", priority.as_str());
+        tracing::Span::current().record("hash", tracing::field::display(bundle_hash));
+        tracing::Span::current().record("signer", tracing::field::display(signer));
+        tracing::Span::current().record("priority", tracing::field::display(priority.as_str()));
 
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
@@ -591,7 +606,6 @@ impl OrderflowIngress {
             bundle.metadata.replacement_nonce =
                 Some(timestamp.try_into().expect("Timestamp too large"));
         }
-
 
         let sample = bundle_hash.sample(10);
         if self.order_cache.contains(&bundle_hash) {
@@ -632,7 +646,6 @@ impl OrderflowIngress {
             })?;
 
         let elapsed = start.elapsed();
-        tracing::Span::current().record("uuid", format!("{}", bundle.uuid()));
 
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
@@ -664,6 +677,12 @@ impl OrderflowIngress {
     }
 
     /// Handles a new mev share bundle.
+    #[tracing::instrument(skip_all, name = "mev_share_bundle", 
+        fields(
+            hash = tracing::field::Empty,
+            signer = tracing::field::Empty,
+            priority = tracing::field::Empty,
+        ))]
     async fn on_mev_share_bundle(
         &self,
         entity: Entity,
@@ -678,9 +697,9 @@ impl OrderflowIngress {
         // Deduplicate bundles.
         let bundle_hash = bundle.bundle_hash();
 
-        tracing::Span::current().record("hash", format!("{bundle_hash:?}"));
-        tracing::Span::current().record("signer", format!("{signer:?}"));
-        tracing::Span::current().record("priority", priority.as_str());
+        tracing::Span::current().record("hash", tracing::field::display(bundle_hash));
+        tracing::Span::current().record("signer", tracing::field::display(signer));
+        tracing::Span::current().record("priority", tracing::field::display(priority.as_str()));
 
         if self.order_cache.contains(&bundle_hash) {
             tracing::trace!("already processed");
@@ -727,33 +746,13 @@ impl OrderflowIngress {
         self.send_mev_share_bundle(priority, bundle).await
     }
 
-    async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
-        let bundle_hash = bundle.bundle_hash();
-        let priority = bundle.metadata.priority;
-        let received_at = bundle.metadata.received_at;
-
-        // Send request to all forwarders.
-        self.forwarders.broadcast_bundle(bundle);
-
-        IngressUserMetrics::record_bundle_rpc_duration(priority, received_at.elapsed());
-        Ok(bundle_hash)
-    }
-
-    async fn send_mev_share_bundle(
-        &self,
-        priority: Priority,
-        bundle: SystemMevShareBundle,
-    ) -> Result<B256, IngressError> {
-        let bundle_hash = bundle.bundle_hash();
-        let received_at = bundle.received_at;
-
-        self.forwarders.broadcast_mev_share_bundle(priority, bundle);
-
-        IngressUserMetrics::record_mev_share_bundle_rpc_duration(priority, received_at.elapsed());
-        Ok(bundle_hash)
-    }
-
-    async fn send_raw_transaction(
+    #[tracing::instrument(skip_all, name = "transaction", 
+        fields(
+            hash = tracing::field::Empty,
+            signer = tracing::field::Empty,
+            priority = tracing::field::Empty,
+        ))]
+    async fn on_raw_transaction(
         &self,
         entity: Entity,
         transaction: EthereumTransaction,
@@ -762,10 +761,12 @@ impl OrderflowIngress {
         let start = Instant::now();
 
         let Entity::Signer(signer) = entity else { unreachable!() };
-        tracing::Span::current().record("signer", format!("{signer:?}"));
-
         let tx_hash = *transaction.hash();
-        tracing::Span::current().record("hash", format!("{tx_hash:?}"));
+        let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
+
+        tracing::Span::current().record("hash", tracing::field::display(tx_hash));
+        tracing::Span::current().record("signer", tracing::field::display(signer));
+        tracing::Span::current().record("priority", tracing::field::display(priority.as_str()));
 
         // Deduplicate transactions.
         if self.order_cache.contains(&tx_hash) {
@@ -780,8 +781,6 @@ impl OrderflowIngress {
         }
 
         self.order_cache.insert(tx_hash);
-
-        let priority = self.priority_for(entity, EntityRequest::PrivateTx(&transaction));
 
         let system_transaction =
             SystemTransaction::from_transaction(transaction, signer, received_at, priority);
@@ -810,6 +809,32 @@ impl OrderflowIngress {
         IngressUserMetrics::record_transaction_rpc_duration(priority, received_at.elapsed());
 
         Ok(tx_hash)
+    }
+
+    async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
+        let bundle_hash = bundle.bundle_hash();
+        let priority = bundle.metadata.priority;
+        let received_at = bundle.metadata.received_at;
+
+        // Send request to all forwarders.
+        self.forwarders.broadcast_bundle(bundle);
+
+        IngressUserMetrics::record_bundle_rpc_duration(priority, received_at.elapsed());
+        Ok(bundle_hash)
+    }
+
+    async fn send_mev_share_bundle(
+        &self,
+        priority: Priority,
+        bundle: SystemMevShareBundle,
+    ) -> Result<B256, IngressError> {
+        let bundle_hash = bundle.bundle_hash();
+        let received_at = bundle.received_at;
+
+        self.forwarders.broadcast_mev_share_bundle(priority, bundle);
+
+        IngressUserMetrics::record_mev_share_bundle_rpc_duration(priority, received_at.elapsed());
+        Ok(bundle_hash)
     }
 
     #[tracing::instrument(skip_all, name = "builder_handler", fields(count = data.len()))]
