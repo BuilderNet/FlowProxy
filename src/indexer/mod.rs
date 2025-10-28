@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 
+use rbuilder_utils::tasks::TaskExecutor;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -10,7 +11,6 @@ use crate::{
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, SystemBundle},
-    tasks::TaskExecutor,
 };
 
 pub(crate) mod click;
@@ -42,7 +42,7 @@ pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-
 const TARGET: &str = "indexer";
 
 /// Trait for adding order indexing functionality.
-pub trait OrderIndexer: Sync + Send {
+pub(crate) trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt);
 }

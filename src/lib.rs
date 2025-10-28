@@ -54,7 +54,6 @@ pub mod priority;
 pub mod rate_limit;
 pub mod runner;
 pub mod statics;
-pub mod tasks;
 pub mod trace;
 pub mod utils;
 pub mod validation;

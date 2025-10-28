@@ -5,13 +5,13 @@ use crate::{
     },
     ingress::forwarder::{spawn_forwarder, PeerHandle},
     metrics::BuilderHubMetrics,
-    tasks::TaskExecutor,
     utils, DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
 use std::{convert::Infallible, fmt::Debug, future::Future, sync::Arc, time::Duration};
 
+use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Certificate;
 use serde::{Deserialize, Serialize};
 
