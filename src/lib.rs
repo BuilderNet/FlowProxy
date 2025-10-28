@@ -55,22 +55,12 @@ pub mod rate_limit;
 pub mod runner;
 pub mod statics;
 pub mod tasks;
+pub mod trace;
 pub mod utils;
 pub mod validation;
 
 /// Default system port for proxy instances.
 const DEFAULT_SYSTEM_PORT: u16 = 5544;
-
-pub fn init_tracing(log_json: bool) {
-    let registry = tracing_subscriber::registry().with(
-        EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy(),
-    );
-    if log_json {
-        let _ = registry.with(tracing_subscriber::fmt::layer().json()).try_init();
-    } else {
-        let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
-    }
-}
 
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
     fdlimit::raise_fd_limit()?;

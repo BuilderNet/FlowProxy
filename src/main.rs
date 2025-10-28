@@ -1,8 +1,8 @@
 use clap::Parser;
 use flowproxy::{
     cli::OrderflowIngressArgs,
-    init_tracing,
     runner::{CliContext, CliRunner},
+    trace::init_tracing,
 };
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -23,12 +23,14 @@ static ALLOC: Allocator = new_allocator();
 
 fn main() {
     let args = OrderflowIngressArgs::parse();
-    init_tracing(args.log_json);
 
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("failed to create runtime");
+
+    let _ = tokio_runtime.handle();
+    init_tracing(args.log_json);
 
     let runner = CliRunner::from_runtime(tokio_runtime);
 

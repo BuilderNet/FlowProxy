@@ -276,6 +276,7 @@ impl OrderflowIngress {
             }
         };
 
+        trace!(elapsed = ?received_at.instant.elapsed(), "processed json-rpc request");
         response
     }
 
@@ -554,6 +555,7 @@ impl OrderflowIngress {
         // Send request only to the local builder forwarder.
         ingress.forwarders.send_to_local(priority, &request.method, raw, received_at);
 
+        trace!(elapsed = ?received_at.instant.elapsed(), "processed json-rpc request");
         JsonRpcResponse::result(request.id, response)
     }
 
@@ -565,12 +567,19 @@ impl OrderflowIngress {
         received_at: UtcInstant,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
+
         // Convert to system bundle.
         let Entity::Signer(signer) = entity else { unreachable!() };
         bundle.metadata.signing_address = Some(signer);
-        tracing::Span::current().record("signer", format!("{signer:?}"));
-
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
+        // Deduplicate bundles.
+        // IMPORTANT: For correct cancellation deduplication, the replacement nonce must be set (see
+        // above).
+        let bundle_hash = bundle.bundle_hash();
+
+        tracing::Span::current().record("hash", format!("{bundle_hash:?}"));
+        tracing::Span::current().record("signer", format!("{signer:?}"));
+        tracing::Span::current().record("priority", priority.as_str());
 
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
@@ -582,12 +591,6 @@ impl OrderflowIngress {
             bundle.metadata.replacement_nonce =
                 Some(timestamp.try_into().expect("Timestamp too large"));
         }
-
-        // Deduplicate bundles.
-        // IMPORTANT: For correct cancellation deduplication, the replacement nonce must be set (see
-        // above).
-        let bundle_hash = bundle.bundle_hash();
-        tracing::Span::current().record("hash", format!("{bundle_hash:?}"));
 
 
         let sample = bundle_hash.sample(10);
@@ -628,15 +631,18 @@ impl OrderflowIngress {
                 IngressUserMetrics::increment_validation_errors(&e);
             })?;
 
+        let elapsed = start.elapsed();
+        tracing::Span::current().record("uuid", format!("{}", bundle.uuid()));
+
         match bundle.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => {
-                tracing::debug!("decoded new bundle");
+                tracing::debug!(?elapsed, "decoded new bundle");
                 for tx in &bundle.txs {
                     self.signer_cache.insert(tx.hash(), tx.signer());
                 }
             }
             DecodedBundle::EmptyReplacement(replacement_data) => {
-                tracing::debug!(?replacement_data, "decoded replacement bundle");
+                tracing::debug!(?elapsed, ?replacement_data, "decoded replacement bundle");
             }
         }
 
@@ -651,9 +657,6 @@ impl OrderflowIngress {
         } else {
             IngressUserMetrics::record_txs_per_bundle(bundle.raw_bundle.txs.len());
         }
-
-        let elapsed = start.elapsed();
-        tracing::debug!(uuid = %bundle.uuid(), ?elapsed, "validated bundle");
 
         self.indexer_handle.index_bundle(bundle.clone());
 
@@ -671,13 +674,13 @@ impl OrderflowIngress {
 
         // Convert to system bundle.
         let Entity::Signer(signer) = entity else { unreachable!() };
-        tracing::Span::current().record("signer", format!("{signer:?}"));
-
         let priority = self.priority_for(entity, EntityRequest::MevShareBundle(&bundle));
-
         // Deduplicate bundles.
         let bundle_hash = bundle.bundle_hash();
+
         tracing::Span::current().record("hash", format!("{bundle_hash:?}"));
+        tracing::Span::current().record("signer", format!("{signer:?}"));
+        tracing::Span::current().record("priority", priority.as_str());
 
         if self.order_cache.contains(&bundle_hash) {
             tracing::trace!("already processed");
@@ -708,33 +711,29 @@ impl OrderflowIngress {
                 tracing::error!(?e, "error decoding bundle");
                 IngressUserMetrics::increment_validation_errors(&e);
             })?;
+        let elapsed = start.elapsed();
 
         match bundle.decoded.as_ref() {
             DecodedShareBundle::New(_) => {
-                tracing::debug!("decoded new bundle");
+                tracing::debug!(?elapsed, "decoded new bundle");
             }
             DecodedShareBundle::Cancel(cancellation) => {
-                tracing::debug!(?cancellation, "decoded cancellation bundle");
+                tracing::debug!(?elapsed, ?cancellation, "decoded cancellation bundle");
             }
         }
 
         IngressUserMetrics::record_txs_per_mev_share_bundle(bundle.raw.body.len());
 
-        let elapsed = start.elapsed();
-        tracing::debug!(?elapsed, "validated mev share bundle");
-
         self.send_mev_share_bundle(priority, bundle).await
     }
 
     async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
-        let bundle_uuid = bundle.uuid();
         let bundle_hash = bundle.bundle_hash();
         let priority = bundle.metadata.priority;
         let received_at = bundle.metadata.received_at;
 
         // Send request to all forwarders.
         self.forwarders.broadcast_bundle(bundle);
-        tracing::debug!(%bundle_uuid, %bundle_hash, "processed bundle");
 
         IngressUserMetrics::record_bundle_rpc_duration(priority, received_at.elapsed());
         Ok(bundle_hash)
@@ -749,7 +748,6 @@ impl OrderflowIngress {
         let received_at = bundle.received_at;
 
         self.forwarders.broadcast_mev_share_bundle(priority, bundle);
-        tracing::debug!("processed mev share bundle");
 
         IngressUserMetrics::record_mev_share_bundle_rpc_duration(priority, received_at.elapsed());
         Ok(bundle_hash)

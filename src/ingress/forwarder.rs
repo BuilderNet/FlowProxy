@@ -2,8 +2,7 @@ use crate::{
     builderhub,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
-        MEV_SEND_BUNDLE_METHOD,
+        FLASHBOTS_SIGNATURE_HEADER,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::{ForwarderMetrics, SystemMetrics},
@@ -82,7 +81,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -102,7 +101,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -122,7 +121,7 @@ impl IngressForwarders {
             UtcDateTime::now(),
         );
 
-        debug!(name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        debug!(peers = %self.peers.len(), "sending transaction to peers");
         self.broadcast(forward);
     }
 

@@ -39,6 +39,13 @@ tikv-jemallocator = { version = "0.6", optional = true }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-futures = "0.2.5"
+tracing-opentelemetry = "0.32.0"
+opentelemetry = "0.31.0"
+opentelemetry-otlp = "0.31.0"
+opentelemetry-semantic-conventions = { version = "0.31.0", features = [
+  "semconv_experimental"
+] }
+opentelemetry_sdk = "0.31.0"
 
 # metrics
 metrics = "0.24"
