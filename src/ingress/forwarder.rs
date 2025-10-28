@@ -396,15 +396,13 @@ impl HttpForwarder {
         let client = self.client.clone();
         let peer_url = self.peer_url.clone();
 
-        let parent_span = request.span.clone();
-        let local_span = tracing::info_span!("http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
+        let request_span = request.span.clone();
+        let span = tracing::info_span!(parent: request_span.clone(), "http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
 
         let fut = async move {
             let direction = request.direction;
             let is_big = request.is_big();
             let hash = request.hash();
-
-            let span = request.span.clone();
 
             // Try to avoid cloning the body and headers if there is only one reference.
             let (order, headers) = Arc::try_unwrap(request).map_or_else(
@@ -456,15 +454,15 @@ impl HttpForwarder {
                 client.post(peer_url).body(order.encoding().to_vec()).headers(headers).send().await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
-            ForwarderResponse { start_time, response, is_big, order_type, hash, span }
+            ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
         } // We first want to enter the parent span, then the local span.
-        .instrument(local_span)
-        .instrument(parent_span);
+        .instrument(span);
 
         Box::pin(fut)
     }
 
     #[tracing::instrument(skip_all, name = "http_forwarder_response"
+        parent = response.span.clone(),
         fields(
             peer_url = %self.peer_url,
             is_big = response.is_big,
@@ -495,6 +493,8 @@ impl HttpForwarder {
                 }
 
                 if status.is_success() {
+                    trace!("received success response");
+
                     if status != StatusCode::OK {
                         warn!("non-ok status code");
                     }
