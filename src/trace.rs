@@ -1,8 +1,3 @@
-//! The [`init_tracing`] function sets up tracing for the application.
-//! [`init_otel_provider`] is also interesting :)
-//!
-//! Adapated from https://github.com/init4tech/teaching-tracing/blob/main/src/trace.rs.
-
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{filter::EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
