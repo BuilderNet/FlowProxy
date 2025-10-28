@@ -69,17 +69,17 @@ impl IngressForwarders {
         let encoded_bundle = bundle.encode();
 
         // Create local request first
-        let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = ForwardingRequest::user_to_system(
+        let forward = Arc::new(ForwardingRequest::user_to_system(
             encoded_bundle.into(),
             signature_header,
             UtcDateTime::now(),
-        );
+        ));
 
         debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
@@ -89,17 +89,17 @@ impl IngressForwarders {
     pub fn broadcast_mev_share_bundle(&self, priority: Priority, bundle: SystemMevShareBundle) {
         let encoded_bundle = bundle.encode();
         // Create local request first
-        let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
         let _ = self.local.send(priority, local);
 
         let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = ForwardingRequest::user_to_system(
+        let forward = Arc::new(ForwardingRequest::user_to_system(
             encoded_bundle.into(),
             signature_header,
             UtcDateTime::now(),
-        );
+        ));
 
         debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
@@ -109,17 +109,17 @@ impl IngressForwarders {
     pub fn broadcast_transaction(&self, transaction: SystemTransaction) {
         let encoded_transaction = transaction.encode();
 
-        let local = ForwardingRequest::user_to_local(encoded_transaction.clone().into());
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_transaction.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signature_header = self.build_signature_header(encoded_transaction.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = ForwardingRequest::user_to_system(
+        let forward = Arc::new(ForwardingRequest::user_to_system(
             encoded_transaction.into(),
             signature_header,
             UtcDateTime::now(),
-        );
+        ));
 
         debug!(peers = %self.peers.len(), "sending transaction to peers");
         self.broadcast(forward);
@@ -161,7 +161,7 @@ impl IngressForwarders {
         let order =
             EncodedOrder::SystemOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
 
-        let local = ForwardingRequest::system_to_local(order);
+        let local = Arc::new(ForwardingRequest::system_to_local(order));
         let _ = self.local.send(priority, local);
     }
 }
@@ -235,32 +235,54 @@ pub struct ForwardingRequest {
 
     /// The direction of the forwarding request.
     pub direction: ForwardingDirection,
+
+    /// The tracing span associated with this request.
+    pub span: tracing::Span,
 }
 
 impl ForwardingRequest {
-    pub fn user_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
+    pub fn user_to_local(encoded_order: EncodedOrder) -> Self {
         let headers =
             Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
-        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::UserToLocal })
+        Self {
+            encoded_order,
+            headers,
+            direction: ForwardingDirection::UserToLocal,
+            span: tracing::Span::current(),
+        }
     }
 
     pub fn user_to_system(
         encoded_order: EncodedOrder,
         signature_header: String,
         sent_at_header: UtcDateTime,
-    ) -> Arc<Self> {
+    ) -> Self {
         let headers = Self::create_headers(
             encoded_order.priority(),
             Some(signature_header),
             Some(sent_at_header),
         );
-        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::UserToSystem })
+        Self {
+            encoded_order,
+            headers,
+            direction: ForwardingDirection::UserToSystem,
+            span: tracing::Span::current(),
+        }
     }
 
-    pub fn system_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
+    pub fn system_to_local(encoded_order: EncodedOrder) -> Self {
         let headers =
             Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
-        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::SystemToLocal })
+        Self {
+            encoded_order,
+            headers,
+            direction: ForwardingDirection::SystemToLocal,
+            span: tracing::Span::current(),
+        }
+    }
+
+    pub fn with_span(self, span: tracing::Span) -> Self {
+        Self { span, ..self }
     }
 
     /// Create a new forwarding request to a builder. The [`BUILDERNET_SENT_AT_HEADER`] is formatted
@@ -318,6 +340,9 @@ struct ForwarderResponse<Ok, Err> {
     start_time: Instant,
     /// Builder response.
     response: Result<Ok, Err>,
+
+    /// The parent span associated with this response.
+    span: tracing::Span,
 }
 
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
@@ -364,13 +389,6 @@ impl HttpForwarder {
     }
 
     /// Send an HTTP request to the peer, returning a future that resolves to the response.
-    #[tracing::instrument(skip_all, name = "http_forwarder_request"
-        fields(
-            hash = %request.hash(),
-            order_type = %request.encoded_order.order_type(),
-            direction = %request.direction,
-            is_big = request.is_big(),
-    ))]
     fn send_http_request(
         &self,
         request: Arc<ForwardingRequest>,
@@ -378,11 +396,21 @@ impl HttpForwarder {
         let client = self.client.clone();
         let peer_url = self.peer_url.clone();
 
-        let span = tracing::Span::current();
+        let parent_span = request.span.clone();
+        let local_span = tracing::info_span!(
+            "http_forwarder_request",
+            hash = %request.hash(),
+            order_type = %request.encoded_order.order_type(),
+            direction = %request.direction,
+            is_big = request.is_big(),
+        );
+
         let fut = async move {
             let direction = request.direction;
             let is_big = request.is_big();
             let hash = request.hash();
+
+            let span = request.span.clone();
 
             // Try to avoid cloning the body and headers if there is only one reference.
             let (order, headers) = Arc::try_unwrap(request).map_or_else(
@@ -434,9 +462,10 @@ impl HttpForwarder {
                 client.post(peer_url).body(order.encoding().to_vec()).headers(headers).send().await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
-            ForwarderResponse { start_time, response, is_big, order_type, hash }
-        }
-        .instrument(span);
+            ForwarderResponse { start_time, response, is_big, order_type, hash, span }
+        } // We first want to enter the parent span, then the local span.
+        .instrument(local_span)
+        .instrument(parent_span);
 
         Box::pin(fut)
     }
@@ -460,6 +489,7 @@ impl HttpForwarder {
             ..
         } = response;
         let elapsed = start_time.elapsed();
+
         tracing::Span::current().record("elapsed", tracing::field::debug(&elapsed));
 
         match response_result {
@@ -493,7 +523,7 @@ impl HttpForwarder {
                     );
 
                     if let Err(e) =
-                        self.error_decoder_tx.try_send(ErrorDecoderInput { hash, response })
+                        self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
                     {
                         error!(?e, "failed to send error response to decoder");
                     }
@@ -533,7 +563,9 @@ impl Future for HttpForwarder {
         loop {
             // First poll for completed work.
             if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
-                this.on_response(response);
+                response.span.clone().in_scope(|| {
+                    this.on_response(response);
+                });
                 continue;
             }
 
@@ -563,6 +595,21 @@ pub struct ErrorDecoderInput {
     pub hash: B256,
     /// The error response to be decoded.
     pub response: reqwest::Response,
+
+    /// The tracing span associated with this data.
+    pub span: tracing::Span,
+}
+
+impl ErrorDecoderInput {
+    /// Create a new error decoder input.
+    pub fn new(hash: B256, response: reqwest::Response) -> Self {
+        Self { hash, response, span: tracing::Span::current() }
+    }
+
+    /// Set the tracing span for this input.
+    pub fn with_span(self, span: tracing::Span) -> Self {
+        Self { span, ..self }
+    }
 }
 
 /// A [`reqwest::Response`] error decoder, associated to a certain [`HttpForwarder`] which traces
@@ -579,11 +626,7 @@ pub struct ResponseErrorDecoder {
 
 impl ResponseErrorDecoder {
     #[tracing::instrument(skip_all, name = "response_error_decode"
-        fields(
-            peer = %self.peer_name,
-            peer_url = %self.peer_url,
-            hash = %input.hash,
-            status = %input.response.status(),
+        fields(peer = %self.peer_name, peer_url = %self.peer_url, hash = %input.hash, status = %input.response.status(),
     ))]
     async fn decode(&self, input: ErrorDecoderInput) {
         match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
@@ -603,7 +646,8 @@ impl ResponseErrorDecoder {
     /// Run the error decoder actor in loop.
     pub async fn run(mut self) {
         while let Some(input) = self.rx.recv().await {
-            self.decode(input).await;
+            let span = input.span.clone();
+            self.decode(input).instrument(span).await;
         }
     }
 }
