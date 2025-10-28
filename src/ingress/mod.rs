@@ -196,7 +196,7 @@ impl OrderflowIngress {
             data.scores.score_mut(received_at.into()).number_of_requests += 1;
         }
 
-        tracing::trace!(?entity, params = ?request.params, "serving user json-rpc request");
+        tracing::trace!(?entity, "serving user json-rpc request");
 
         let result = match request.method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
@@ -579,7 +579,6 @@ impl OrderflowIngress {
             hash = tracing::field::Empty,
             signer = tracing::field::Empty,
             priority = tracing::field::Empty,
-            uuid = tracing::field::Empty,
         ))]
     async fn on_bundle(
         &self,
@@ -605,9 +604,8 @@ impl OrderflowIngress {
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
-            bundle.metadata.replacement_nonce.is_none()
-        {
+        let replacement_uuid = bundle.metadata.uuid.or(bundle.metadata.replacement_uuid);
+        if (replacement_uuid.is_some()) && bundle.metadata.replacement_nonce.is_none() {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
                 Some(timestamp.try_into().expect("Timestamp too large"));

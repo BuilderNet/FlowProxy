@@ -410,43 +410,7 @@ impl HttpForwarder {
                 |inner| (inner.encoded_order, inner.headers),
             );
 
-            let order_type = order.order_type();
-
-            match order {
-                EncodedOrder::Bundle(_) => {
-                    SystemMetrics::record_e2e_bundle_processing_time(
-                        order.received_at().elapsed(),
-                        order.priority(),
-                        direction,
-                        is_big,
-                    );
-                }
-                EncodedOrder::MevShareBundle(_) => {
-                    SystemMetrics::record_e2e_mev_share_bundle_processing_time(
-                        order.received_at().elapsed(),
-                        order.priority(),
-                        direction,
-                        is_big,
-                    );
-                }
-                EncodedOrder::Transaction(_) => {
-                    SystemMetrics::record_e2e_transaction_processing_time(
-                        order.received_at().elapsed(),
-                        order.priority(),
-                        direction,
-                        is_big,
-                    );
-                }
-                EncodedOrder::SystemOrder(_) => {
-                    SystemMetrics::record_e2e_system_order_processing_time(
-                        order.received_at().elapsed(),
-                        order.priority(),
-                        direction,
-                        order_type,
-                        is_big,
-                    );
-                }
-            }
+            SystemMetrics::record_e2e_order_processing_time(&order, direction, is_big);
 
             let order_type = order.order_type();
             let start_time = Instant::now();
@@ -462,7 +426,6 @@ impl HttpForwarder {
     }
 
     #[tracing::instrument(skip_all, name = "http_forwarder_response"
-        parent = response.span.clone(),
         fields(
             peer_url = %self.peer_url,
             is_big = response.is_big,
@@ -568,7 +531,8 @@ impl Future for HttpForwarder {
                     return Poll::Ready(());
                 };
 
-                this.pending.push(this.send_http_request(request));
+                let fut = this.send_http_request(request);
+                this.pending.push(fut);
 
                 ForwarderMetrics::set_inflight_requests(this.pending.len());
                 continue;
