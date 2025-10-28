@@ -111,14 +111,17 @@ impl OrderflowIngress {
     fn record_queue_capacity_metrics(&self, priority: Priority) {
         let available_permits = self.pqueues.available_permits_for(priority);
         let total_permits = self.pqueues.total_permits_for(priority);
-        if available_permits == 0 {
-            SystemMetrics::increment_queue_capacity_hit(priority);
-        }
 
-        // Record queue capacity almost hit if the queue is at 75% of capacity.
-        if available_permits <= total_permits / 4 {
+        if available_permits == 0 {
+            warn!("hit queue capacity");
+            SystemMetrics::increment_queue_capacity_hit(priority);
+        } else if available_permits <= total_permits / 4 {
+            // Record queue capacity almost hit if the queue is at 75% of capacity.
+            warn!("hit 75% queue capacity");
             SystemMetrics::increment_queue_capacity_almost_hit(priority);
         }
+
+        trace!(available_permits, total_permits, "queue capacity metrics");
     }
 
     /// Perform maintenance task for internal orderflow ingress state.
@@ -137,7 +140,7 @@ impl OrderflowIngress {
 
     #[tracing::instrument(skip_all, name = "ingress",
         fields(
-            handler = "user", 
+            handler = "user",
             id = %short_uuid_v4(),
             method = tracing::field::Empty,
         ))]
@@ -314,12 +317,11 @@ impl OrderflowIngress {
         Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
     }
 
-    #[tracing::instrument(skip_all, name = "ingress", 
+    #[tracing::instrument(skip_all, name = "ingress",
         fields(
-            handler = "system", 
+            handler = "system",
             id = %short_uuid_v4(),
             method = tracing::field::Empty,
-            hash = tracing::field::Empty,
             peer = tracing::field::Empty
         ))]
     pub async fn system_handler(
@@ -353,7 +355,7 @@ impl OrderflowIngress {
             );
             return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
         };
-        tracing::Span::current().record("peer", &peer);
+        tracing::Span::current().record("peer", tracing::field::display(&peer));
 
         // This gets computed only if we enter in an error branch.
         let body_utf8 = || str::from_utf8(&body).unwrap_or("<invalid utf8>");
@@ -367,7 +369,7 @@ impl OrderflowIngress {
                 return JsonRpcResponse::error(Value::Null, e);
             }
         };
-        tracing::Span::current().record("method", &request.method);
+        tracing::Span::current().record("method", tracing::field::display(&request.method));
 
         let sent_at = headers.get(BUILDERNET_SENT_AT_HEADER).and_then(UtcDateTime::parse_header);
 
@@ -561,14 +563,20 @@ impl OrderflowIngress {
         };
 
         // Send request only to the local builder forwarder.
-        ingress.forwarders.send_to_local(priority, &request.method, raw, received_at);
+        ingress.forwarders.send_to_local(
+            priority,
+            &request.method,
+            raw,
+            response.hash(),
+            received_at,
+        );
 
         trace!(elapsed = ?received_at.instant.elapsed(), "processed json-rpc request");
         JsonRpcResponse::result(request.id, response)
     }
 
     /// Handles a new bundle.
-    #[tracing::instrument(skip_all, name = "bundle", 
+    #[tracing::instrument(skip_all, name = "bundle",
         fields(
             hash = tracing::field::Empty,
             signer = tracing::field::Empty,
@@ -599,8 +607,8 @@ impl OrderflowIngress {
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
-            bundle.metadata.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
+            && bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
@@ -677,7 +685,7 @@ impl OrderflowIngress {
     }
 
     /// Handles a new mev share bundle.
-    #[tracing::instrument(skip_all, name = "mev_share_bundle", 
+    #[tracing::instrument(skip_all, name = "mev_share_bundle",
         fields(
             hash = tracing::field::Empty,
             signer = tracing::field::Empty,
@@ -746,7 +754,7 @@ impl OrderflowIngress {
         self.send_mev_share_bundle(priority, bundle).await
     }
 
-    #[tracing::instrument(skip_all, name = "transaction", 
+    #[tracing::instrument(skip_all, name = "transaction",
         fields(
             hash = tracing::field::Empty,
             signer = tracing::field::Empty,
