@@ -22,6 +22,7 @@ pub(crate) const fn new_allocator() -> Allocator {
 static ALLOC: Allocator = new_allocator();
 
 fn main() {
+    dotenvy::dotenv().ok();
     let args = OrderflowIngressArgs::parse();
 
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
@@ -29,7 +30,6 @@ fn main() {
         .build()
         .expect("failed to create runtime");
 
-    let _ = tokio_runtime.handle();
     init_tracing(args.log_json);
 
     let runner = CliRunner::from_runtime(tokio_runtime);
