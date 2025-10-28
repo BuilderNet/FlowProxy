@@ -21,13 +21,10 @@ pub(crate) const fn new_allocator() -> Allocator {
 #[global_allocator]
 static ALLOC: Allocator = new_allocator();
 
-use opentelemetry_sdk::trace::SdkTracerProvider;
-use std::sync::LazyLock;
-
-static OTEL_PROVIDER: LazyLock<SdkTracerProvider> = LazyLock::new(init_tracing);
-
 fn main() {
     dotenvy::dotenv().ok();
+    let args = OrderflowIngressArgs::parse();
+    init_tracing(args.log_json);
 
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -36,10 +33,9 @@ fn main() {
 
     let runner = CliRunner::from_runtime(tokio_runtime);
 
-    let command = |ctx: CliContext| flowproxy::run(OrderflowIngressArgs::parse(), ctx);
+    let command = |ctx: CliContext| flowproxy::run(args, ctx);
 
     if let Err(e) = runner.run_command_until_exit(command) {
         eprintln!("Orderflow proxy terminated with error: {e}");
     }
-    let _ = OTEL_PROVIDER.force_flush();
 }
