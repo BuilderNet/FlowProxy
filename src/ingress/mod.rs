@@ -120,8 +120,6 @@ impl OrderflowIngress {
             warn!("hit 75% queue capacity");
             SystemMetrics::increment_queue_capacity_almost_hit(priority);
         }
-
-        trace!(available_permits, total_permits, "queue capacity metrics");
     }
 
     /// Perform maintenance task for internal orderflow ingress state.
