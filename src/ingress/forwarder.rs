@@ -397,13 +397,7 @@ impl HttpForwarder {
         let peer_url = self.peer_url.clone();
 
         let parent_span = request.span.clone();
-        let local_span = tracing::info_span!(
-            "http_forwarder_request",
-            hash = %request.hash(),
-            order_type = %request.encoded_order.order_type(),
-            direction = %request.direction,
-            is_big = request.is_big(),
-        );
+        let local_span = tracing::info_span!("http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
 
         let fut = async move {
             let direction = request.direction;
@@ -472,9 +466,7 @@ impl HttpForwarder {
 
     #[tracing::instrument(skip_all, name = "http_forwarder_response"
         fields(
-            peer = %self.peer_name,
-            hash = %response.hash,
-            order_type = response.order_type,
+            peer_url = %self.peer_url,
             is_big = response.is_big,
             elapsed = tracing::field::Empty,
             status = tracing::field::Empty,
@@ -625,9 +617,7 @@ pub struct ResponseErrorDecoder {
 }
 
 impl ResponseErrorDecoder {
-    #[tracing::instrument(skip_all, name = "response_error_decode"
-        fields(peer = %self.peer_name, peer_url = %self.peer_url, hash = %input.hash, status = %input.response.status(),
-    ))]
+    #[tracing::instrument(skip_all, name = "response_error_decode")]
     async fn decode(&self, input: ErrorDecoderInput) {
         match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
             Ok(body) => {
