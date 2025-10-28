@@ -101,7 +101,7 @@ const OTEL_FILTER: &str = "OTEL_FILTER";
 /// runtime.
 ///
 /// [`Filter`]: tracing_subscriber::layer::Filter
-pub fn init_tracing(_log_json: bool) -> SdkTracerProvider {
+pub fn init_tracing() -> SdkTracerProvider {
     let env_filter =
         EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).from_env_lossy();
 
