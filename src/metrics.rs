@@ -14,26 +14,21 @@ pub(crate) struct ForwarderMetrics {
     /// The number of HTTP connection failures.
     #[metric(labels = ["peer_name", "reason"])]
     http_connect_failures: IntCounter,
-
     /// The number of HTTP call failures.
     #[metric(labels = ["peer_name", "reason"])]
     http_call_failures: IntCounter,
-
     /// The number of inflight HTTP requests.
     #[metric(labels = ["peer_name"])]
     inflight_requests: IntGauge,
-
+    /// The number of open HTTP connections.
     #[metric(labels = ["peer_name"])]
     open_http_connections: IntGauge,
-
     /// The number of JSON-RPC decoding failures.
     #[metric(labels = ["peer_name"])]
     json_rpc_decoding_failures: IntCounter,
-
     /// The duration of RPC calls.
     #[metric(labels = ["peer_name", "order_type", "big_request"])]
     rpc_call_duration: Histogram,
-
     /// The number of RPC call failures.
     #[metric(labels = ["peer_name", "rpc_code"])]
     rpc_call_failures: IntCounter,
