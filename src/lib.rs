@@ -284,12 +284,13 @@ async fn run_update_peers(
     task_executor: TaskExecutor,
 ) {
     let delay = Duration::from_secs(30);
+    let metrics = BuilderHubMetrics::default();
 
     loop {
         let builders = match peer_store.get_peers().await {
             Ok(builders) => builders,
             Err(error) => {
-                BuilderHubMetrics::increment_builderhub_peer_request_failures(error.to_string());
+                metrics.peer_request_failures().error(error.to_string()).inc();
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
                 continue;
@@ -359,7 +360,7 @@ async fn run_update_peers(
             }
         }
 
-        BuilderHubMetrics::builderhub_peer_count(peers.len());
+        metrics.peer_count().set(peers.len() as i64);
 
         tokio::time::sleep(delay).await;
     }

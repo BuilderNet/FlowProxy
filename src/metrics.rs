@@ -7,6 +7,19 @@ use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gau
 
 use crate::{forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
 
+#[prom_derive::metrics(scope = "builderhub")]
+pub(crate) struct BuilderHubMetrics {
+    /// The peer count.
+    #[metric(labels = ["peer_name"])]
+    peer_count: IntGauge,
+    /// The number of registration failures.
+    #[metric(labels = ["error"])]
+    registration_failures: IntCounter,
+    /// The number of peer request failures.
+    #[metric(labels = ["error"])]
+    peer_request_failures: IntCounter,
+}
+
 /// Forwarder metrics.
 #[prom_derive::metrics(scope = "forwarder")]
 #[derive(Debug, Clone)]
@@ -34,14 +47,59 @@ pub(crate) struct ForwarderMetrics {
     rpc_call_failures: IntCounter,
 }
 
-mod name {
-    /// BuilderHub metrics.
-    pub(crate) mod builderhub {
-        pub(crate) const PEER_COUNT: &str = "builderhub_peer_count";
-        pub(crate) const REGISTRATION_FAILURES: &str = "builderhub_registration_failures";
-        pub(crate) const PEER_REQUEST_FAILURES: &str = "builderhub_peer_request_failures";
-    }
+#[prom_derive::metrics(scope = "ingress")]
+pub(crate) struct IngressMetrics {
+    /// The number of entities.
+    #[metric(labels = ["handler"])]
+    entity_count: IntGauge,
+    /// The number of requests rate limited.
+    #[metric(labels = ["handler"])]
+    requests_rate_limited: IntCounter,
+    /// The number of JSON-RPC parsing errors.
+    #[metric(labels = ["handler", "method"])]
+    json_rpc_parse_errors: IntCounter,
+    /// The number of JSON-RPC unknown methods.
+    #[metric(labels = ["handler", "method"])]
+    json_rpc_unknown_method: IntCounter,
+    /// The number of order cache hits.
+    #[metric(labels = ["handler", "order_type"])]
+    order_cache_hit: IntCounter,
+    /// The number of order cache misses.
+    #[metric(labels = ["handler", "order_type"])]
+    order_cache_miss: IntCounter,
+    /// The number of signer cache hits.
+    #[metric(labels = ["handler"])]
+    signer_cache_hit: IntCounter,
+    /// The number of signer cache misses.
+    #[metric(labels = ["handler"])]
+    signer_cache_miss: IntCounter,
+    /// The number of validation errors.
+    #[metric(labels = ["handler", "error"])]
+    validation_errors: IntCounter,
+    /// The duration of HTTP requests.
+    #[metric(labels = ["handler", "method", "path", "status"])]
+    http_request_duration: Histogram,
+    /// The number of transactions per bundle.
+    #[metric(labels = ["handler"])]
+    txs_per_bundle: Histogram,
+    /// The number of transactions per MEV-share bundle.
+    #[metric(labels = ["handler"])]
+    txs_per_mev_share_bundle: Histogram,
+    /// The number of empty bundles.
+    #[metric(labels = ["handler"])]
+    total_empty_bundles: IntCounter,
+    /// The order cache hit ratio.
+    #[metric(labels = ["handler"])]
+    order_cache_hit_ratio: Gauge,
+    /// The signer cache hit ratio.
+    #[metric(labels = ["handler"])]
+    signer_cache_hit_ratio: Gauge,
+    /// The order cache entry count.
+    #[metric(labels = ["handler"])]
+    order_cache_entry_count: IntGauge,
+}
 
+mod name {
     /// Indexer metrics.
     pub(crate) mod indexer {
         pub(crate) const BUNDLE_INDEXING_FAILURES: &str = "indexer_bundle_indexing_failures";
@@ -115,17 +173,6 @@ mod name {
 use name::*;
 
 pub fn describe() {
-    // BuilderHub metrics
-    describe_gauge!(builderhub::PEER_COUNT, "Number of active BuilderHub peers");
-    describe_counter!(
-        builderhub::PEER_REQUEST_FAILURES,
-        "Total number of failed get peer requests to BuilderHub"
-    );
-    describe_counter!(
-        builderhub::REGISTRATION_FAILURES,
-        "Total number of failed BuilderHub registrations"
-    );
-
     // Indexer metrics
     describe_counter!(
         indexer::BUNDLE_INDEXING_FAILURES,
@@ -480,27 +527,6 @@ impl SystemMetrics {
     #[inline]
     pub fn increment_queue_capacity_almost_hit(priority: Priority) {
         counter!(system::QUEUE_CAPACITY_ALMOST_HITS, "priority" => priority.as_str()).increment(1);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct BuilderHubMetrics;
-
-#[allow(missing_debug_implementations)]
-impl BuilderHubMetrics {
-    #[inline]
-    pub fn increment_builderhub_peer_request_failures(err: String) {
-        counter!(builderhub::PEER_REQUEST_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_builderhub_registration_failures(err: String) {
-        counter!(builderhub::REGISTRATION_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn builderhub_peer_count(count: usize) {
-        gauge!(builderhub::PEER_COUNT).set(count as f64);
     }
 }
 
