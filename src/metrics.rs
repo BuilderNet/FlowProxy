@@ -7,23 +7,44 @@ use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gau
 
 use crate::{forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
 
+/// Forwarder metrics.
+#[prom_derive::metrics(scope = "forwarder")]
+#[derive(Debug, Clone)]
+pub(crate) struct ForwarderMetrics {
+    /// The number of HTTP connection failures.
+    #[metric(labels = ["peer_name", "reason"])]
+    http_connect_failures: IntCounter,
+
+    /// The number of HTTP call failures.
+    #[metric(labels = ["peer_name", "reason"])]
+    http_call_failures: IntCounter,
+
+    /// The number of inflight HTTP requests.
+    #[metric(labels = ["peer_name"])]
+    inflight_requests: IntGauge,
+
+    #[metric(labels = ["peer_name"])]
+    open_http_connections: IntGauge,
+
+    /// The number of JSON-RPC decoding failures.
+    #[metric(labels = ["peer_name"])]
+    json_rpc_decoding_failures: IntCounter,
+
+    /// The duration of RPC calls.
+    #[metric(labels = ["peer_name", "order_type", "big_request"])]
+    rpc_call_duration: Histogram,
+
+    /// The number of RPC call failures.
+    #[metric(labels = ["peer_name", "rpc_code"])]
+    rpc_call_failures: IntCounter,
+}
+
 mod name {
     /// BuilderHub metrics.
     pub(crate) mod builderhub {
         pub(crate) const PEER_COUNT: &str = "builderhub_peer_count";
         pub(crate) const REGISTRATION_FAILURES: &str = "builderhub_registration_failures";
         pub(crate) const PEER_REQUEST_FAILURES: &str = "builderhub_peer_request_failures";
-    }
-
-    /// Forwarder metrics.
-    pub(crate) mod forwarder {
-        pub(crate) const HTTP_CONNECT_FAILURES: &str = "forwarder_http_connect_failures";
-        pub(crate) const HTTP_CALL_FAILURES: &str = "forwarder_http_call_failures";
-        pub(crate) const INFLIGHT_REQUESTS: &str = "forwarder_inflight_http_calls";
-        pub(crate) const OPEN_HTTP_CONNECTIONS: &str = "forwarder_open_http_connections";
-        pub(crate) const JSON_RPC_DECODING_FAILURES: &str = "forwarder_rpc_decoding_failures";
-        pub(crate) const RPC_CALL_DURATION: &str = "forwarder_rpc_call_duration";
-        pub(crate) const RPC_CALL_FAILURES: &str = "forwarder_rpc_call_failures";
     }
 
     /// Indexer metrics.
@@ -109,17 +130,6 @@ pub fn describe() {
         builderhub::REGISTRATION_FAILURES,
         "Total number of failed BuilderHub registrations"
     );
-
-    // Forwarder metrics
-    describe_counter!(forwarder::HTTP_CALL_FAILURES, "Total number of failed HTTP calls to peers");
-    describe_counter!(
-        forwarder::JSON_RPC_DECODING_FAILURES,
-        "Total number of JSON-RPC response decoding failures"
-    );
-    describe_histogram!(forwarder::RPC_CALL_DURATION, "Duration of RPC calls to peers in seconds");
-    describe_counter!(forwarder::RPC_CALL_FAILURES, "Total number of failed RPC calls to peers");
-    describe_gauge!(forwarder::INFLIGHT_REQUESTS, "Number of inflight HTTP requests to peers");
-    describe_gauge!(forwarder::OPEN_HTTP_CONNECTIONS, "Number of open HTTP connections to peers");
 
     // Indexer metrics
     describe_counter!(
@@ -257,56 +267,6 @@ pub fn describe() {
         system::QUEUE_CAPACITY_ALMOST_HITS,
         "Number of times the queue capacity was almost hit per priority (>= 75% of capacity)"
     );
-}
-
-#[derive(Debug)]
-pub struct ForwarderMetrics;
-
-impl ForwarderMetrics {
-    /// Set the number of inflight HTTP requests.
-    #[inline]
-    pub fn set_inflight_requests(count: usize) {
-        gauge!(forwarder::INFLIGHT_REQUESTS).set(count as f64);
-    }
-
-    /// Set the number of open HTTP connections.
-    #[inline]
-    pub fn set_open_http_connections(count: usize, peer_name: String) {
-        gauge!(forwarder::OPEN_HTTP_CONNECTIONS, "peer_name" => peer_name).set(count as f64);
-    }
-
-    /// The duration of the RPC call to a peer.
-    #[inline]
-    pub fn record_rpc_call(
-        peer_name: String,
-        order_type: &'static str,
-        duration: Duration,
-        big_request: bool,
-    ) {
-        histogram!(forwarder::RPC_CALL_DURATION, "peer_name" => peer_name, "order_type" => order_type, "big_request" => big_request.to_string()).record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn increment_http_connect_failures(peer_name: String, reason: String) {
-        counter!(forwarder::HTTP_CONNECT_FAILURES, "peer_name" => peer_name, "reason" => reason)
-            .increment(1);
-    }
-
-    #[inline]
-    pub fn increment_http_call_failures(peer_name: String, reason: String) {
-        counter!(forwarder::HTTP_CALL_FAILURES, "peer_name" => peer_name, "reason" => reason)
-            .increment(1);
-    }
-
-    #[inline]
-    pub fn increment_rpc_call_failures(peer_name: String, rpc_code: i32) {
-        counter!(forwarder::RPC_CALL_FAILURES, "peer_name" => peer_name, "rpc_code" => rpc_code.to_string()).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_json_rpc_decoding_failures(peer_name: String) {
-        counter!(forwarder::JSON_RPC_DECODING_FAILURES, "peer_name" => peer_name).increment(1);
-    }
 }
 
 pub trait IngressHandlerMetricsExt {

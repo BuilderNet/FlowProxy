@@ -92,8 +92,6 @@ pub mod limit {
     use tokio_util::sync::PollSemaphore;
     use tower::{Layer, Service};
 
-    use crate::metrics::ForwarderMetrics;
-
     /// Enforces a limit on the concurrent number of requests the underlying
     /// service can handle.
     #[derive(Debug, Clone)]
@@ -192,10 +190,11 @@ pub mod limit {
                 );
             }
 
-            ForwarderMetrics::set_open_http_connections(
-                self.current_connections(),
-                self.id.clone(),
-            );
+            // TODO: Add metrics here.
+            // ForwarderMetrics::set_open_http_connections(
+            //     self.current_connections(),
+            //     self.id.clone(),
+            // );
 
             // Once we've acquired a permit (or if we already had one), poll the
             // inner service.
