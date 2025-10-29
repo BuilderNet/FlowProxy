@@ -265,7 +265,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     refund_percent: bundle.raw_bundle.metadata.refund_percent,
                     refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
                     refund_identity: bundle.raw_bundle.metadata.refund_identity,
-                    hash: bundle.bundle_hash,
+                    hash: bundle.bundle_hash(),
                     version: match decoded.version {
                         BundleVersion::V1 => 1,
                         BundleVersion::V2 => 2,
@@ -320,7 +320,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     refund_percent: bundle.raw_bundle.metadata.refund_percent,
                     refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
                     refund_identity: bundle.raw_bundle.metadata.refund_identity,
-                    hash: bundle.bundle_hash,
+                    hash: bundle.bundle_hash(),
                     // NOTE: For now, replacement bundles don't have a version, so we set v2.
                     version: 2,
                 }
@@ -400,7 +400,7 @@ impl ClickhouseIndexableOrder for SystemBundle {
     const ORDER: &'static str = <BundleRow as ClickhouseRowExt>::ORDER;
 
     fn hash(&self) -> B256 {
-        self.bundle_hash
+        self.bundle_hash()
     }
 
     fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {

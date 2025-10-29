@@ -566,21 +566,30 @@ impl OrderflowIngress {
 
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
+        // NOTE: Before computing the bundle hash used for indexing and deduplication purposes, we
+        // add two fields if they are not set: the `replacement_nonce` (if applicable) and the `version`.
+        // The replacement nonce is needed to deduplicate replacement bundles correctly, while the
+        // version is tech debt.
+
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some()) &&
-            bundle.metadata.replacement_nonce.is_none()
+        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
+            && bundle.metadata.replacement_nonce.is_none()
         {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
                 Some(timestamp.try_into().expect("Timestamp too large"));
         }
 
-        // Deduplicate bundles.
-        // IMPORTANT: For correct cancellation deduplication, the replacement nonce must be set (see
-        // above).
+        if bundle.metadata.version.is_none() {
+            bundle.metadata.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
+        }
+
+        // From now on, use THIS bundle hash for deduplication and indexing.
         let bundle_hash = bundle.bundle_hash();
+        bundle.metadata.bundle_hash = Some(bundle_hash);
+
         let sample = bundle_hash.sample(10);
         if self.order_cache.contains(&bundle_hash) {
             trace!(target: INGRESS, %bundle_hash, "Bundle already processed");
@@ -597,10 +606,6 @@ impl OrderflowIngress {
         self.order_cache.insert(bundle_hash);
         let signer_cache = self.signer_cache.clone();
         let lookup = move |hash: B256| signer_cache.get(&hash);
-
-        if bundle.metadata.version.is_none() {
-            bundle.metadata.version = Some(DEFAULT_BUNDLE_VERSION.to_string());
-        }
 
         // Record queue capacity metrics.
         self.record_queue_capacity_metrics(priority);
