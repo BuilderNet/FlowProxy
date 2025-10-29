@@ -567,16 +567,15 @@ impl OrderflowIngress {
         let priority = self.priority_for(entity, EntityRequest::Bundle(&bundle));
 
         // NOTE: Before computing the bundle hash used for indexing and deduplication purposes, we
-        // add two fields if they are not set: the `replacement_nonce` (if applicable) and the `version`.
-        // The replacement nonce is needed to deduplicate replacement bundles correctly, while the
-        // version is tech debt.
+        // add two fields if they are not set: the `replacement_nonce` (if applicable) and the
+        // `version`. The replacement nonce is needed to deduplicate replacement bundles
+        // correctly, while the version is tech debt.
 
         // Set replacement nonce if it is not set and we have a replacement UUID or UUID. This is
         // needed to decode the replacement data correctly in
         // [`SystemBundle::try_from_bundle_and_signer`].
-        if (bundle.metadata.uuid.or(bundle.metadata.replacement_uuid).is_some())
-            && bundle.metadata.replacement_nonce.is_none()
-        {
+        let replacement_uuid = bundle.metadata.uuid.or(bundle.metadata.replacement_uuid);
+        if replacement_uuid.is_some() && bundle.metadata.replacement_nonce.is_none() {
             let timestamp = received_at.utc.unix_timestamp_nanos() / 1000;
             bundle.metadata.replacement_nonce =
                 Some(timestamp.try_into().expect("Timestamp too large"));
