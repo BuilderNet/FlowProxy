@@ -135,7 +135,10 @@ impl IngressForwarders {
     /// Broadcast request to all peers.
     fn broadcast(&self, forward: Arc<ForwardingRequest>) {
         for entry in self.peers.iter() {
-            let _ = entry.value().sender.send(forward.priority(), forward.clone());
+            let handle = entry.value();
+            if let Err(e) = handle.sender.send(forward.priority(), forward.clone()) {
+                error!(?e, peer = %handle.info.name,  "failed to send forwarding request to peer");
+            }
         }
     }
 
