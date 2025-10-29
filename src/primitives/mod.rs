@@ -49,8 +49,6 @@ pub struct SystemBundleMetadata {
 pub struct SystemBundle {
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
     pub raw_bundle: Arc<RawBundle>,
-    /// The bundle hash.
-    pub bundle_hash: B256,
     /// The decoded bundle.
     pub decoded_bundle: Arc<DecodedBundle>,
     /// Metadata about the bundle.
@@ -289,17 +287,13 @@ impl SystemBundleDecoder {
     /// function for the transaction signers. Returns an error if the raw bundle fails to decode.
     fn try_decode_inner(
         &self,
-        mut bundle: RawBundle,
+        bundle: RawBundle,
         metadata: SystemBundleMetadata,
         lookup: Option<impl Fn(B256) -> Option<Address>>,
     ) -> Result<SystemBundle, SystemBundleDecodingError> {
         if bundle.txs.len() > self.max_txs_per_bundle {
             return Err(SystemBundleDecodingError::TooManyTransactions);
         }
-
-        let raw_bundle_hash = bundle.bundle_hash();
-        // Set the bundle hash in the metadata.
-        bundle.metadata.bundle_hash = Some(raw_bundle_hash);
 
         let mut decoded = if let Some(lookup) = lookup {
             bundle.clone().decode_with_signer_lookup(TxEncoding::WithBlobData, lookup)?.into()
@@ -314,7 +308,6 @@ impl SystemBundleDecoder {
         Ok(SystemBundle {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded),
-            bundle_hash: raw_bundle_hash,
             metadata,
         })
     }
@@ -336,7 +329,8 @@ impl SystemBundle {
 
     /// Returns the bundle hash.
     pub fn bundle_hash(&self) -> B256 {
-        self.bundle_hash
+        // Use the provided bundle hash if available, otherwise compute it.
+        self.raw_bundle.metadata.bundle_hash.unwrap_or_else(|| self.raw_bundle.bundle_hash())
     }
 
     /// Returns the bundle if it is a new bundle.
@@ -676,7 +670,7 @@ impl EncodedOrder {
     pub fn hash(&self) -> B256 {
         match self {
             EncodedOrder::SystemOrder(order) => order.inner.hash,
-            EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash,
+            EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::Transaction(tx) => tx.inner.tx_hash(),
         }
@@ -768,6 +762,7 @@ mod tests {
                 bundle_hash: None,
             },
         };
+
         let metadata = SystemBundleMetadata {
             signer: Address::ZERO,
             received_at: UtcInstant::now(),
