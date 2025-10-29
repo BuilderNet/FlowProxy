@@ -6,7 +6,9 @@ use hyper::{Method, StatusCode};
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use rbuilder_utils::clickhouse::Quantities;
 
-use crate::{forwarder::ForwardingDirection, priority::Priority};
+use crate::{
+    ingress::forwarder::ForwardingDirection, primitives::EncodedOrder, priority::Priority,
+};
 
 mod name {
     /// BuilderHub metrics.
@@ -447,6 +449,48 @@ pub struct SystemMetrics;
 
 #[allow(missing_debug_implementations)]
 impl SystemMetrics {
+    pub fn record_e2e_order_processing_time(
+        order: &EncodedOrder,
+        direction: ForwardingDirection,
+        is_big: bool,
+    ) {
+        match order {
+            EncodedOrder::Bundle(_) => {
+                SystemMetrics::record_e2e_bundle_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+            EncodedOrder::MevShareBundle(_) => {
+                SystemMetrics::record_e2e_mev_share_bundle_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+            EncodedOrder::Transaction(_) => {
+                SystemMetrics::record_e2e_transaction_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    is_big,
+                );
+            }
+            EncodedOrder::SystemOrder(_) => {
+                SystemMetrics::record_e2e_system_order_processing_time(
+                    order.received_at().elapsed(),
+                    order.priority(),
+                    direction,
+                    order.order_type(),
+                    is_big,
+                );
+            }
+        }
+    }
+
     #[inline]
     pub fn record_e2e_bundle_processing_time(
         duration: Duration,

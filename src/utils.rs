@@ -4,6 +4,7 @@ use alloy_rlp::{Buf as _, Header};
 use axum::http::HeaderValue;
 use std::time::{Duration, Instant};
 use time::UtcDateTime;
+use uuid::Uuid;
 
 use crate::{statics::START, validation::MAINNET_CHAIN_ID};
 
@@ -75,6 +76,11 @@ impl FormatBytes for u64 {
             format!("{}GiB", self / 1024 / 1024 / 1024)
         }
     }
+}
+
+/// Generate a short UUID v4 string (8 characters).
+pub fn short_uuid_v4() -> String {
+    Uuid::new_v4().as_simple().to_string()[..8].to_string()
 }
 
 /// A module for the concurrent connections limit layer.

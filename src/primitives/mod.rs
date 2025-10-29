@@ -373,6 +373,7 @@ impl SystemBundle {
 pub struct RawOrderMetadata {
     pub priority: Priority,
     pub received_at: UtcInstant,
+    pub hash: B256,
 }
 
 /// Decoded MEV Share bundle.
@@ -564,6 +565,16 @@ pub enum EthResponse {
     TxHash(B256),
 }
 
+impl EthResponse {
+    /// Returns the hash contained in the response.
+    pub fn hash(&self) -> B256 {
+        match self {
+            EthResponse::BundleHash(hash) => *hash,
+            EthResponse::TxHash(hash) => *hash,
+        }
+    }
+}
+
 /// A UTC timestamp along with a monotonic `Instant` to measure elapsed time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UtcInstant {
@@ -652,6 +663,16 @@ impl EncodedOrder {
             EncodedOrder::Bundle(_) => "bundle",
             EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
             EncodedOrder::Transaction(_) => "transaction",
+        }
+    }
+
+    /// Returns the hash of the order.
+    pub fn hash(&self) -> B256 {
+        match self {
+            EncodedOrder::SystemOrder(order) => order.inner.hash,
+            EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash(),
+            EncodedOrder::MevShareBundle(bundle) => bundle.inner.bundle_hash(),
+            EncodedOrder::Transaction(tx) => tx.inner.tx_hash(),
         }
     }
 }

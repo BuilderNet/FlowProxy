@@ -122,12 +122,14 @@ impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
             match e {
-                mpsc::error::TrySendError::Full(bundle) => {
-                    tracing::error!(target: TARGET, bundle_hash = ?bundle.bundle_hash(), "CRITICAL: Failed to send bundle to index, channel is full");
+                mpsc::error::TrySendError::Full(_) => {
+                    tracing::error!("CRITICAL: Failed to send bundle to index, channel is full");
                     IndexerMetrics::increment_bundle_indexing_failures("Full");
                 }
                 mpsc::error::TrySendError::Closed(_) => {
-                    tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle to index, indexer task is closed");
+                    tracing::error!(
+                        "CRITICAL: Failed to send bundle to index, indexer task is closed"
+                    );
                     IndexerMetrics::increment_bundle_indexing_failures("Closed");
                 }
             }

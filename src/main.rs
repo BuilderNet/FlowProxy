@@ -1,8 +1,8 @@
 use clap::Parser;
 use flowproxy::{
     cli::OrderflowIngressArgs,
-    init_tracing,
     runner::{CliContext, CliRunner},
+    trace::init_tracing,
 };
 
 #[cfg(all(feature = "jemalloc", unix))]
@@ -22,6 +22,7 @@ pub(crate) const fn new_allocator() -> Allocator {
 static ALLOC: Allocator = new_allocator();
 
 fn main() {
+    dotenvy::dotenv().ok();
     let args = OrderflowIngressArgs::parse();
     init_tracing(args.log_json);
 
@@ -32,7 +33,7 @@ fn main() {
 
     let runner = CliRunner::from_runtime(tokio_runtime);
 
-    let command = |ctx: CliContext| flowproxy::run(OrderflowIngressArgs::parse(), ctx);
+    let command = |ctx: CliContext| flowproxy::run(args, ctx);
 
     if let Err(e) = runner.run_command_until_exit(command) {
         eprintln!("Orderflow proxy terminated with error: {e}");
