@@ -5068,7 +5068,7 @@ dependencies = [
 [[package]]
 name = "prom-derive"
 version = "0.1.0"
-source = "git+https://github.com/chainbound/prom-derive#849f8ced531dc0dbbeddcd78eeed1a932f787ece"
+source = "git+https://github.com/chainbound/prom-derive#367da4ad5d977dd151681bbbb53f2d01f8c82d5a"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
