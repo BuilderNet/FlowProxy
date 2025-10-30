@@ -1,749 +1,281 @@
-//! Metrics for the system. We don't use `metrics_derive` here because it doesn't allow for dynamic
-//! label
-use std::time::Duration;
+//! FlowProxy metrics with [`prometric_derive`].
+use std::{sync::LazyLock, time::Duration};
 
-use hyper::{Method, StatusCode};
-use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
-use rbuilder_utils::clickhouse::Quantities;
+use prometheus::{Encoder as _, TextEncoder};
+use prometric::{Counter, Gauge, Histogram};
+use prometric_derive::metrics;
+use tokio::net::ToSocketAddrs;
 
-use crate::{
-    ingress::forwarder::ForwardingDirection, primitives::EncodedOrder, priority::Priority,
-};
+/// The system metrics. We use a lazy lock here to make sure they're globally accessible and
+/// initialized only once.
+pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> = LazyLock::new(SystemMetrics::default);
 
-mod name {
-    /// BuilderHub metrics.
-    pub(crate) mod builderhub {
-        pub(crate) const PEER_COUNT: &str = "builderhub_peer_count";
-        pub(crate) const REGISTRATION_FAILURES: &str = "builderhub_registration_failures";
-        pub(crate) const PEER_REQUEST_FAILURES: &str = "builderhub_peer_request_failures";
-    }
+/// Global HTTP metrics.
+pub(crate) static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(HttpMetrics::default);
 
-    /// Forwarder metrics.
-    pub(crate) mod forwarder {
-        pub(crate) const HTTP_CONNECT_FAILURES: &str = "forwarder_http_connect_failures";
-        pub(crate) const HTTP_CALL_FAILURES: &str = "forwarder_http_call_failures";
-        pub(crate) const INFLIGHT_REQUESTS: &str = "forwarder_inflight_http_calls";
-        pub(crate) const OPEN_HTTP_CONNECTIONS: &str = "forwarder_open_http_connections";
-        pub(crate) const JSON_RPC_DECODING_FAILURES: &str = "forwarder_rpc_decoding_failures";
-        pub(crate) const RPC_CALL_DURATION: &str = "forwarder_rpc_call_duration";
-        pub(crate) const RPC_CALL_FAILURES: &str = "forwarder_rpc_call_failures";
-    }
+/// Global Clickhouse metrics.
+pub(crate) static CLICKHOUSE_METRICS: LazyLock<ClickhouseMetrics> =
+    LazyLock::new(ClickhouseMetrics::default);
 
-    /// Indexer metrics.
-    pub(crate) mod indexer {
-        pub(crate) const BUNDLE_INDEXING_FAILURES: &str = "indexer_bundle_indexing_failures";
-        pub(crate) const BUNDLE_RECEIPT_INDEXING_FAILURES: &str =
-            "indexer_bundle_receipt_indexing_failures";
-
-        pub(crate) const CLICKHOUSE_COMMIT_FAILURES: &str = "indexer_clickhouse_commit_failures";
-        pub(crate) const CLICKHOUSE_QUEUE_SIZE: &str = "indexer_clickhouse_queue_size";
-        pub(crate) const CLICKHOUSE_WRITE_FAILURES: &str = "indexer_clickhouse_write_failures";
-        pub(crate) const CLICKHOUSE_ROWS_COMMITTED: &str = "indexer_clickhouse_rows_committed";
-        pub(crate) const CLICKHOUSE_BYTES_COMMITTED: &str = "indexer_clickhouse_bytes_committed";
-        pub(crate) const CLICKHOUSE_BATCHES_COMMITTED: &str =
-            "indexer_clickhouse_batches_committed";
-        pub(crate) const CLICKHOUSE_BATCH_COMMIT_TIME: &str =
-            "indexer_clickhouse_batch_commit_time";
-
-        pub(crate) const CLICKHOUSE_BACKUP_SIZE_BYTES: &str =
-            "indexer_clickhouse_backup_size_bytes";
-        pub(crate) const CLICKHOUSE_BACKUP_SIZE_BATCHES: &str =
-            "indexer_clickhouse_backup_size_batches";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_BYTES: &str =
-            "indexer_clickhouse_backup_data_bytes_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_ROWS: &str =
-            "indexer_clickhouse_backup_data_rows_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_BYTES: &str =
-            "indexer_clickhouse_backup_data_lost_bytes_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_ROWS: &str =
-            "indexer_clickhouse_backup_data_lost_rows_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DISK_ERRORS: &str =
-            "indexer_clickhouse_backup_disk_errors";
-
-        pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
-    }
-
-    /// Ingress metrics.
-    pub(crate) mod ingress {
-        pub(crate) const ENTITY_COUNT: &str = "ingress_entity_count";
-        pub(crate) const HTTP_REQUEST_DURATION: &str = "ingress_http_request_duration";
-        pub(crate) const JSON_RPC_PARSE_ERRORS: &str = "ingress_json_rpc_parse_errors";
-        pub(crate) const JSON_RPC_UNKNOWN_METHOD: &str = "ingress_json_rpc_unknown_method";
-        pub(crate) const ORDER_CACHE_HIT: &str = "ingress_order_cache_hit";
-        pub(crate) const REQUESTS_RATE_LIMITED: &str = "ingress_requests_rate_limited";
-        pub(crate) const RPC_REQUEST_DURATION: &str = "ingress_rpc_request_duration";
-        pub(crate) const VALIDATION_ERRORS: &str = "ingress_validation_errors";
-
-        pub(crate) const REQUEST_BODY_SIZE_DECOMPRESSED: &str =
-            "ingress_request_body_size_decompressed";
-        pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
-        pub(crate) const TXS_PER_MEV_SHARE_BUNDLE: &str = "ingress_txs_per_mev_share_bundle";
-        pub(crate) const TOTAL_EMPTY_BUNDLES: &str = "ingress_total_empty_bundles";
-        pub(crate) const ORDER_CACHE_HIT_RATIO: &str = "ingress_order_cache_hit_ratio";
-        pub(crate) const SIGNER_CACHE_HIT_RATIO: &str = "ingress_signer_cache_hit_ratio";
-        pub(crate) const ORDER_CACHE_ENTRY_COUNT: &str = "ingress_order_cache_entry_count";
-        pub(crate) const SIGNER_CACHE_ENTRY_COUNT: &str = "ingress_signer_cache_entry_count";
-    }
-
-    /// System processing metrics.
-    pub(crate) mod system {
-        pub(crate) const E2E_BUNDLE_PROCESSING_TIME: &str = "system_e2e_bundle_processing_time";
-        pub(crate) const E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME: &str =
-            "system_e2e_mev_share_bundle_processing_time";
-        pub(crate) const E2E_TRANSACTION_PROCESSING_TIME: &str =
-            "system_e2e_transaction_processing_time";
-        pub(crate) const E2E_SYSTEM_ORDER_PROCESSING_TIME: &str =
-            "system_e2e_system_order_processing_time";
-        pub(crate) const QUEUE_CAPACITY_HITS: &str = "system_queue_capacity_hits";
-        pub(crate) const QUEUE_CAPACITY_ALMOST_HITS: &str = "system_queue_capacity_almost_hits";
-    }
+#[derive(Debug)]
+#[metrics(scope = "builderhub")]
+pub(crate) struct BuilderHubMetrics {
+    /// The peer count.
+    #[metric]
+    peer_count: Gauge,
+    /// The total number of peer request failures.
+    #[metric(labels = ["error"])]
+    peer_request_failures: Counter,
 }
 
-use name::*;
+#[metrics(scope = "forwarder")]
+pub(crate) struct HttpMetrics {
+    /// The current number of open HTTP connections.
+    #[metric(labels = ["peer_name"])]
+    open_http_connections: Gauge,
+}
 
-pub fn describe() {
-    // BuilderHub metrics
-    describe_gauge!(builderhub::PEER_COUNT, "Number of active BuilderHub peers");
-    describe_counter!(
-        builderhub::PEER_REQUEST_FAILURES,
-        "Total number of failed get peer requests to BuilderHub"
-    );
-    describe_counter!(
-        builderhub::REGISTRATION_FAILURES,
-        "Total number of failed BuilderHub registrations"
-    );
+/// Forwarder metrics.
+#[metrics(scope = "forwarder")]
+#[derive(Debug, Clone)]
+pub(crate) struct ForwarderMetrics {
+    /// The total number of HTTP connection failures.
+    #[metric(labels = ["reason"])]
+    http_connect_failures: Counter,
+    /// The total number of HTTP call failures.
+    #[metric(labels = ["reason"])]
+    http_call_failures: Counter,
+    /// The current number of inflight HTTP requests.
+    #[metric]
+    inflight_requests: Gauge,
+    /// The total number of JSON-RPC decoding failures.
+    #[metric]
+    json_rpc_decoding_failures: Counter,
+    /// The duration of RPC calls in seconds.
+    #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    rpc_call_duration: Histogram,
+    /// The total number of RPC call failures.
+    #[metric(labels = ["rpc_code"])]
+    rpc_call_failures: Counter,
+}
 
-    // Forwarder metrics
-    describe_counter!(forwarder::HTTP_CALL_FAILURES, "Total number of failed HTTP calls to peers");
-    describe_counter!(
-        forwarder::JSON_RPC_DECODING_FAILURES,
-        "Total number of JSON-RPC response decoding failures"
-    );
-    describe_histogram!(forwarder::RPC_CALL_DURATION, "Duration of RPC calls to peers in seconds");
-    describe_counter!(forwarder::RPC_CALL_FAILURES, "Total number of failed RPC calls to peers");
-    describe_gauge!(forwarder::INFLIGHT_REQUESTS, "Number of inflight HTTP requests to peers");
-    describe_gauge!(forwarder::OPEN_HTTP_CONNECTIONS, "Number of open HTTP connections to peers");
-
-    // Indexer metrics
-    describe_counter!(
-        indexer::BUNDLE_INDEXING_FAILURES,
-        "Total number of bundle indexing failures"
-    );
-    describe_counter!(
-        indexer::BUNDLE_RECEIPT_INDEXING_FAILURES,
-        "Total number of bundle receipt indexing failures"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_COMMIT_FAILURES,
-        "Total number of ClickHouse commit failures"
-    );
-    describe_gauge!(indexer::CLICKHOUSE_QUEUE_SIZE, "Current size of ClickHouse write queue");
-    describe_counter!(
-        indexer::CLICKHOUSE_WRITE_FAILURES,
-        "Total number of ClickHouse write failures (not the same as commit failures)"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_ROWS_COMMITTED,
-        "Total number of rows committed to ClickHouse"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BYTES_COMMITTED,
-        "Total number of bytes committed to ClickHouse"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BATCHES_COMMITTED,
-        "Total number of batches committed to ClickHouse"
-    );
-
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_SIZE_BYTES,
-        "Current size of Clickhouse backup in bytes"
-    );
-
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES,
-        "Current size of Clickhouse backup in batches"
-    );
-
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_BYTES,
-        "Total number of bytes sent to Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_ROWS,
-        "Total number of rows sent to Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_LOST_BYTES,
-        "Total number of bytes lost due to pressure on Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS,
-        "Total number of rows lost due to pressure on Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DISK_ERRORS,
-        "Errors encountered during Clickhouse disk backup"
-    );
-
-    describe_histogram!(
-        indexer::CLICKHOUSE_BATCH_COMMIT_TIME,
-        "Duration of Clickhouse batch commits in seconds"
-    );
-    describe_gauge!(indexer::PARQUET_QUEUE_SIZE, "Current size of Parquet write queue");
-
-    // Ingress metrics
-    describe_gauge!(ingress::ENTITY_COUNT, "Current number of tracked entities");
-    describe_histogram!(
-        ingress::HTTP_REQUEST_DURATION,
-        "Duration of incoming HTTP request handling in seconds"
-    );
-    describe_counter!(ingress::JSON_RPC_PARSE_ERRORS, "Total number of JSON-RPC parsing errors");
-    describe_counter!(
-        ingress::JSON_RPC_UNKNOWN_METHOD,
-        "Total number of incoming unknown JSON-RPC method calls"
-    );
-    describe_counter!(ingress::ORDER_CACHE_HIT, "Total number of order cache hits");
-    describe_gauge!(
-        ingress::ORDER_CACHE_HIT_RATIO,
-        "Ratio of order cache hits (successful cache hits / total orders) by order type"
-    );
-    describe_counter!(
-        ingress::REQUESTS_RATE_LIMITED,
-        "Total number of incoming rate-limited requests"
-    );
-    describe_histogram!(
-        ingress::RPC_REQUEST_DURATION,
-        "Duration of incoming RPC requests in seconds"
-    );
-    describe_counter!(ingress::VALIDATION_ERRORS, "Total number of validation errors");
-
-    describe_histogram!(
-        ingress::REQUEST_BODY_SIZE_DECOMPRESSED,
-        "Size of incoming request bodies in bytes, decompressed"
-    );
-    describe_histogram!(ingress::TXS_PER_BUNDLE, "Number of transactions per bundle");
-    describe_histogram!(
-        ingress::TXS_PER_MEV_SHARE_BUNDLE,
-        "Number of transactions per MEV-share bundle"
-    );
-    describe_counter!(ingress::TOTAL_EMPTY_BUNDLES, "Total number of cancellation bundles");
-    describe_gauge!(
-        ingress::SIGNER_CACHE_HIT_RATIO,
-        "Ratio of transaction signer cache hits (successful cache hits / total transactions)"
-    );
-    describe_gauge!(ingress::ORDER_CACHE_ENTRY_COUNT, "Number of entries in the order cache");
-    describe_gauge!(ingress::SIGNER_CACHE_ENTRY_COUNT, "Number of entries in the signer cache");
-
-    // System end-to-end processing metrics
-    describe_histogram!(
-        system::E2E_BUNDLE_PROCESSING_TIME,
-        "End-to-end bundle processing time in seconds"
-    );
-    describe_histogram!(
-        system::E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME,
-        "End-to-end MEV-share bundle processing time in seconds"
-    );
-    describe_histogram!(
-        system::E2E_TRANSACTION_PROCESSING_TIME,
-        "End-to-end transaction processing time in seconds"
-    );
-    describe_histogram!(
-        system::E2E_SYSTEM_ORDER_PROCESSING_TIME,
-        "End-to-end system order processing time in seconds"
-    );
-    describe_counter!(
-        system::QUEUE_CAPACITY_HITS,
-        "Number of times the queue capacity was hit per priority"
-    );
-    describe_counter!(
-        system::QUEUE_CAPACITY_ALMOST_HITS,
-        "Number of times the queue capacity was almost hit per priority (>= 75% of capacity)"
-    );
+#[derive(Debug, Clone)]
+#[metrics(scope = "ingress")]
+pub(crate) struct IngressMetrics {
+    /// The current number of entities.
+    #[metric]
+    entity_count: Gauge,
+    /// The total number of requests rate limited.
+    #[metric]
+    requests_rate_limited: Counter,
+    /// The total number of JSON-RPC parsing errors.
+    #[metric(labels = ["method"])]
+    json_rpc_parse_errors: Counter,
+    /// The total number of JSON-RPC unknown methods.
+    #[metric(labels = ["method"])]
+    json_rpc_unknown_method: Counter,
+    /// The total number of order cache hits.
+    #[metric(labels = ["order_type"])]
+    order_cache_hit: Counter,
+    /// Request body size in bytes.
+    #[metric(rename = "request_body_size_bytes", labels = ["method"], buckets = [128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0, 262144.0, 524288.0, 1048576.0, 2097152.0, 4194304.0])]
+    request_body_size: Histogram,
+    /// The total number of validation errors.
+    #[metric(labels = ["error"])]
+    validation_errors: Counter,
+    /// The duration of HTTP requests.
+    #[metric(labels = ["method", "path", "status"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    http_request_duration: Histogram,
+    /// The duration of RPC calls.
+    #[metric(labels = ["method", "priority"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    rpc_request_duration: Histogram,
+    /// The number of transactions per bundle.
+    #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
+    txs_per_bundle: Histogram,
+    /// The number of transactions per MEV-share bundle.
+    #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
+    txs_per_mev_share_bundle: Histogram,
+    /// The total number of empty bundles.
+    #[metric]
+    total_empty_bundles: Counter,
+    /// The order cache hit ratio.
+    #[metric]
+    order_cache_hit_ratio: Gauge,
+    /// The signer cache hit ratio.
+    #[metric]
+    signer_cache_hit_ratio: Gauge,
+    /// The current order cache entry count.
+    #[metric]
+    order_cache_entry_count: Gauge,
+    /// The current signer cache entry count.
+    #[metric]
+    signer_cache_entry_count: Gauge,
 }
 
 #[derive(Debug)]
-pub struct ForwarderMetrics;
-
-impl ForwarderMetrics {
-    /// Set the number of inflight HTTP requests.
-    #[inline]
-    pub fn set_inflight_requests(count: usize) {
-        gauge!(forwarder::INFLIGHT_REQUESTS).set(count as f64);
-    }
-
-    /// Set the number of open HTTP connections.
-    #[inline]
-    pub fn set_open_http_connections(count: usize, peer_name: String) {
-        gauge!(forwarder::OPEN_HTTP_CONNECTIONS, "peer_name" => peer_name).set(count as f64);
-    }
-
-    /// The duration of the RPC call to a peer.
-    #[inline]
-    pub fn record_rpc_call(
-        peer_name: String,
-        order_type: &'static str,
-        duration: Duration,
-        big_request: bool,
-    ) {
-        histogram!(forwarder::RPC_CALL_DURATION, "peer_name" => peer_name, "order_type" => order_type, "big_request" => big_request.to_string()).record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn increment_http_connect_failures(peer_name: String, reason: String) {
-        counter!(forwarder::HTTP_CONNECT_FAILURES, "peer_name" => peer_name, "reason" => reason)
-            .increment(1);
-    }
-
-    #[inline]
-    pub fn increment_http_call_failures(peer_name: String, reason: String) {
-        counter!(forwarder::HTTP_CALL_FAILURES, "peer_name" => peer_name, "reason" => reason)
-            .increment(1);
-    }
-
-    #[inline]
-    pub fn increment_rpc_call_failures(peer_name: String, rpc_code: i32) {
-        counter!(forwarder::RPC_CALL_FAILURES, "peer_name" => peer_name, "rpc_code" => rpc_code.to_string()).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_json_rpc_decoding_failures(peer_name: String) {
-        counter!(forwarder::JSON_RPC_DECODING_FAILURES, "peer_name" => peer_name).increment(1);
-    }
+#[metrics(scope = "indexer")]
+pub struct IndexerMetrics {
+    /// The total number of bundle indexing failures.
+    #[metric(labels = ["error"])]
+    bundle_indexing_failures: Counter,
+    /// The total number of bundle receipt indexing failures.
+    #[metric(labels = ["error"])]
+    bundle_receipt_indexing_failures: Counter,
 }
 
-pub trait IngressHandlerMetricsExt {
-    const HANDLER: &str;
-
-    #[inline]
-    fn set_entity_count(count: usize) {
-        gauge!(ingress::ENTITY_COUNT).set(count as f64);
-    }
-
-    #[inline]
-    fn increment_requests_rate_limited() {
-        counter!(ingress::REQUESTS_RATE_LIMITED, "handler" => Self::HANDLER).increment(1);
-    }
-
-    #[inline]
-    fn increment_json_rpc_parse_errors(method: &'static str) {
-        counter!(ingress::JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER, "method" => method)
-            .increment(1);
-    }
-
-    #[inline]
-    fn increment_json_rpc_unknown_method(method: String) {
-        counter!(ingress::JSON_RPC_UNKNOWN_METHOD, "handler" => Self::HANDLER, "method" => method)
-            .increment(1);
-    }
-
-    #[inline]
-    fn increment_validation_errors<E: std::error::Error>(error: &E) {
-        counter!(ingress::VALIDATION_ERRORS, "handler" => Self::HANDLER, "error" => error.to_string()).increment(1);
-    }
-
-    #[inline]
-    fn increment_order_cache_hit(order_type: &'static str) {
-        counter!(ingress::ORDER_CACHE_HIT, "handler" => Self::HANDLER, "order_type" => order_type)
-            .increment(1);
-    }
-
-    #[inline]
-    fn record_http_request(method: &Method, path: String, status: StatusCode, duration: Duration) {
-        let method = match *method {
-            Method::GET => "GET",
-            Method::POST => "POST",
-            Method::PUT => "PUT",
-            _ => "Unhandled",
-        };
-
-        let reason = status.canonical_reason().unwrap_or("unknown");
-
-        histogram!(ingress::HTTP_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => method, "path" => path, "status" => reason).record(duration.as_secs_f64());
-    }
-
-    // BUNDLES
-    #[inline]
-    fn record_txs_per_bundle(txs: usize) {
-        histogram!(ingress::TXS_PER_BUNDLE, "handler" => Self::HANDLER).record(txs as f64);
-    }
-
-    #[inline]
-    fn record_txs_per_mev_share_bundle(txs: usize) {
-        histogram!(ingress::TXS_PER_MEV_SHARE_BUNDLE, "handler" => Self::HANDLER)
-            .record(txs as f64);
-    }
-
-    #[inline]
-    fn record_request_body_size_bytes(size: usize, method: &'static str) {
-        histogram!(ingress::REQUEST_BODY_SIZE_DECOMPRESSED, "handler" => Self::HANDLER, method => "method")
-            .record(size as f64);
-    }
-
-    /// The duration of the `eth_sendBundle` RPC call.
-    #[inline]
-    fn record_bundle_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "eth_sendBundle", "priority" => priority.as_str())
-            .record(duration.as_secs_f64());
-    }
-
-    /// The duration of the `mev_sendBundle` RPC call.
-    #[inline]
-    fn record_mev_share_bundle_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "mev_sendBundle", "priority" => priority.as_str())
-            .record(duration.as_secs_f64());
-    }
-
-    /// The duration of the `eth_sendRawTransaction` RPC call.
-    #[inline]
-    fn record_transaction_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "eth_sendRawTransaction", "priority" => priority.as_str())
-            .record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    fn increment_empty_bundles() {
-        counter!(ingress::TOTAL_EMPTY_BUNDLES, "handler" => Self::HANDLER).increment(1);
-    }
-
-    /// Set the order cache hit ratio.
-    #[inline]
-    fn set_order_cache_hit_ratio(ratio: f64) {
-        gauge!(ingress::ORDER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
-    }
-
-    #[inline]
-    fn set_order_cache_entry_count(count: u64) {
-        gauge!(ingress::ORDER_CACHE_ENTRY_COUNT, "handler" => Self::HANDLER).set(count as f64);
-    }
-
-    /// Set the signer cache hit ratio.
-    #[inline]
-    fn set_signer_cache_hit_ratio(ratio: f64) {
-        gauge!(ingress::SIGNER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
-    }
-
-    #[inline]
-    fn set_signer_cache_entry_count(count: u64) {
-        gauge!(ingress::SIGNER_CACHE_ENTRY_COUNT, "handler" => Self::HANDLER).set(count as f64);
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct IngressUserMetrics;
-
-impl IngressHandlerMetricsExt for IngressUserMetrics {
-    const HANDLER: &'static str = "user";
-}
-
-#[derive(Clone, Debug)]
-pub struct IngressSystemMetrics;
-
-impl IngressHandlerMetricsExt for IngressSystemMetrics {
-    const HANDLER: &'static str = "system";
-}
-
-/// Metrics related to the whole system.
 #[derive(Debug, Clone)]
-pub struct SystemMetrics;
+#[metrics(scope = "indexer_clickhouse")]
+pub struct ClickhouseMetrics {
+    /// Total number of ClickHouse commit failures.
+    #[metric(labels = ["error"])]
+    commit_failures: Counter,
+    /// Current size of ClickHouse write queue.
+    #[metric(rename = "queue_size", labels = ["order"])]
+    queue_len: Gauge,
+    /// Total number of ClickHouse write failures.
+    #[metric(labels = ["error"])]
+    write_failures: Counter,
+    /// Total number of rows committed to ClickHouse.
+    #[metric]
+    rows_committed: Counter,
+    /// Total number of bytes committed to ClickHouse.
+    #[metric]
+    bytes_committed: Counter,
+    /// Total number of batches committed to ClickHouse.
+    #[metric]
+    batches_committed: Counter,
+    /// Duration of Clickhouse batch commits in seconds.
+    #[metric(buckets = [0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0, 4.0, 8.0, 16.0])]
+    batch_commit_time: Histogram,
+    /// Current size of ClickHouse backup in bytes.
+    #[metric(labels = ["order", "backend"])]
+    backup_size_bytes: Gauge,
+    /// Current size of ClickHouse backup in batches.
+    #[metric(labels = ["order", "backend"])]
+    backup_size_batches: Gauge,
+    /// Total number of bytes sent to Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_bytes_total")]
+    backup_data_bytes: Counter,
+    /// Total number of rows sent to Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_rows_total")]
+    backup_data_rows: Counter,
+    /// Total number of bytes lost due to pressure on Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_lost_bytes_total")]
+    backup_data_lost_bytes: Counter,
+    /// Total number of rows lost due to pressure on Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_lost_rows_total")]
+    backup_data_lost_rows: Counter,
+    /// Errors encountered during Clickhouse disk backup.
+    #[metric(labels = ["order", "error"])]
+    backup_disk_errors: Counter,
+}
 
-#[allow(missing_debug_implementations)]
-impl SystemMetrics {
-    pub fn record_e2e_order_processing_time(
-        order: &EncodedOrder,
-        direction: ForwardingDirection,
-        is_big: bool,
-    ) {
-        match order {
-            EncodedOrder::Bundle(_) => {
-                SystemMetrics::record_e2e_bundle_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    is_big,
-                );
-            }
-            EncodedOrder::MevShareBundle(_) => {
-                SystemMetrics::record_e2e_mev_share_bundle_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    is_big,
-                );
-            }
-            EncodedOrder::Transaction(_) => {
-                SystemMetrics::record_e2e_transaction_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    is_big,
-                );
-            }
-            EncodedOrder::SystemOrder(_) => {
-                SystemMetrics::record_e2e_system_order_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    order.order_type(),
-                    is_big,
-                );
-            }
+#[metrics(scope = "indexer_parquet")]
+pub(crate) struct ParquetMetrics {
+    /// Current size of Parquet write queue.
+    #[metric(labels = ["order"])]
+    queue_size: Gauge,
+}
+
+#[derive(Debug, Clone)]
+#[metrics(scope = "system")]
+pub(crate) struct SystemMetrics {
+    /// End-to-end bundle processing time in seconds.
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    bundle_processing_time: Histogram,
+    /// End-to-end MEV-share bundle processing time in seconds.
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    mev_share_bundle_processing_time: Histogram,
+    /// End-to-end transaction processing time in seconds.
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    transaction_processing_time: Histogram,
+    /// End-to-end system order processing time in seconds.
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    system_order_processing_time: Histogram,
+    /// Number of times the queue capacity was hit per priority.
+    #[metric(labels = ["priority"])]
+    queue_capacity_hits: Counter,
+    /// Number of times the queue capacity was almost hit per priority (>= 75% of capacity).
+    #[metric(labels = ["priority"])]
+    queue_capacity_almost_hits: Counter,
+}
+
+#[derive(Debug)]
+#[metrics(scope = "process")]
+pub struct ProcessMetrics {
+    /// Total user and system CPU time spent in seconds.
+    #[metric]
+    cpu_seconds_total: Gauge,
+    /// Number of open file descriptors.
+    #[metric]
+    open_fds: Gauge,
+    /// Maximum number of open file descriptors.
+    #[metric]
+    max_fds: Gauge,
+    /// Virtual memory size in bytes.
+    #[metric]
+    virtual_memory_bytes: Gauge,
+    /// Maximum amount of virtual memory available in bytes.
+    #[metric]
+    virtual_memory_max_bytes: Gauge,
+    /// Resident memory size in bytes.
+    #[metric]
+    resident_memory_bytes: Gauge,
+    /// Start time of the process since unix epoch in seconds.
+    #[metric]
+    start_time_seconds: Gauge,
+    /// Numberof OS threads in the process.
+    #[metric]
+    threads: Gauge,
+}
+
+impl ProcessMetrics {
+    pub fn update(&self, metrics: metrics_process::collector::Metrics) {
+        self.cpu_seconds_total().set(metrics.cpu_seconds_total.unwrap_or(0.0) as i64);
+        self.open_fds().set(metrics.open_fds.unwrap_or(0) as i64);
+        self.max_fds().set(metrics.max_fds.unwrap_or(0) as i64);
+        self.virtual_memory_bytes().set(metrics.virtual_memory_bytes.unwrap_or(0) as i64);
+        self.virtual_memory_max_bytes().set(metrics.virtual_memory_max_bytes.unwrap_or(0) as i64);
+        self.resident_memory_bytes().set(metrics.resident_memory_bytes.unwrap_or(0) as i64);
+        self.start_time_seconds().set(metrics.start_time_seconds.unwrap_or(0) as i64);
+        self.threads().set(metrics.threads.unwrap_or(0) as i64);
+    }
+}
+
+/// Start prometheus at provider address.
+pub(crate) async fn spawn_prometheus_server<A: ToSocketAddrs>(address: A) -> eyre::Result<()> {
+    // Get the default registry
+    let registry = prometheus::default_registry().clone();
+
+    let router = axum::Router::new()
+        .route("/metrics", axum::routing::get(metrics_handler))
+        .route("/", axum::routing::get(metrics_handler))
+        .with_state(registry);
+
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    let process_metrics = ProcessMetrics::default();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            process_metrics.update(metrics_process::collector::collect());
         }
-    }
+    });
 
-    #[inline]
-    pub fn record_e2e_bundle_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_BUNDLE_PROCESSING_TIME, &labels).record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn record_e2e_mev_share_bundle_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME, &labels)
-            .record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn record_e2e_transaction_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_TRANSACTION_PROCESSING_TIME, &labels).record(duration.as_secs_f64());
-    }
-
-    pub fn record_e2e_system_order_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        order_type: &'static str,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("order_type", order_type),
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_SYSTEM_ORDER_PROCESSING_TIME, &labels)
-            .record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn increment_queue_capacity_hit(priority: Priority) {
-        counter!(system::QUEUE_CAPACITY_HITS, "priority" => priority.as_str()).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_queue_capacity_almost_hit(priority: Priority) {
-        counter!(system::QUEUE_CAPACITY_ALMOST_HITS, "priority" => priority.as_str()).increment(1);
-    }
+    Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub struct BuilderHubMetrics;
+async fn metrics_handler(
+    axum::extract::State(registry): axum::extract::State<prometheus::Registry>,
+) -> impl axum::response::IntoResponse {
+    let encoder = TextEncoder::new();
+    let mut metrics = registry.gather();
+    // Prepend "orderflow_proxy" to the metric name.
+    metrics.iter_mut().for_each(|m| m.mut_name().insert_str(0, "flowproxy_"));
+    let mut buffer = Vec::new();
 
-#[allow(missing_debug_implementations)]
-impl BuilderHubMetrics {
-    #[inline]
-    pub fn increment_builderhub_peer_request_failures(err: String) {
-        counter!(builderhub::PEER_REQUEST_FAILURES, "error" => err).increment(1);
-    }
+    encoder.encode(&metrics, &mut buffer).unwrap();
 
-    #[inline]
-    pub fn increment_builderhub_registration_failures(err: String) {
-        counter!(builderhub::REGISTRATION_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn builderhub_peer_count(count: usize) {
-        gauge!(builderhub::PEER_COUNT).set(count as f64);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IndexerMetrics;
-
-impl IndexerMetrics {
-    // Counters
-
-    #[inline]
-    pub fn increment_bundle_indexing_failures(err: &'static str) {
-        counter!(indexer::BUNDLE_INDEXING_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_bundle_receipt_indexing_failures(err: &'static str) {
-        counter!(indexer::BUNDLE_RECEIPT_INDEXING_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_clickhouse_write_failures(err: String) {
-        counter!(indexer::CLICKHOUSE_WRITE_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_clickhouse_commit_failures(err: String) {
-        counter!(indexer::CLICKHOUSE_COMMIT_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    fn increment_clickhouse_backup_data_bytes(size: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_BYTES).increment(size);
-    }
-
-    fn increment_clickhouse_backup_data_rows(count: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_ROWS).increment(count);
-    }
-
-    /// Process the quantities of data lost because pressure has been applied to backup.
-    #[inline]
-    pub fn process_clickhouse_backup_data_quantities(quantities: &Quantities) {
-        Self::increment_clickhouse_backup_data_bytes(quantities.bytes);
-        Self::increment_clickhouse_backup_data_rows(quantities.rows);
-    }
-
-    #[inline]
-    fn increment_clickhouse_backup_data_lost_bytes(size: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_LOST_BYTES).increment(size);
-    }
-
-    fn increment_clickhouse_backup_data_lost_rows(count: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS).increment(count);
-    }
-
-    /// Process the quantities of data lost because pressure has been applied to backup.
-    #[inline]
-    pub fn process_clickhouse_backup_data_lost_quantities(quantities: &Quantities) {
-        Self::increment_clickhouse_backup_data_lost_bytes(quantities.bytes);
-        Self::increment_clickhouse_backup_data_lost_rows(quantities.rows);
-    }
-
-    /// Process the quantities from the Clickhouse inserter. No-op if the quantities are zero.
-    #[inline]
-    pub fn process_clickhouse_quantities(quantities: &Quantities) {
-        if quantities == &Quantities::ZERO {
-            return;
-        }
-
-        Self::increment_clickhouse_rows_committed(quantities.rows);
-        Self::increment_clickhouse_bytes_committed(quantities.bytes);
-        Self::increment_clickhouse_batches_committed();
-    }
-
-    #[inline]
-    fn increment_clickhouse_rows_committed(rows: u64) {
-        counter!(indexer::CLICKHOUSE_ROWS_COMMITTED).increment(rows);
-    }
-
-    #[inline]
-    fn increment_clickhouse_bytes_committed(bytes: u64) {
-        counter!(indexer::CLICKHOUSE_BYTES_COMMITTED).increment(bytes);
-    }
-
-    fn increment_clickhouse_batches_committed() {
-        counter!(indexer::CLICKHOUSE_BATCHES_COMMITTED).increment(1);
-    }
-
-    // Gauges
-
-    #[inline]
-    pub fn set_clickhouse_queue_size(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_QUEUE_SIZE, "order" => order).set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_memory_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        Self::set_clickhouse_backup_memory_size_bytes(size_bytes, order);
-        Self::set_clickhouse_backup_memory_size_batches(batches, order);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_memory_size_bytes(size: u64, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "backup" => "memory", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_memory_size_batches(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "backup" => "memory", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_disk_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        Self::set_clickhouse_backup_disk_size_bytes(size_bytes, order);
-        Self::set_clickhouse_backup_disk_size_batches(batches, order);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_disk_size_bytes(size: u64, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "backup" => "disk", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_disk_size_batches(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "backup" => "disk", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_empty_size(order: &'static str) {
-        Self::set_clickhouse_backup_memory_size_bytes(0, order);
-        Self::set_clickhouse_backup_memory_size_batches(0, order);
-        Self::set_clickhouse_backup_disk_size_bytes(0, order);
-        Self::set_clickhouse_backup_disk_size_batches(0, order);
-    }
-
-    #[inline]
-    pub fn increment_clickhouse_backup_disk_errors(order: &'static str, error: &str) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DISK_ERRORS, "order" => order, "error" => error.to_string())
-            .increment(1);
-    }
-
-    #[inline]
-    pub fn set_parquet_queue_size(size: usize, order: &'static str) {
-        gauge!(indexer::PARQUET_QUEUE_SIZE, "order" => order).set(size as f64);
-    }
-
-    // Histograms
-
-    #[inline]
-    pub fn record_clickhouse_batch_commit_time(duration: Duration) {
-        histogram!(indexer::CLICKHOUSE_BATCH_COMMIT_TIME).record(duration.as_secs_f64());
-    }
+    (hyper::StatusCode::OK, [(hyper::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())], buffer)
 }

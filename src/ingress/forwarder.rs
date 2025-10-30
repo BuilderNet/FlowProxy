@@ -5,7 +5,7 @@ use crate::{
         FLASHBOTS_SIGNATURE_HEADER,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
-    metrics::{ForwarderMetrics, SystemMetrics},
+    metrics::{ForwarderMetrics, SYSTEM_METRICS},
     primitives::{
         EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithEncoding,
@@ -363,6 +363,8 @@ struct HttpForwarder {
     error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
+    /// The metrics for the forwarder.
+    metrics: ForwarderMetrics,
 }
 
 impl HttpForwarder {
@@ -373,11 +375,14 @@ impl HttpForwarder {
         request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> (Self, ResponseErrorDecoder) {
         let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
+        let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
         let decoder = ResponseErrorDecoder {
             peer_name: name.clone(),
             peer_url: url.clone(),
             rx: error_decoder_rx,
+            metrics: metrics.clone(),
         };
+
         (
             Self {
                 client,
@@ -386,6 +391,7 @@ impl HttpForwarder {
                 request_rx,
                 pending: FuturesUnordered::new(),
                 error_decoder_tx,
+                metrics,
             },
             decoder,
         )
@@ -413,7 +419,7 @@ impl HttpForwarder {
                 |inner| (inner.encoded_order, inner.headers),
             );
 
-            SystemMetrics::record_e2e_order_processing_time(&order, direction, is_big);
+            record_e2e_metrics(&order, &direction, is_big);
 
             let order_type = order.order_type();
             let start_time = Instant::now();
@@ -466,19 +472,16 @@ impl HttpForwarder {
                     }
 
                     // Only record success if the status is OK.
-                    ForwarderMetrics::record_rpc_call(
-                        self.peer_name.clone(),
-                        order_type,
-                        elapsed,
-                        is_big,
-                    );
+                    self.metrics
+                        .rpc_call_duration(order_type, is_big.to_string())
+                        .observe(elapsed.as_secs_f64());
                 } else {
                     // If we have a non-OK status code, also record it.
                     error!("failed to forward request");
-                    ForwarderMetrics::increment_http_call_failures(
-                        self.peer_name.clone(),
-                        status.canonical_reason().map(String::from).unwrap_or(status.to_string()),
-                    );
+                    let reason =
+                        status.canonical_reason().map(String::from).unwrap_or(status.to_string());
+
+                    self.metrics.http_call_failures(reason).inc();
 
                     if let Err(e) =
                         self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
@@ -500,12 +503,9 @@ impl HttpForwarder {
 
                 if error.is_connect() {
                     warn!(?reason, "connection error");
-                    ForwarderMetrics::increment_http_connect_failures(
-                        self.peer_name.clone(),
-                        reason,
-                    );
+                    self.metrics.http_connect_failures(reason).inc();
                 } else {
-                    ForwarderMetrics::increment_http_call_failures(self.peer_name.clone(), reason);
+                    self.metrics.http_call_failures(reason).inc();
                 }
             }
         }
@@ -537,11 +537,54 @@ impl Future for HttpForwarder {
                 let fut = this.send_http_request(request);
                 this.pending.push(fut);
 
-                ForwarderMetrics::set_inflight_requests(this.pending.len());
+                this.metrics.inflight_requests().set(this.pending.len() as i64);
                 continue;
             }
 
             return Poll::Pending;
+        }
+    }
+}
+
+/// Record the end-to-end metrics for the request.
+fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_big: bool) {
+    match order {
+        EncodedOrder::Bundle(_) => {
+            SYSTEM_METRICS
+                .bundle_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
+        }
+        EncodedOrder::MevShareBundle(_) => {
+            SYSTEM_METRICS
+                .mev_share_bundle_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
+        }
+        EncodedOrder::Transaction(_) => {
+            SYSTEM_METRICS
+                .transaction_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
+        }
+        EncodedOrder::SystemOrder(_) => {
+            SYSTEM_METRICS
+                .system_order_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    order.order_type(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
         }
     }
 }
@@ -581,6 +624,8 @@ pub struct ResponseErrorDecoder {
     pub peer_url: String,
     /// The receiver of the error responses.
     pub rx: mpsc::Receiver<ErrorDecoderInput>,
+    /// Metrics from the associated forwarder.
+    pub(crate) metrics: ForwarderMetrics,
 }
 
 impl ResponseErrorDecoder {
@@ -590,12 +635,12 @@ impl ResponseErrorDecoder {
             Ok(body) => {
                 if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
                     error!(%code, %message, "decoded error response from builder");
-                    ForwarderMetrics::increment_rpc_call_failures(self.peer_name.clone(), code);
+                    self.metrics.rpc_call_failures(code.to_string()).inc();
                 }
             }
             Err(e) => {
                 warn!(?e, "failed to decode response into json-rpc");
-                ForwarderMetrics::increment_json_rpc_decoding_failures(self.peer_name.clone());
+                self.metrics.json_rpc_decoding_failures().inc();
             }
         }
     }

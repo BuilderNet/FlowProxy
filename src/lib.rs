@@ -4,14 +4,14 @@ use crate::{
     builderhub::PeersUpdater,
     cache::SignerCache,
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
-    metrics::{IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics},
+    metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
 };
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
-    extract::{DefaultBodyLimit, Request},
+    extract::{DefaultBodyLimit, Request, State},
     middleware::Next,
     response::Response,
     routing::{get, post},
@@ -19,10 +19,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
-use eyre::Context as _;
 use ingress::forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::{PrefixLayer, Stack};
 use reqwest::Url;
 use std::{
     net::SocketAddr,
@@ -65,8 +62,7 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     fdlimit::raise_fd_limit()?;
 
     if let Some(ref metrics_addr) = args.metrics {
-        spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
-        metrics::describe();
+        metrics::spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?).await?;
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
@@ -193,6 +189,8 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
+        system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
 
     // Spawn a state maintenance task.
@@ -213,7 +211,10 @@ pub async fn run_with_listeners(
         .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
-        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressUserMetrics>))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(ingress.user_metrics.clone()),
+            track_server_metrics,
+        ))
         .with_state(ingress.clone());
     let addr = user_listener.local_addr()?;
     tracing::info!(target: "ingress", ?addr, "Starting user ingress server");
@@ -225,9 +226,11 @@ pub async fn run_with_listeners(
         .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
-        .layer(DefaultBodyLimit::max(args.max_request_size))
         // TODO: After mTLS, we can probably take this out.
-        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(ingress.user_metrics.clone()),
+            track_server_metrics,
+        ))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
     tracing::info!(target: "ingress", ?addr, "Starting system ingress server");
@@ -255,43 +258,21 @@ pub async fn run_with_listeners(
     Ok(())
 }
 
-/// Start prometheus at provider address.
-fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> {
-    let (recorder, exporter) = PrometheusBuilder::new().with_http_listener(address).build()?;
-
-    // Prefix all metrics with provider prefix
-    Stack::new(recorder)
-        .push(PrefixLayer::new("orderflow_proxy"))
-        .install()
-        .wrap_err("unable to install metrics recorder")?;
-
-    tokio::spawn(exporter);
-
-    let collector = metrics_process::Collector::default();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            collector.collect();
-        }
-    });
-
-    Ok(())
-}
-
 /// Middleware to track server metrics.
-async fn track_server_metrics<T: IngressHandlerMetricsExt>(
+async fn track_server_metrics(
+    State(metrics): State<Arc<IngressMetrics>>,
     request: Request,
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_string();
-    let method = request.method().clone();
+    let method = request.method().to_string();
 
     let start = Instant::now();
     let response = next.run(request).await;
     let latency = start.elapsed();
-    let status = response.status();
+    let status = response.status().as_u16().to_string();
 
-    T::record_http_request(&method, path, status, latency);
+    metrics.http_request_duration(&method, &path, &status).observe(latency.as_secs_f64());
 
     response
 }

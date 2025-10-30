@@ -19,7 +19,7 @@ use crate::{
         click::models::{BundleReceiptRow, BundleRow},
         OrderReceivers, TARGET,
     },
-    metrics::IndexerMetrics,
+    metrics::CLICKHOUSE_METRICS,
 };
 
 mod models;
@@ -34,51 +34,60 @@ fn config_from_clickhouse_args(args: &ClickhouseArgs, validation: bool) -> Click
     }
 }
 
-struct Metrics {}
+struct MetricsWrapper;
 
-impl rbuilder_utils::clickhouse::backup::metrics::Metrics for Metrics {
+impl rbuilder_utils::clickhouse::backup::metrics::Metrics for MetricsWrapper {
     fn increment_write_failures(err: String) {
-        IndexerMetrics::increment_clickhouse_write_failures(err);
+        CLICKHOUSE_METRICS.write_failures(err).inc();
     }
 
     fn process_quantities(quantities: &Quantities) {
-        IndexerMetrics::process_clickhouse_quantities(quantities);
+        CLICKHOUSE_METRICS.bytes_committed().inc_by(quantities.bytes);
+        CLICKHOUSE_METRICS.rows_committed().inc_by(quantities.rows);
+        CLICKHOUSE_METRICS.batches_committed().inc();
     }
 
     fn record_batch_commit_time(duration: Duration) {
-        IndexerMetrics::record_clickhouse_batch_commit_time(duration);
+        CLICKHOUSE_METRICS.batch_commit_time().observe(duration.as_secs_f64());
     }
 
     fn increment_commit_failures(err: String) {
-        IndexerMetrics::increment_clickhouse_commit_failures(err);
+        CLICKHOUSE_METRICS.commit_failures(err).inc();
     }
 
     fn set_queue_size(size: usize, order: &'static str) {
-        IndexerMetrics::set_clickhouse_queue_size(size, order);
+        CLICKHOUSE_METRICS.queue_len(order).set(size as i64);
     }
 
     fn set_disk_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        IndexerMetrics::set_clickhouse_disk_backup_size(size_bytes, batches, order);
+        CLICKHOUSE_METRICS.backup_size_bytes(order, "disk").set(size_bytes as i64);
+        CLICKHOUSE_METRICS.backup_size_batches(order, "disk").set(batches as i64);
     }
 
     fn increment_backup_disk_errors(order: &'static str, error: &str) {
-        IndexerMetrics::increment_clickhouse_backup_disk_errors(order, error);
+        CLICKHOUSE_METRICS.backup_disk_errors(order, error).inc();
     }
 
     fn set_memory_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        IndexerMetrics::set_clickhouse_memory_backup_size(size_bytes, batches, order);
+        CLICKHOUSE_METRICS.backup_size_bytes(order, "memory").set(size_bytes as i64);
+        CLICKHOUSE_METRICS.backup_size_batches(order, "memory").set(batches as i64);
     }
 
     fn process_backup_data_lost_quantities(quantities: &Quantities) {
-        IndexerMetrics::process_clickhouse_backup_data_lost_quantities(quantities);
+        CLICKHOUSE_METRICS.backup_data_lost_bytes().inc_by(quantities.bytes);
+        CLICKHOUSE_METRICS.backup_data_lost_rows().inc_by(quantities.rows);
     }
 
     fn process_backup_data_quantities(quantities: &Quantities) {
-        IndexerMetrics::process_clickhouse_backup_data_quantities(quantities);
+        CLICKHOUSE_METRICS.backup_data_bytes().inc_by(quantities.bytes);
+        CLICKHOUSE_METRICS.backup_data_rows().inc_by(quantities.rows);
     }
 
     fn set_backup_empty_size(order: &'static str) {
-        IndexerMetrics::set_clickhouse_backup_empty_size(order);
+        CLICKHOUSE_METRICS.backup_size_bytes(order, "disk").set(0);
+        CLICKHOUSE_METRICS.backup_size_batches(order, "disk").set(0);
+        CLICKHOUSE_METRICS.backup_size_bytes(order, "memory").set(0);
+        CLICKHOUSE_METRICS.backup_size_batches(order, "memory").set(0);
     }
 }
 
@@ -117,11 +126,11 @@ impl ClickhouseIndexer {
 
         let (tx, rx) = mpsc::channel(128);
         let bundle_inserter = default_inserter(&client, &bundles_table_name);
-        let bundle_inserter = ClickhouseInserter::<_, Metrics>::new(bundle_inserter, tx);
+        let bundle_inserter = ClickhouseInserter::<_, MetricsWrapper>::new(bundle_inserter, tx);
         let mut bundle_inserter_runner =
             InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
 
-        let mut bundle_backup = Backup::<BundleRow, Metrics>::new(
+        let mut bundle_backup = Backup::<BundleRow, MetricsWrapper>::new(
             rx,
             client
                 .inserter(&bundles_table_name)
@@ -133,10 +142,10 @@ impl ClickhouseIndexer {
         let (tx, rx) = mpsc::channel(128);
         let bundle_receipt_inserter = default_inserter(&client, &bundle_receipts_table_name);
         let bundle_receipt_inserter =
-            ClickhouseInserter::<_, Metrics>::new(bundle_receipt_inserter, tx);
+            ClickhouseInserter::<_, MetricsWrapper>::new(bundle_receipt_inserter, tx);
         let mut bundle_receipt_inserter_runner =
             InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter, builder_name);
-        let mut bundle_receipt_backup = Backup::<BundleReceiptRow, Metrics>::new(
+        let mut bundle_receipt_backup = Backup::<BundleReceiptRow, MetricsWrapper>::new(
             rx,
             client
                 .inserter(&bundle_receipts_table_name)

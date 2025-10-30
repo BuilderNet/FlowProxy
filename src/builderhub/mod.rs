@@ -160,6 +160,8 @@ pub struct PeersUpdater<P: PeerStore> {
     task_executor: TaskExecutor,
     /// Whether to disable spawning order forwarders to peers.
     disable_forwarding: bool,
+    /// The metrics for the peer updater.
+    metrics: Arc<BuilderHubMetrics>,
 }
 
 impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
@@ -171,7 +173,14 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         disable_forwarding: bool,
         task_executor: TaskExecutor,
     ) -> Self {
-        Self { local_signer, peer_store, peers, disable_forwarding, task_executor }
+        Self {
+            local_signer,
+            peer_store,
+            peers,
+            disable_forwarding,
+            task_executor,
+            metrics: Arc::new(BuilderHubMetrics::default()),
+        }
     }
 
     /// Run the peer updater loop.
@@ -190,7 +199,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let builders = match self.peer_store.get_peers().await {
             Ok(builders) => builders,
             Err(e) => {
-                BuilderHubMetrics::increment_builderhub_peer_request_failures(e.to_string());
+                self.metrics.peer_request_failures(e.to_string()).inc();
                 tracing::error!(?e, "failed to get peers from builderhub");
                 return;
             }
@@ -209,7 +218,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             self.process_peer(builder);
         }
 
-        BuilderHubMetrics::builderhub_peer_count(self.peers.len());
+        self.metrics.peer_count().set(self.peers.len() as i64);
     }
 
     /// Process a single peer, updating the local list of connected peers and spawning order

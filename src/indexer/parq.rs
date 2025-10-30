@@ -25,7 +25,7 @@ use std::{
 use crate::{
     cli::ParquetArgs,
     indexer::{OrderReceivers, TARGET},
-    metrics::IndexerMetrics,
+    metrics::ParquetMetrics,
     primitives::BundleReceipt,
 };
 
@@ -196,7 +196,11 @@ impl ParquetIndexer {
         )?;
 
         let receipts_writer = BundleReceiptWriter::new(writer, builder_name.clone());
-        let mut runner = ParquetRunner { rx: bundle_receipt_rx, receipt_writer: receipts_writer };
+        let mut runner = ParquetRunner {
+            rx: bundle_receipt_rx,
+            receipt_writer: receipts_writer,
+            metrics: ParquetMetrics::default(),
+        };
 
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
         task_executor.spawn_with_graceful_shutdown_signal(|mut shutdown| async move {
@@ -225,6 +229,7 @@ impl ParquetIndexer {
 struct ParquetRunner {
     rx: mpsc::Receiver<BundleReceipt>,
     receipt_writer: BundleReceiptWriter,
+    metrics: ParquetMetrics,
 }
 
 impl ParquetRunner {
@@ -242,7 +247,7 @@ impl ParquetRunner {
             tokio::select! {
                 maybe_receipt = self.rx.recv() => {
                     sampler.sample(|| {
-                        IndexerMetrics::set_parquet_queue_size(self.rx.len(), "bundle_receipt");
+                        self.metrics.queue_size("bundle_receipt").set(self.rx.len() as i64);
                     });
 
                     let Some(receipt) = maybe_receipt else {

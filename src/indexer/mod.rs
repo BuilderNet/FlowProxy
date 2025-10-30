@@ -87,7 +87,7 @@ impl Indexer {
         match (args.clickhouse, args.parquet) {
             (None, None) => {
                 MockIndexer.run(receivers, task_executor);
-                IndexerHandle { senders }
+                IndexerHandle::new(senders)
             }
             (Some(clickhouse), None) => {
                 let validation = false;
@@ -98,12 +98,12 @@ impl Indexer {
                     task_executor,
                     validation,
                 );
-                IndexerHandle { senders }
+                IndexerHandle::new(senders)
             }
             (None, Some(parquet)) => {
                 ParquetIndexer::run(parquet, builder_name, receivers, task_executor)
                     .expect("failed to start parquet indexer");
-                IndexerHandle { senders }
+                IndexerHandle::new(senders)
             }
             (Some(_), Some(_)) => {
                 unreachable!("Cannot specify both clickhouse and parquet indexer");
@@ -116,21 +116,26 @@ impl Indexer {
 #[derive(Debug)]
 pub struct IndexerHandle {
     senders: OrderSenders,
+    metrics: IndexerMetrics,
+}
+
+impl IndexerHandle {
+    fn new(senders: OrderSenders) -> Self {
+        Self { senders, metrics: IndexerMetrics::default() }
+    }
 }
 
 impl OrderIndexer for IndexerHandle {
     fn index_bundle(&self, system_bundle: SystemBundle) {
         if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
             match e {
-                mpsc::error::TrySendError::Full(_) => {
-                    tracing::error!("CRITICAL: Failed to send bundle to index, channel is full");
-                    IndexerMetrics::increment_bundle_indexing_failures("Full");
+                mpsc::error::TrySendError::Full(bundle) => {
+                    tracing::error!(target: TARGET, bundle_hash = ?bundle.bundle_hash(), "CRITICAL: Failed to send bundle to index, channel is full");
+                    self.metrics.bundle_indexing_failures("Full").inc();
                 }
                 mpsc::error::TrySendError::Closed(_) => {
-                    tracing::error!(
-                        "CRITICAL: Failed to send bundle to index, indexer task is closed"
-                    );
-                    IndexerMetrics::increment_bundle_indexing_failures("Closed");
+                    tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle to index, indexer task is closed");
+                    self.metrics.bundle_indexing_failures("Closed").inc();
                 }
             }
         }
@@ -141,11 +146,11 @@ impl OrderIndexer for IndexerHandle {
             match e {
                 mpsc::error::TrySendError::Full(_) => {
                     tracing::error!(target: TARGET,  "Failed to send bundle receipt to index, channel is full");
-                    IndexerMetrics::increment_bundle_receipt_indexing_failures("Full");
+                    self.metrics.bundle_receipt_indexing_failures("Full").inc();
                 }
                 mpsc::error::TrySendError::Closed(_) => {
                     tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle receipt to index, indexer task is closed");
-                    IndexerMetrics::increment_bundle_receipt_indexing_failures("Closed");
+                    self.metrics.bundle_receipt_indexing_failures("Closed").inc();
                 }
             }
         }
