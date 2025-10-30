@@ -478,14 +478,10 @@ impl HttpForwarder {
                 } else {
                     // If we have a non-OK status code, also record it.
                     error!("failed to forward request");
-                    self.metrics
-                        .http_call_failures(
-                            status
-                                .canonical_reason()
-                                .map(String::from)
-                                .unwrap_or(status.to_string()),
-                        )
-                        .inc();
+                    let reason =
+                        status.canonical_reason().map(String::from).unwrap_or(status.to_string());
+
+                    self.metrics.http_call_failures(reason).inc();
 
                     if let Err(e) =
                         self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
