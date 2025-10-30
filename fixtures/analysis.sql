@@ -2,11 +2,11 @@
 -- Constants / utility functions
 -- ===================================
 WITH
-    -- Utility: convert bytes to 0x-prefixed lowercase hex
+    -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-10-30 08:40:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-30 09:30:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-30 10:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-10-30 10:30:00', 6, 'UTC') AS t_until,
 
 -- ===================================
 -- Common reusable subqueries
@@ -14,31 +14,32 @@ WITH
 
     ------------ BUNDLE QUERIES --------------
 
-    -- Get bundle receipts within the specified time window
+    -- Get bundle receipts within the specified time window.
     bundle_receipts AS (
         SELECT
             hex0x(double_bundle_hash) AS double_bundle_hash,
             *
         FROM buildernet.bundle_receipts_wo_bundle_hash
         WHERE received_at >= t_since AND received_at <= t_until
+          AND dst_builder_name != 'buildernet-flashbots-mkosi-test-1'
     ),
 
     ------------ METADATA QUERIES ------------
 
-    -- Get all unique builders in the dataset
+    -- Get all unique builders in the dataset.
     builders AS (
         SELECT groupUniqArray(dst_builder_name) AS dsts
         FROM bundle_receipts
     ),
 
-    -- Count total number of unique builders (scalar)
+    -- Count total number of unique builders (scalar).
     builders_count AS (
         SELECT length(dsts) AS total_builders FROM builders
     ),
 
     ------------ BUNDLE VISIBILITY ------------
 
-    -- For each bundle, get the list of builders that have seen it
+    -- For each bundle, get the list of builders that have seen it.
     bundle_seen_by AS (
         SELECT
             double_bundle_hash,
@@ -47,7 +48,7 @@ WITH
         GROUP BY double_bundle_hash
     ),
 
-    -- For each bundle, determine which builders have not seen it
+    -- For each bundle, determine which builders have not seen it.
     bundle_not_seen_by AS (
         SELECT
             double_bundle_hash,
@@ -58,7 +59,7 @@ WITH
 
     ------------ OCCURRENCE COUNTS ------------
 
-    -- Count occurrences of each bundle receipt, grouped by double_bundle_hash
+    -- Count occurrences of each bundle receipt, grouped by double_bundle_hash.
     bundle_occurrences AS (
         SELECT
             double_bundle_hash,
@@ -70,24 +71,26 @@ WITH
 
     ------------ LOST BUNDLES QUERIES ---------
 
-    -- A detailed list of bundles that were not seen by all builders
+    -- A detailed list of bundles that were not seen by all builders.
     lost_bundles_detailed AS (
         SELECT *
         FROM bundle_occurrences
-        WHERE occurrences < (SELECT total_builders FROM builders_count)
+        -- We have to subtract 1 because source builder won't see its own bundle receipt.
+        WHERE occurrences < (SELECT total_builders FROM builders_count) - 1 
     ),
 
-    -- Get a summary of lost bundles by counting how many bundles were missed by how many builders
+    -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
     lost_bundles AS (
         SELECT
-            count() AS observations,
-            occurrences
+            (SELECT total_builders FROM builders_count) - occurrences AS missed_builders,
+            (SELECT total_builders FROM builders_count) AS total_builders,
+            count() AS observations
         FROM lost_bundles_detailed
         GROUP BY occurrences
         ORDER BY occurrences ASC
     ),
 
-    -- Rank builders by the number of bundles they missed
+    -- Rank builders by the number of bundles they missed.
     lost_bundles_by_dst AS (
         SELECT
             arrayJoin(missing_dsts) AS dst_builder_name,
@@ -99,7 +102,7 @@ WITH
 
     ------------ LATENCY QUERIES -------------
 
-    -- Calculate latency quantiles between source and destination builders
+    -- Calculate latency quantiles between source and destination builders.
     src_dst_quantiles AS (
         SELECT
             src_builder_name,
@@ -119,4 +122,4 @@ WITH
 -- Final query
 -- ===================================
 SELECT *
-FROM lost_bundles_by_dst
+FROM lost_bundles
