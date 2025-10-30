@@ -67,7 +67,8 @@ WITH
     bundle_seen_by AS (
         SELECT
             double_bundle_hash,
-            groupUniqArray(src_builder_name) AS src_builders,  -- multiple possible sources
+            -- We may more than one source builder for a given bundle.
+            groupUniqArray(src_builder_name) AS src_builders,
             groupUniqArray(dst_builder_name) AS seen_dsts
         FROM bundle_receipts
         GROUP BY double_bundle_hash
@@ -86,20 +87,20 @@ WITH
     ),
 
     -- Count occurrences of bundle receipts by source-destination builder pairs.
-    -- TODO: duplicates mess this up a little bit.
+    -- NOTE: duplicates will inflate these counts.
     bundle_occurrences_by_link AS (
         SELECT
             src_builder_name,
             dst_builder_name,
             count() AS occurrences
         FROM bundle_receipts
-        GROUP BY double_bundle_hash, src_builder_name, dst_builder_name
+        GROUP BY src_builder_name, dst_builder_name
         ORDER BY occurrences DESC
     ),
 
     ------------ LOST BUNDLES QUERIES ---------
 
-    -- For each bundle, determine which builders have not seen it.
+    -- For each bundle hash, determine which builders have not seen it, along with their sources.
     --
     -- This filters the list of bundles to those that have been missed by at least one builder.
     lost_bundles_detailed AS (
@@ -129,28 +130,40 @@ WITH
     ),
 
     -- Rank links by the number of bundles they missed.
+    -- TODO: double check correctness.
     lost_bundles_by_link AS (
-        SELECT
-            src_builders,
-            dst_builder_name,
-            count(*) AS missed_bundle_count,
-            (SELECT unique_bundles FROM bundle_unique_count) AS total_unique_bundles,
-            concat(toString(round(100 * missed_bundle_count / total_unique_bundles, 2)), '%') AS percent_of_total_bundles
-        FROM (
-            -- explode every missing_dsts array so each element = one "miss event"
+        WITH loss_events AS (
+            -- For each lost bundle, explode the missing_dsts and src_builders to get individual loss events.
             SELECT
-                double_bundle_hash,
-                src_builders,
+                arrayJoin(src_builders) AS src_builder_name,
                 arrayJoin(missing_dsts) AS dst_builder_name
             FROM lost_bundles_detailed
+        ), loss_events_by_link AS (
+            -- Aggregate loss events by source-destination builder pairs.
+            SELECT
+                src_builder_name,
+                dst_builder_name,
+                count() AS missed_bundle_count
+            FROM loss_events
+            GROUP BY src_builder_name, dst_builder_name
         )
-        GROUP BY dst_builder_name, src_builders
+        SELECT
+            l.src_builder_name AS src_builder_name,
+            l.dst_builder_name AS dst_builder_name,
+            missed_bundle_count,
+            bobl.occurrences AS total_bundles_sent_between_link,
+            concat(toString(round(100 * missed_bundle_count / total_bundles_sent_between_link, 2)), '%') AS percent_of_total_bundles
+        FROM loss_events_by_link AS l
+        JOIN bundle_occurrences_by_link bobl
+             ON l.src_builder_name = bobl.src_builder_name
+            AND l.dst_builder_name = bobl.dst_builder_name
         ORDER BY missed_bundle_count DESC
     ),
 
     -------- sanity checks ---------
 
-    -- Should match
+    -- Should match, or be really really close. `lost_bundles_by_link` might be slightly higher
+    -- because of `loss_events_by_link` expanding multiple `src_builders` per bundle.
     lost_bundles_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles),
     lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
 
