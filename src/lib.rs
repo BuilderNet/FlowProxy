@@ -13,16 +13,15 @@ use alloy_signer_local::PrivateKeySigner;
 use axum::{
     extract::{DefaultBodyLimit, Request, State},
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
     routing::{get, post},
     Router,
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
-use eyre::Context as _;
+use hyper::{header, StatusCode};
 use ingress::forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
-use metrics_exporter_prometheus::PrometheusBuilder;
-use metrics_util::layers::{PrefixLayer, Stack};
+use prometheus::{Encoder as _, TextEncoder};
 use reqwest::Url;
 use std::{
     net::SocketAddr,
@@ -30,7 +29,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, ToSocketAddrs};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
 
@@ -65,7 +64,7 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     fdlimit::raise_fd_limit()?;
 
     if let Some(ref metrics_addr) = args.metrics {
-        spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
+        spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?).await?;
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
@@ -262,26 +261,37 @@ pub async fn run_with_listeners(
 }
 
 /// Start prometheus at provider address.
-fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> {
-    let (recorder, exporter) = PrometheusBuilder::new().with_http_listener(address).build()?;
+async fn spawn_prometheus_server<A: ToSocketAddrs>(address: A) -> eyre::Result<()> {
+    // Get the default registry
+    let registry = prometheus::default_registry().clone();
 
-    // Prefix all metrics with provider prefix
-    Stack::new(recorder)
-        .push(PrefixLayer::new("orderflow_proxy"))
-        .install()
-        .wrap_err("unable to install metrics recorder")?;
+    let router = Router::new()
+        .route("/metrics", get(metrics_handler))
+        .route("/", get(metrics_handler))
+        .with_state(registry);
 
-    tokio::spawn(exporter);
+    let listener = TcpListener::bind(address).await?;
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
-    let collector = metrics_process::Collector::default();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            collector.collect();
+            let _process_metrics = metrics_process::collector::collect();
+            // TODO: Register
         }
     });
 
     Ok(())
+}
+
+async fn metrics_handler(State(registry): State<prometheus::Registry>) -> impl IntoResponse {
+    let encoder = TextEncoder::new();
+    let metrics = registry.gather();
+    let mut buffer = Vec::new();
+
+    encoder.encode(&metrics, &mut buffer).unwrap();
+
+    (StatusCode::OK, [(header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())], buffer)
 }
 
 /// Middleware to track server metrics.

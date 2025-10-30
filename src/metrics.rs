@@ -196,3 +196,67 @@ pub(crate) struct SystemMetrics {
     #[metric(labels = ["priority"])]
     queue_capacity_almost_hits: Counter,
 }
+
+// pub struct Metrics {
+//     /// Total user and system CPU time spent in seconds.
+//     pub cpu_seconds_total: Option<f64>,
+//     /// Number of open file descriptors.
+//     pub open_fds: Option<u64>,
+//     /// Maximum number of open file descriptors.
+//     ///
+//     /// 0 indicates 'unlimited'.
+//     pub max_fds: Option<u64>,
+//     /// Virtual memory size in bytes.
+//     pub virtual_memory_bytes: Option<u64>,
+//     /// Maximum amount of virtual memory available in bytes.
+//     ///
+//     /// 0 indicates 'unlimited'.
+//     pub virtual_memory_max_bytes: Option<u64>,
+//     /// Resident memory size in bytes.
+//     pub resident_memory_bytes: Option<u64>,
+//     /// Start time of the process since unix epoch in seconds.
+//     pub start_time_seconds: Option<u64>,
+//     /// Numberof OS threads in the process.
+//     pub threads: Option<u64>,
+// }
+#[derive(Debug)]
+#[prometric_derive::metrics(scope = "process")]
+pub struct ProcessMetrics {
+    /// Total user and system CPU time spent in seconds.
+    #[metric]
+    cpu_seconds_total: Gauge,
+    /// Number of open file descriptors.
+    #[metric]
+    open_fds: Gauge,
+    /// Maximum number of open file descriptors.
+    #[metric]
+    max_fds: Gauge,
+    /// Virtual memory size in bytes.
+    #[metric]
+    virtual_memory_bytes: Gauge,
+    /// Maximum amount of virtual memory available in bytes.
+    #[metric]
+    virtual_memory_max_bytes: Gauge,
+    /// Resident memory size in bytes.
+    #[metric]
+    resident_memory_bytes: Gauge,
+    /// Start time of the process since unix epoch in seconds.
+    #[metric]
+    start_time_seconds: Gauge,
+    /// Numberof OS threads in the process.
+    #[metric]
+    threads: Gauge,
+}
+
+impl ProcessMetrics {
+    pub fn update(&self, metrics: metrics_process::collector::Metrics) {
+        self.cpu_seconds_total().set(metrics.cpu_seconds_total.unwrap_or(0.0) as i64);
+        self.open_fds().set(metrics.open_fds.unwrap_or(0) as i64);
+        self.max_fds().set(metrics.max_fds.unwrap_or(0) as i64);
+        self.virtual_memory_bytes().set(metrics.virtual_memory_bytes.unwrap_or(0) as i64);
+        self.virtual_memory_max_bytes().set(metrics.virtual_memory_max_bytes.unwrap_or(0) as i64);
+        self.resident_memory_bytes().set(metrics.resident_memory_bytes.unwrap_or(0) as i64);
+        self.start_time_seconds().set(metrics.start_time_seconds.unwrap_or(0) as i64);
+        self.threads().set(metrics.threads.unwrap_or(0) as i64);
+    }
+}
