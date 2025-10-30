@@ -5,7 +5,7 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-10-30 10:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-10-30 09:00:00', 6, 'UTC') AS t_since,
     toDateTime64('2025-10-30 10:30:00', 6, 'UTC') AS t_until,
 
 -- ===================================
@@ -18,10 +18,15 @@ WITH
     bundle_receipts AS (
         SELECT
             hex0x(double_bundle_hash) AS double_bundle_hash,
-            *
+            sent_at,
+            received_at,
+            replaceAll(dst_builder_name, '-', '_') AS dst_builder_name,
+            src_builder_name,
+            payload_size,
+            priority
         FROM buildernet.bundle_receipts_wo_bundle_hash
         WHERE received_at >= t_since AND received_at <= t_until
-            AND dst_builder_name != 'buildernet-flashbots-mkosi-test-1'
+            AND dst_builder_name != 'buildernet_flashbots_mkosi_test_1'
     ),
 
     ------------ METADATA QUERIES ------------
@@ -39,7 +44,7 @@ WITH
 
     ------------ BUNDLE VISIBILITY ------------
 
-    -- For each bundle, get the list of builders that have seen it.
+    -- For each bundle, get the list of builders that have seen it, along with their sources.
     bundle_seen_by AS (
         SELECT
             double_bundle_hash,
@@ -77,12 +82,22 @@ WITH
 
     ------------ LOST BUNDLES QUERIES ---------
 
-    -- A detailed list of bundles that were not seen by all builders.
+    -- A detailed list of bundles that were not seen by all builders. 
+    --
+    -- Since a bundle can be sent from multiple sources, and each source won't
+    -- track the receipt of its own bundles, we consider a bundle "lost" if the
+    -- total number of unique source builders and destination builders that have
+    -- seen it is less than the total number of builders.
     lost_bundles_detailed AS (
-        SELECT *
-        FROM bundle_occurrences
-        -- We have to subtract 1 because source builder won't see its own bundle receipt.
-        WHERE occurrences < (SELECT total_builders FROM builders_count) - 1
+        SELECT
+            double_bundle_hash,
+            src_builders,
+            seen_dsts,
+            length(src_builders) AS src_count,
+            length(seen_dsts) AS seen_count,
+            (SELECT total_builders FROM builders_count) AS total_builders
+        FROM bundle_seen_by
+        WHERE src_count + seen_count < total_builders
     ),
 
     -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
@@ -96,7 +111,7 @@ WITH
         ORDER BY occurrences ASC
     ),
 
-    -- Rank builders by the number of bundles they missed.
+    -- Rank builders by the number of bundles they missed. TODO: this is broken.
     lost_bundles_by_dst AS (
         SELECT
             arrayJoin(missing_dsts) AS dst_builder_name,
