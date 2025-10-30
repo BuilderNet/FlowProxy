@@ -49,8 +49,8 @@ pub(crate) struct ForwarderMetrics {
     /// The number of JSON-RPC decoding failures.
     #[metric]
     json_rpc_decoding_failures: Counter,
-    /// The duration of RPC calls.
-    #[metric(labels = ["order_type", "big_request"])]
+    /// The duration of RPC calls in seconds.
+    #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     rpc_call_duration: Histogram,
     /// The number of RPC call failures.
     #[metric(labels = ["rpc_code"])]
@@ -76,22 +76,22 @@ pub(crate) struct IngressMetrics {
     #[metric(labels = ["order_type"])]
     order_cache_hit: Counter,
     /// Request body size in bytes.
-    #[metric(rename = "request_body_size_bytes", labels = ["method"])]
+    #[metric(rename = "request_body_size_bytes", labels = ["method"], buckets = [128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0, 262144.0, 524288.0, 1048576.0, 2097152.0, 4194304.0])]
     request_body_size: Histogram,
     /// The number of validation errors.
     #[metric(labels = ["error"])]
     validation_errors: Counter,
     /// The duration of HTTP requests.
-    #[metric(labels = ["method", "path", "status"])]
+    #[metric(labels = ["method", "path", "status"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     http_request_duration: Histogram,
     /// The duration of RPC calls.
-    #[metric(labels = ["method", "priority"])]
+    #[metric(labels = ["method", "priority"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     rpc_request_duration: Histogram,
     /// The number of transactions per bundle.
-    #[metric]
+    #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
     txs_per_bundle: Histogram,
     /// The number of transactions per MEV-share bundle.
-    #[metric]
+    #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
     txs_per_mev_share_bundle: Histogram,
     /// The number of empty bundles.
     #[metric]
@@ -143,7 +143,7 @@ pub struct ClickhouseMetrics {
     #[metric]
     batches_committed: Counter,
     /// Duration of Clickhouse batch commits in seconds.
-    #[metric]
+    #[metric(buckets = [0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     batch_commit_time: Histogram,
     /// Current size of ClickHouse backup in bytes.
     #[metric(labels = ["order", "backend"])]
@@ -179,16 +179,16 @@ pub(crate) struct ParquetMetrics {
 #[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
-    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     bundle_processing_time: Histogram,
     /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     mev_share_bundle_processing_time: Histogram,
     /// End-to-end transaction processing time in seconds.
-    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"])]
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     transaction_processing_time: Histogram,
     /// End-to-end system order processing time in seconds.
-    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"])]
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     system_order_processing_time: Histogram,
     /// Number of times the queue capacity was hit per priority.
     #[metric(labels = ["priority"])]
