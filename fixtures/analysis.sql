@@ -6,8 +6,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-10-30 12:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-30 12:30:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-30 00:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-10-30 12:00:00', 6, 'UTC') AS t_until,
 
 -- ===================================
 -- Common reusable subqueries
@@ -110,7 +110,7 @@ WITH
             count() AS observations
         FROM lost_bundles_detailed
         GROUP BY missed_builders
-        ORDER BY observations ASC
+        ORDER BY missed_builders ASC
     ),
 
     -- Rank builders by the number of bundles they missed.
