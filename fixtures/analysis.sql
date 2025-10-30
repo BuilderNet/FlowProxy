@@ -31,6 +31,11 @@ WITH
             AND dst_builder_name != 'buildernet_flashbots_mkosi_test_1'
     ),
 
+    bundle_unique_count AS (
+        SELECT count(DISTINCT double_bundle_hash) AS unique_bundles
+        FROM bundle_receipts
+    ),
+
     ------------ METADATA QUERIES ------------
 
     -- Get all unique builders in the dataset.
@@ -91,7 +96,9 @@ WITH
     lost_bundles AS (
         SELECT
             missed_builders,
-            count() AS observations
+            count() AS observations,
+            (SELECT unique_bundles FROM bundle_unique_count) AS total_unique_bundles,
+            concat(toString(round(100 * observations / total_unique_bundles, 2)), '%') AS percent_of_total_bundles
         FROM lost_bundles_detailed
         GROUP BY missed_builders
         ORDER BY missed_builders ASC
