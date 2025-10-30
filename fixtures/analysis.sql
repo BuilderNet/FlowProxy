@@ -113,6 +113,12 @@ WITH
         ORDER BY missed_bundle_count DESC
     ),
 
+    -------- sanity checks ---------
+
+    -- Should match
+    lost_bundles_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles),
+    lost_bundles_by_dst_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_dst),
+
     ------------ LATENCY QUERIES -------------
 
     -- Calculate latency quantiles between source and destination builders.
