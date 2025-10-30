@@ -28,13 +28,13 @@ WITH
 
     -- Get all unique builders in the dataset.
     builders AS (
-        SELECT groupUniqArray(dst_builder_name) AS dsts
-        FROM bundle_receipts
+      SELECT groupUniqArray(dst_builder_name) AS dsts
+      FROM bundle_receipts
     ),
 
     -- Count total number of unique builders (scalar).
     builders_count AS (
-        SELECT length(dsts) AS total_builders FROM builders
+      SELECT length(dsts) AS total_builders FROM builders
     ),
 
     ------------ BUNDLE VISIBILITY ------------
@@ -43,6 +43,7 @@ WITH
     bundle_seen_by AS (
         SELECT
             double_bundle_hash,
+            groupUniqArray(src_builder_name) AS src_builders,  -- multiple possible sources
             groupUniqArray(dst_builder_name) AS seen_dsts
         FROM bundle_receipts
         GROUP BY double_bundle_hash
@@ -50,11 +51,16 @@ WITH
 
     -- For each bundle, determine which builders have not seen it.
     bundle_not_seen_by AS (
-        SELECT
-            double_bundle_hash,
-            arrayFilter(x -> NOT has(seen_dsts, x), (SELECT dsts FROM builders)) as missing_dsts
-        FROM bundle_seen_by
-        WHERE length(missing_dsts) > 0
+      SELECT
+        double_bundle_hash,
+        src_builders,
+        -- We have to exclude source builders since they won't see their own bundles.
+        arrayFilter(
+          x -> (NOT has(src_builders, x)) AND (NOT has(seen_dsts, x)),
+          (SELECT dsts FROM builders)
+        ) AS missing_dsts
+      FROM bundle_seen_by
+      WHERE length(missing_dsts) > 0
     ),
 
     ------------ OCCURRENCE COUNTS ------------
