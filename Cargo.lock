@@ -2865,8 +2865,6 @@ dependencies = [
  "futures",
  "futures-util",
  "hyper",
- "metrics",
- "metrics-derive",
  "metrics-exporter-prometheus",
  "metrics-process",
  "metrics-util",

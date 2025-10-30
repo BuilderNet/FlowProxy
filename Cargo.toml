@@ -20,9 +20,10 @@ revm-interpreter = { version = "25.0.2", default-features = false }
 
 # rbuilder
 rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder", rev = "332b00ceeb960cfa27278c020f0f8b299f928982" }
-rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", rev = "332b00ceeb960cfa27278c020f0f8b299f928982", features = ["test-utils"] }
+rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", rev = "332b00ceeb960cfa27278c020f0f8b299f928982", features = [
+  "test-utils"
+] }
 
- 
 
 # rt
 tokio = { version = "1", default-features = false, features = [
@@ -44,8 +45,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-futures = "0.2.5"
 
 # metrics
-metrics = "0.24"
-metrics-derive = "0.1"
 prometric = { git = "https://github.com/chainbound/prometric" }
 prometric-derive = { git = "https://github.com/chainbound/prometric" }
 prometheus = "0.14.0"

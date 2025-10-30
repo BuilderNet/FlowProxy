@@ -624,7 +624,7 @@ pub struct ResponseErrorDecoder {
     /// The receiver of the error responses.
     pub rx: mpsc::Receiver<ErrorDecoderInput>,
     /// Metrics from the associated forwarder.
-    pub metrics: ForwarderMetrics,
+    pub(crate) metrics: ForwarderMetrics,
 }
 
 impl ResponseErrorDecoder {

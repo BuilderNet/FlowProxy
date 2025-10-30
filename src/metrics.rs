@@ -5,15 +5,14 @@ use prometric::{Counter, Gauge, Histogram};
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and
 /// initialized only once.
-pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> =
-    LazyLock::new(|| SystemMetrics::default());
+pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> = LazyLock::new(SystemMetrics::default);
 
 /// Global HTTP metrics.
-pub(crate) static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| HttpMetrics::default());
+pub(crate) static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(HttpMetrics::default);
 
 /// Global Clickhouse metrics.
 pub(crate) static CLICKHOUSE_METRICS: LazyLock<ClickhouseMetrics> =
-    LazyLock::new(|| ClickhouseMetrics::default());
+    LazyLock::new(ClickhouseMetrics::default);
 
 #[derive(Debug)]
 #[prometric_derive::metrics(scope = "builderhub")]
