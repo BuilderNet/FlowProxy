@@ -419,45 +419,7 @@ impl HttpForwarder {
                 |inner| (inner.encoded_order, inner.headers),
             );
 
-            match order {
-                EncodedOrder::Bundle(_) => {
-                    SYSTEM_METRICS
-                        .bundle_processing_time(
-                            order.priority().as_str(),
-                            direction.as_str(),
-                            is_big.to_string(),
-                        )
-                        .observe(order.received_at().elapsed().as_secs_f64());
-                }
-                EncodedOrder::MevShareBundle(_) => {
-                    SYSTEM_METRICS
-                        .mev_share_bundle_processing_time(
-                            order.priority().as_str(),
-                            direction.as_str(),
-                            is_big.to_string(),
-                        )
-                        .observe(order.received_at().elapsed().as_secs_f64());
-                }
-                EncodedOrder::Transaction(_) => {
-                    SYSTEM_METRICS
-                        .transaction_processing_time(
-                            order.priority().as_str(),
-                            direction.as_str(),
-                            is_big.to_string(),
-                        )
-                        .observe(order.received_at().elapsed().as_secs_f64());
-                }
-                EncodedOrder::SystemOrder(_) => {
-                    SYSTEM_METRICS
-                        .system_order_processing_time(
-                            order.priority().as_str(),
-                            direction.as_str(),
-                            order.order_type(),
-                            is_big.to_string(),
-                        )
-                        .observe(order.received_at().elapsed().as_secs_f64());
-                }
-            }
+            record_e2e_metrics(&order, &direction, is_big);
 
             let order_type = order.order_type();
             let start_time = Instant::now();
@@ -584,6 +546,49 @@ impl Future for HttpForwarder {
             }
 
             return Poll::Pending;
+        }
+    }
+}
+
+/// Record the end-to-end metrics for the request.
+fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_big: bool) {
+    match order {
+        EncodedOrder::Bundle(_) => {
+            SYSTEM_METRICS
+                .bundle_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
+        }
+        EncodedOrder::MevShareBundle(_) => {
+            SYSTEM_METRICS
+                .mev_share_bundle_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
+        }
+        EncodedOrder::Transaction(_) => {
+            SYSTEM_METRICS
+                .transaction_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
+        }
+        EncodedOrder::SystemOrder(_) => {
+            SYSTEM_METRICS
+                .system_order_processing_time(
+                    order.priority().as_str(),
+                    direction.as_str(),
+                    order.order_type(),
+                    is_big.to_string(),
+                )
+                .observe(order.received_at().elapsed().as_secs_f64());
         }
     }
 }
