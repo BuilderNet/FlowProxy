@@ -23,14 +23,14 @@ pub(crate) struct BuilderHubMetrics {
     /// The peer count.
     #[metric]
     peer_count: Gauge,
-    /// The number of peer request failures.
+    /// The total number of peer request failures.
     #[metric(labels = ["error"])]
     peer_request_failures: Counter,
 }
 
 #[metrics(scope = "forwarder")]
 pub(crate) struct HttpMetrics {
-    /// The number of open HTTP connections.
+    /// The current number of open HTTP connections.
     #[metric(labels = ["peer_name"])]
     open_http_connections: Gauge,
 }
@@ -39,22 +39,22 @@ pub(crate) struct HttpMetrics {
 #[metrics(scope = "forwarder")]
 #[derive(Debug, Clone)]
 pub(crate) struct ForwarderMetrics {
-    /// The number of HTTP connection failures.
+    /// The total number of HTTP connection failures.
     #[metric(labels = ["reason"])]
     http_connect_failures: Counter,
-    /// The number of HTTP call failures.
+    /// The total number of HTTP call failures.
     #[metric(labels = ["reason"])]
     http_call_failures: Counter,
-    /// The number of inflight HTTP requests.
+    /// The current number of inflight HTTP requests.
     #[metric]
     inflight_requests: Gauge,
-    /// The number of JSON-RPC decoding failures.
+    /// The total number of JSON-RPC decoding failures.
     #[metric]
     json_rpc_decoding_failures: Counter,
     /// The duration of RPC calls in seconds.
     #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     rpc_call_duration: Histogram,
-    /// The number of RPC call failures.
+    /// The total number of RPC call failures.
     #[metric(labels = ["rpc_code"])]
     rpc_call_failures: Counter,
 }
@@ -62,25 +62,25 @@ pub(crate) struct ForwarderMetrics {
 #[derive(Debug, Clone)]
 #[metrics(scope = "ingress")]
 pub(crate) struct IngressMetrics {
-    /// The number of entities.
+    /// The current number of entities.
     #[metric]
     entity_count: Gauge,
-    /// The number of requests rate limited.
+    /// The total number of requests rate limited.
     #[metric]
     requests_rate_limited: Counter,
-    /// The number of JSON-RPC parsing errors.
+    /// The total number of JSON-RPC parsing errors.
     #[metric(labels = ["method"])]
     json_rpc_parse_errors: Counter,
-    /// The number of JSON-RPC unknown methods.
+    /// The total number of JSON-RPC unknown methods.
     #[metric(labels = ["method"])]
     json_rpc_unknown_method: Counter,
-    /// The number of order cache hits.
+    /// The total number of order cache hits.
     #[metric(labels = ["order_type"])]
     order_cache_hit: Counter,
     /// Request body size in bytes.
     #[metric(rename = "request_body_size_bytes", labels = ["method"], buckets = [128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0, 262144.0, 524288.0, 1048576.0, 2097152.0, 4194304.0])]
     request_body_size: Histogram,
-    /// The number of validation errors.
+    /// The total number of validation errors.
     #[metric(labels = ["error"])]
     validation_errors: Counter,
     /// The duration of HTTP requests.
@@ -95,7 +95,7 @@ pub(crate) struct IngressMetrics {
     /// The number of transactions per MEV-share bundle.
     #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
     txs_per_mev_share_bundle: Histogram,
-    /// The number of empty bundles.
+    /// The total number of empty bundles.
     #[metric]
     total_empty_bundles: Counter,
     /// The order cache hit ratio.
@@ -104,10 +104,10 @@ pub(crate) struct IngressMetrics {
     /// The signer cache hit ratio.
     #[metric]
     signer_cache_hit_ratio: Gauge,
-    /// The order cache entry count.
+    /// The current order cache entry count.
     #[metric]
     order_cache_entry_count: Gauge,
-    /// The signer cache entry count.
+    /// The current signer cache entry count.
     #[metric]
     signer_cache_entry_count: Gauge,
 }
@@ -115,10 +115,10 @@ pub(crate) struct IngressMetrics {
 #[derive(Debug)]
 #[metrics(scope = "indexer")]
 pub struct IndexerMetrics {
-    /// Total number of bundle indexing failures.
+    /// The total number of bundle indexing failures.
     #[metric(labels = ["error"])]
     bundle_indexing_failures: Counter,
-    /// Total number of bundle receipt indexing failures.
+    /// The total number of bundle receipt indexing failures.
     #[metric(labels = ["error"])]
     bundle_receipt_indexing_failures: Counter,
 }
@@ -200,28 +200,6 @@ pub(crate) struct SystemMetrics {
     queue_capacity_almost_hits: Counter,
 }
 
-// pub struct Metrics {
-//     /// Total user and system CPU time spent in seconds.
-//     pub cpu_seconds_total: Option<f64>,
-//     /// Number of open file descriptors.
-//     pub open_fds: Option<u64>,
-//     /// Maximum number of open file descriptors.
-//     ///
-//     /// 0 indicates 'unlimited'.
-//     pub max_fds: Option<u64>,
-//     /// Virtual memory size in bytes.
-//     pub virtual_memory_bytes: Option<u64>,
-//     /// Maximum amount of virtual memory available in bytes.
-//     ///
-//     /// 0 indicates 'unlimited'.
-//     pub virtual_memory_max_bytes: Option<u64>,
-//     /// Resident memory size in bytes.
-//     pub resident_memory_bytes: Option<u64>,
-//     /// Start time of the process since unix epoch in seconds.
-//     pub start_time_seconds: Option<u64>,
-//     /// Numberof OS threads in the process.
-//     pub threads: Option<u64>,
-// }
 #[derive(Debug)]
 #[metrics(scope = "process")]
 pub struct ProcessMetrics {
