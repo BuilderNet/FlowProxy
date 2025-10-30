@@ -5111,7 +5111,7 @@ dependencies = [
 [[package]]
 name = "prometric"
 version = "0.1.0"
-source = "git+https://github.com/chainbound/prometric#ae52b16e5a1d863f381df79b97d7db39d760d4ac"
+source = "git+https://github.com/chainbound/prometric#886671d25991ada61e0273453e37f66fef7c90d5"
 dependencies = [
  "prometheus",
 ]
@@ -5119,7 +5119,7 @@ dependencies = [
 [[package]]
 name = "prometric-derive"
 version = "0.1.0"
-source = "git+https://github.com/chainbound/prometric#ae52b16e5a1d863f381df79b97d7db39d760d4ac"
+source = "git+https://github.com/chainbound/prometric#886671d25991ada61e0273453e37f66fef7c90d5"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
