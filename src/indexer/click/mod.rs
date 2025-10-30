@@ -20,7 +20,7 @@ use crate::{
         },
         OrderReceivers, TARGET,
     },
-    metrics::IndexerMetrics,
+    metrics::ClickhouseMetrics,
     primitives::{Quantities, Sampler},
     spawn_clickhouse_backup, spawn_clickhouse_inserter,
     tasks::TaskExecutor,
@@ -77,12 +77,18 @@ struct ClickhouseInserter<T: ClickhouseRowExt> {
     rows_backup: Vec<T>,
     /// The channel where to send data to be backed up.
     backup_tx: mpsc::Sender<FailedCommit<T>>,
+    /// The metrics for the Clickhouse inserter.
+    metrics: ClickhouseMetrics,
 }
 
 impl<T: ClickhouseRowExt> ClickhouseInserter<T> {
-    fn new(inner: Inserter<T>, backup_tx: mpsc::Sender<FailedCommit<T>>) -> Self {
+    fn new(
+        inner: Inserter<T>,
+        backup_tx: mpsc::Sender<FailedCommit<T>>,
+        metrics: ClickhouseMetrics,
+    ) -> Self {
         let rows_backup = Vec::new();
-        Self { inner, rows_backup, backup_tx }
+        Self { inner, rows_backup, backup_tx, metrics }
     }
 
     /// Writes the provided order into the inner Clickhouse writer buffer.
@@ -91,7 +97,7 @@ impl<T: ClickhouseRowExt> ClickhouseInserter<T> {
         let value_ref = ClickhouseRowExt::to_row_ref(&row);
 
         if let Err(e) = self.inner.write(value_ref).await {
-            IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
+            self.metrics.write_failures(e.to_string()).inc();
             tracing::error!(target: TARGET, order = T::ORDER, ?e, %hash, "failed to write to clickhouse inserter");
             return;
         }
@@ -113,14 +119,16 @@ impl<T: ClickhouseRowExt> ClickhouseInserter<T> {
                     tracing::trace!(target: TARGET, order = T::ORDER, "committed to inserter");
                 } else {
                     tracing::debug!(target: TARGET, order = T::ORDER, ?quantities, "inserted batch to clickhouse");
-                    IndexerMetrics::process_clickhouse_quantities(&quantities.into());
-                    IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
+                    self.metrics.bytes_committed().inc_by(quantities.bytes);
+                    self.metrics.rows_committed().inc_by(quantities.rows);
+                    self.metrics.batches_committed().inc();
+                    self.metrics.batch_commit_time().observe(start.elapsed().as_secs_f64());
                     // Clear the backup rows.
                     self.rows_backup.clear();
                 }
             }
             Err(e) => {
-                IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
+                self.metrics.commit_failures(e.to_string()).inc();
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to commit bundle to clickhouse");
 
                 let rows = std::mem::take(&mut self.rows_backup);
@@ -177,7 +185,7 @@ impl<T: ClickhouseIndexableOrder> InserterRunner<T> {
         while let Some(order) = self.rx.recv().await {
             tracing::trace!(target: TARGET, order = T::ORDER, hash = %order.hash(), "received data to index");
             sampler.sample(|| {
-                IndexerMetrics::set_clickhouse_queue_size(self.rx.len(), T::ORDER);
+                self.inserter.metrics.queue_len(T::ORDER).set(self.rx.len() as i64);
             });
 
             let row = order.to_row(self.builder_name.clone());
@@ -239,6 +247,7 @@ impl ClickhouseIndexer {
     ) {
         let client = ClickhouseClientConfig::new(&args, validation).into();
         tracing::info!("Running with clickhouse indexer");
+        let metrics = ClickhouseMetrics::default();
 
         let (bundles_table_name, bundle_receipts_table_name) =
             (args.bundles_table_name, args.bundle_receipts_table_name);
@@ -256,7 +265,7 @@ impl ClickhouseIndexer {
 
         let (tx, rx) = mpsc::channel(128);
         let bundle_inserter = default_inserter(&client, &bundles_table_name);
-        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx);
+        let bundle_inserter = ClickhouseInserter::new(bundle_inserter, tx, metrics.clone());
         let mut bundle_inserter_runner =
             InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
 
@@ -266,12 +275,14 @@ impl ClickhouseIndexer {
                 .inserter(&bundles_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
             disk_backup.clone_to(),
+            metrics.clone(),
         )
         .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 
         let (tx, rx) = mpsc::channel(128);
         let bundle_receipt_inserter = default_inserter(&client, &bundle_receipts_table_name);
-        let bundle_receipt_inserter = ClickhouseInserter::new(bundle_receipt_inserter, tx);
+        let bundle_receipt_inserter =
+            ClickhouseInserter::new(bundle_receipt_inserter, tx, metrics.clone());
         let mut bundle_receipt_inserter_runner =
             InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter, builder_name);
         let mut bundle_receipt_backup = Backup::<BundleReceiptRow>::new(
@@ -280,6 +291,7 @@ impl ClickhouseIndexer {
                 .inserter(&bundle_receipts_table_name)
                 .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
             disk_backup,
+            metrics,
         )
         .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
 

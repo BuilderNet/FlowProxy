@@ -17,7 +17,7 @@ use crate::{
         default_disk_backup_database_path, primitives::ClickhouseRowExt, ClickhouseIndexableOrder,
         MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
     },
-    metrics::IndexerMetrics,
+    metrics::{ClickhouseMetrics, IndexerMetrics},
     primitives::{backoff::BackoffInterval, Quantities},
     tasks::TaskExecutor,
     utils::FormatBytes,
@@ -465,6 +465,9 @@ pub(crate) struct Backup<T: ClickhouseRowExt> {
     /// A failed commit retrieved from either disk or memory, waiting to be retried.
     last_cached: Option<RetrievedFailedCommit<T>>,
 
+    /// The metrics for the backup actor.
+    metrics: ClickhouseMetrics,
+
     /// Whether to use only the in-memory backup (for testing purposes).
     #[cfg(test)]
     use_only_memory_backup: bool,
@@ -475,6 +478,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
         rx: mpsc::Receiver<FailedCommit<T>>,
         inserter: Inserter<T>,
         disk_backup: DiskBackup<T>,
+        metrics: ClickhouseMetrics,
     ) -> Self {
         Self {
             rx,
@@ -483,6 +487,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
             memory_backup: MemoryBackup::default(),
             disk_backup,
             last_cached: None,
+            metrics,
             #[cfg(test)]
             use_only_memory_backup: false,
         }
@@ -578,7 +583,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
             let value_ref = T::to_row_ref(row);
 
             if let Err(e) = self.inserter.write(value_ref).await {
-                IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
+                self.metrics.write_failures(e.to_string()).inc();
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to write to backup inserter");
                 continue;
             }
@@ -592,11 +597,11 @@ impl<T: ClickhouseRowExt> Backup<T> {
             match self.disk_backup.delete(key) {
                 Ok(stats) => {
                     tracing::debug!(target: TARGET, order = T::ORDER, total_size = stats.size_bytes.format_bytes(), elapsed = ?start.elapsed(), "deleted failed commit from disk");
-                    IndexerMetrics::set_clickhouse_disk_backup_size(
-                        stats.size_bytes,
-                        stats.total_batches,
-                        T::ORDER,
-                    );
+
+                    self.metrics.backup_size_bytes(T::ORDER, "disk").set(stats.size_bytes as i64);
+                    self.metrics
+                        .backup_size_batches(T::ORDER, "disk")
+                        .set(stats.total_batches as i64);
                 }
                 Err(e) => {
                     tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to purge failed commit from disk");
@@ -623,7 +628,8 @@ impl<T: ClickhouseRowExt> Backup<T> {
                 _ = self.interval.tick() => {
                     let Some(oldest) = self.retrieve_oldest() else {
                         self.interval.reset();
-                        IndexerMetrics::set_clickhouse_backup_empty_size(T::ORDER);
+                        self.metrics.backup_size_bytes(T::ORDER, "disk").set(0);
+                        self.metrics.backup_size_batches(T::ORDER, "disk").set(0);
                         continue // Nothing to do!
                     };
 
@@ -633,14 +639,15 @@ impl<T: ClickhouseRowExt> Backup<T> {
                     match self.inserter.force_commit().await {
                         Ok(quantities) => {
                             tracing::info!(target: TARGET, order = T::ORDER, ?quantities, "successfully backed up");
-                            IndexerMetrics::process_clickhouse_backup_data_quantities(&quantities.into());
-                            IndexerMetrics::record_clickhouse_batch_commit_time(start.elapsed());
+                            self.metrics.backup_data_bytes().inc_by(quantities.bytes);
+                            self.metrics.backup_data_rows().inc_by(quantities.rows);
+                            self.metrics.batch_commit_time().observe(start.elapsed().as_secs_f64());
                             self.interval.reset();
                             self.purge_commit(&oldest).await;
                         }
                         Err(e) => {
                             tracing::error!(target: TARGET, order = T::ORDER, ?e, quantities = ?oldest.commit.quantities, "failed to commit bundle to clickhouse from backup");
-                            IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
+                            self.metrics.commit_failures(e.to_string()).inc();
                             self.last_cached = Some(oldest);
                             continue;
                         }
@@ -659,24 +666,24 @@ impl<T: ClickhouseRowExt> Backup<T> {
 
                 if let Err(e) = self.inserter.write(value_ref).await {
                     tracing::error!( target: TARGET, order = T::ORDER, ?e, "failed to write to backup inserter during shutdown");
-                    IndexerMetrics::increment_clickhouse_write_failures(e.to_string());
+                    self.metrics.write_failures(e.to_string()).inc();
                     continue;
                 }
             }
             if let Err(e) = self.inserter.force_commit().await {
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to commit backup to CH during shutdown, trying disk");
-                IndexerMetrics::increment_clickhouse_commit_failures(e.to_string());
+                self.metrics.commit_failures(e.to_string()).inc();
             }
 
             if let Err(e) = self.disk_backup.save(&failed_commit) {
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to write commit to disk backup during shutdown");
-                IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+                self.metrics.backup_disk_errors(T::ORDER, e.to_string()).inc();
             }
         }
 
         if let Err(e) = self.disk_backup.flush().await {
             tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to flush disk backup during shutdown");
-            IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+            self.metrics.backup_disk_errors(T::ORDER, e.to_string()).inc();
         } else {
             tracing::info!(target: TARGET, order = T::ORDER, "flushed disk backup during shutdown");
         }
@@ -727,6 +734,7 @@ mod tests {
                 disk_backup,
                 last_cached: None,
                 use_only_memory_backup,
+                metrics: ClickhouseMetrics::default(),
             }
         }
     }

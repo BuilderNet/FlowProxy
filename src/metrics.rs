@@ -2,11 +2,10 @@
 //! label
 use std::time::Duration;
 
-use hyper::{Method, StatusCode};
-use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
+use metrics::{counter, describe_counter, describe_histogram, histogram};
 use prometric::{Counter, Gauge, Histogram};
 
-use crate::{forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
+use crate::{forwarder::ForwardingDirection, priority::Priority};
 
 #[prometric_derive::metrics(scope = "builderhub")]
 pub(crate) struct BuilderHubMetrics {
@@ -107,41 +106,70 @@ pub(crate) struct IngressMetrics {
     signer_cache_entry_count: Gauge,
 }
 
+#[prometric_derive::metrics(scope = "indexer")]
+pub struct IndexerMetrics {
+    /// Total number of bundle indexing failures.
+    #[metric(labels = ["error"])]
+    bundle_indexing_failures: Counter,
+    /// Total number of bundle receipt indexing failures.
+    #[metric(labels = ["error"])]
+    bundle_receipt_indexing_failures: Counter,
+}
+
+#[prometric_derive::metrics(scope = "indexer_clickhouse")]
+pub struct ClickhouseMetrics {
+    /// Total number of ClickHouse commit failures.
+    #[metric(labels = ["error"])]
+    commit_failures: Counter,
+    /// Current size of ClickHouse write queue.
+    #[metric(rename = "queue_size", labels = ["order"])]
+    queue_len: Gauge,
+    /// Total number of ClickHouse write failures.
+    #[metric(labels = ["error"])]
+    write_failures: Counter,
+    /// Total number of rows committed to ClickHouse.
+    #[metric]
+    rows_committed: Counter,
+    /// Total number of bytes committed to ClickHouse.
+    #[metric]
+    bytes_committed: Counter,
+    /// Total number of batches committed to ClickHouse.
+    #[metric]
+    batches_committed: Counter,
+    /// Duration of Clickhouse batch commits in seconds.
+    #[metric]
+    batch_commit_time: Histogram,
+    /// Current size of ClickHouse backup in bytes.
+    #[metric(labels = ["order", "backend"])]
+    backup_size_bytes: Gauge,
+    /// Current size of ClickHouse backup in batches.
+    #[metric(labels = ["order", "backend"])]
+    backup_size_batches: Gauge,
+    /// Total number of bytes sent to Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_bytes_total")]
+    backup_data_bytes: Counter,
+    /// Total number of rows sent to Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_rows_total")]
+    backup_data_rows: Counter,
+    /// Total number of bytes lost due to pressure on Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_lost_bytes_total")]
+    backup_data_lost_bytes: Counter,
+    /// Total number of rows lost due to pressure on Clickhouse backup.
+    #[metric(rename = "clickhouse_backup_data_lost_rows_total")]
+    backup_data_lost_rows: Counter,
+    /// Errors encountered during Clickhouse disk backup.
+    #[metric(labels = ["order", "error"])]
+    backup_disk_errors: Counter,
+}
+
+#[prometric_derive::metrics(scope = "indexer_parquet")]
+pub struct ParquetMetrics {
+    /// Current size of Parquet write queue.
+    #[metric(labels = ["order"])]
+    queue_size: Gauge,
+}
+
 mod name {
-    /// Indexer metrics.
-    pub(crate) mod indexer {
-        pub(crate) const BUNDLE_INDEXING_FAILURES: &str = "indexer_bundle_indexing_failures";
-        pub(crate) const BUNDLE_RECEIPT_INDEXING_FAILURES: &str =
-            "indexer_bundle_receipt_indexing_failures";
-
-        pub(crate) const CLICKHOUSE_COMMIT_FAILURES: &str = "indexer_clickhouse_commit_failures";
-        pub(crate) const CLICKHOUSE_QUEUE_SIZE: &str = "indexer_clickhouse_queue_size";
-        pub(crate) const CLICKHOUSE_WRITE_FAILURES: &str = "indexer_clickhouse_write_failures";
-        pub(crate) const CLICKHOUSE_ROWS_COMMITTED: &str = "indexer_clickhouse_rows_committed";
-        pub(crate) const CLICKHOUSE_BYTES_COMMITTED: &str = "indexer_clickhouse_bytes_committed";
-        pub(crate) const CLICKHOUSE_BATCHES_COMMITTED: &str =
-            "indexer_clickhouse_batches_committed";
-        pub(crate) const CLICKHOUSE_BATCH_COMMIT_TIME: &str =
-            "indexer_clickhouse_batch_commit_time";
-
-        pub(crate) const CLICKHOUSE_BACKUP_SIZE_BYTES: &str =
-            "indexer_clickhouse_backup_size_bytes";
-        pub(crate) const CLICKHOUSE_BACKUP_SIZE_BATCHES: &str =
-            "indexer_clickhouse_backup_size_batches";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_BYTES: &str =
-            "indexer_clickhouse_backup_data_bytes_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_ROWS: &str =
-            "indexer_clickhouse_backup_data_rows_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_BYTES: &str =
-            "indexer_clickhouse_backup_data_lost_bytes_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DATA_LOST_ROWS: &str =
-            "indexer_clickhouse_backup_data_lost_rows_total";
-        pub(crate) const CLICKHOUSE_BACKUP_DISK_ERRORS: &str =
-            "indexer_clickhouse_backup_disk_errors";
-
-        pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
-    }
-
     /// System processing metrics.
     pub(crate) mod system {
         pub(crate) const E2E_BUNDLE_PROCESSING_TIME: &str = "system_e2e_bundle_processing_time";
@@ -160,72 +188,6 @@ use name::*;
 
 pub fn describe() {
     // Indexer metrics
-    describe_counter!(
-        indexer::BUNDLE_INDEXING_FAILURES,
-        "Total number of bundle indexing failures"
-    );
-    describe_counter!(
-        indexer::BUNDLE_RECEIPT_INDEXING_FAILURES,
-        "Total number of bundle receipt indexing failures"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_COMMIT_FAILURES,
-        "Total number of ClickHouse commit failures"
-    );
-    describe_gauge!(indexer::CLICKHOUSE_QUEUE_SIZE, "Current size of ClickHouse write queue");
-    describe_counter!(
-        indexer::CLICKHOUSE_WRITE_FAILURES,
-        "Total number of ClickHouse write failures (not the same as commit failures)"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_ROWS_COMMITTED,
-        "Total number of rows committed to ClickHouse"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BYTES_COMMITTED,
-        "Total number of bytes committed to ClickHouse"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BATCHES_COMMITTED,
-        "Total number of batches committed to ClickHouse"
-    );
-
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_SIZE_BYTES,
-        "Current size of Clickhouse backup in bytes"
-    );
-
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES,
-        "Current size of Clickhouse backup in batches"
-    );
-
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_BYTES,
-        "Total number of bytes sent to Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_ROWS,
-        "Total number of rows sent to Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_LOST_BYTES,
-        "Total number of bytes lost due to pressure on Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS,
-        "Total number of rows lost due to pressure on Clickhouse backup"
-    );
-    describe_counter!(
-        indexer::CLICKHOUSE_BACKUP_DISK_ERRORS,
-        "Errors encountered during Clickhouse disk backup"
-    );
-
-    describe_histogram!(
-        indexer::CLICKHOUSE_BATCH_COMMIT_TIME,
-        "Duration of Clickhouse batch commits in seconds"
-    );
-    describe_gauge!(indexer::PARQUET_QUEUE_SIZE, "Current size of Parquet write queue");
 
     // System end-to-end processing metrics
     describe_histogram!(
@@ -339,159 +301,5 @@ impl SystemMetrics {
     #[inline]
     pub fn increment_queue_capacity_almost_hit(priority: Priority) {
         counter!(system::QUEUE_CAPACITY_ALMOST_HITS, "priority" => priority.as_str()).increment(1);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct IndexerMetrics;
-
-impl IndexerMetrics {
-    // Counters
-
-    #[inline]
-    pub fn increment_bundle_indexing_failures(err: &'static str) {
-        counter!(indexer::BUNDLE_INDEXING_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_bundle_receipt_indexing_failures(err: &'static str) {
-        counter!(indexer::BUNDLE_RECEIPT_INDEXING_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_clickhouse_write_failures(err: String) {
-        counter!(indexer::CLICKHOUSE_WRITE_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_clickhouse_commit_failures(err: String) {
-        counter!(indexer::CLICKHOUSE_COMMIT_FAILURES, "error" => err).increment(1);
-    }
-
-    #[inline]
-    fn increment_clickhouse_backup_data_bytes(size: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_BYTES).increment(size);
-    }
-
-    fn increment_clickhouse_backup_data_rows(count: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_ROWS).increment(count);
-    }
-
-    /// Process the quantities of data lost because pressure has been applied to backup.
-    #[inline]
-    pub fn process_clickhouse_backup_data_quantities(quantities: &Quantities) {
-        Self::increment_clickhouse_backup_data_bytes(quantities.bytes);
-        Self::increment_clickhouse_backup_data_rows(quantities.rows);
-    }
-
-    #[inline]
-    fn increment_clickhouse_backup_data_lost_bytes(size: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_LOST_BYTES).increment(size);
-    }
-
-    fn increment_clickhouse_backup_data_lost_rows(count: u64) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DATA_LOST_ROWS).increment(count);
-    }
-
-    /// Process the quantities of data lost because pressure has been applied to backup.
-    #[inline]
-    pub fn process_clickhouse_backup_data_lost_quantities(quantities: &Quantities) {
-        Self::increment_clickhouse_backup_data_lost_bytes(quantities.bytes);
-        Self::increment_clickhouse_backup_data_lost_rows(quantities.rows);
-    }
-
-    /// Process the quantities from the Clickhouse inserter. No-op if the quantities are zero.
-    #[inline]
-    pub fn process_clickhouse_quantities(quantities: &Quantities) {
-        if quantities == &Quantities::ZERO {
-            return;
-        }
-
-        Self::increment_clickhouse_rows_committed(quantities.rows);
-        Self::increment_clickhouse_bytes_committed(quantities.bytes);
-        Self::increment_clickhouse_batches_committed();
-    }
-
-    #[inline]
-    fn increment_clickhouse_rows_committed(rows: u64) {
-        counter!(indexer::CLICKHOUSE_ROWS_COMMITTED).increment(rows);
-    }
-
-    #[inline]
-    fn increment_clickhouse_bytes_committed(bytes: u64) {
-        counter!(indexer::CLICKHOUSE_BYTES_COMMITTED).increment(bytes);
-    }
-
-    fn increment_clickhouse_batches_committed() {
-        counter!(indexer::CLICKHOUSE_BATCHES_COMMITTED).increment(1);
-    }
-
-    // Gauges
-
-    #[inline]
-    pub fn set_clickhouse_queue_size(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_QUEUE_SIZE, "order" => order).set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_memory_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        Self::set_clickhouse_backup_memory_size_bytes(size_bytes, order);
-        Self::set_clickhouse_backup_memory_size_batches(batches, order);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_memory_size_bytes(size: u64, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "backup" => "memory", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_memory_size_batches(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "backup" => "memory", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_disk_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        Self::set_clickhouse_backup_disk_size_bytes(size_bytes, order);
-        Self::set_clickhouse_backup_disk_size_batches(batches, order);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_disk_size_bytes(size: u64, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BYTES, "backup" => "disk", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_disk_size_batches(size: usize, order: &'static str) {
-        gauge!(indexer::CLICKHOUSE_BACKUP_SIZE_BATCHES, "backup" => "disk", "order" => order)
-            .set(size as f64);
-    }
-
-    #[inline]
-    pub fn set_clickhouse_backup_empty_size(order: &'static str) {
-        Self::set_clickhouse_backup_memory_size_bytes(0, order);
-        Self::set_clickhouse_backup_memory_size_batches(0, order);
-        Self::set_clickhouse_backup_disk_size_bytes(0, order);
-        Self::set_clickhouse_backup_disk_size_batches(0, order);
-    }
-
-    #[inline]
-    pub fn increment_clickhouse_backup_disk_errors(order: &'static str, error: &str) {
-        counter!(indexer::CLICKHOUSE_BACKUP_DISK_ERRORS, "order" => order, "error" => error.to_string())
-            .increment(1);
-    }
-
-    #[inline]
-    pub fn set_parquet_queue_size(size: usize, order: &'static str) {
-        gauge!(indexer::PARQUET_QUEUE_SIZE, "order" => order).set(size as f64);
-    }
-
-    // Histograms
-
-    #[inline]
-    pub fn record_clickhouse_batch_commit_time(duration: Duration) {
-        histogram!(indexer::CLICKHOUSE_BATCH_COMMIT_TIME).record(duration.as_secs_f64());
     }
 }
