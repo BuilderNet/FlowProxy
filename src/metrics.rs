@@ -1,8 +1,10 @@
 //! FlowProxy metrics with [`prometric_derive`].
-use std::sync::LazyLock;
+use std::{sync::LazyLock, time::Duration};
 
+use prometheus::{Encoder as _, TextEncoder};
 use prometric::{Counter, Gauge, Histogram};
 use prometric_derive::metrics;
+use tokio::net::ToSocketAddrs;
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and
 /// initialized only once.
@@ -260,4 +262,42 @@ impl ProcessMetrics {
         self.start_time_seconds().set(metrics.start_time_seconds.unwrap_or(0) as i64);
         self.threads().set(metrics.threads.unwrap_or(0) as i64);
     }
+}
+
+/// Start prometheus at provider address.
+pub(crate) async fn spawn_prometheus_server<A: ToSocketAddrs>(address: A) -> eyre::Result<()> {
+    // Get the default registry
+    let registry = prometheus::default_registry().clone();
+
+    let router = axum::Router::new()
+        .route("/metrics", axum::routing::get(metrics_handler))
+        .route("/", axum::routing::get(metrics_handler))
+        .with_state(registry);
+
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+    let process_metrics = ProcessMetrics::default();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            process_metrics.update(metrics_process::collector::collect());
+        }
+    });
+
+    Ok(())
+}
+
+async fn metrics_handler(
+    axum::extract::State(registry): axum::extract::State<prometheus::Registry>,
+) -> impl axum::response::IntoResponse {
+    let encoder = TextEncoder::new();
+    let mut metrics = registry.gather();
+    // Prepend "orderflow_proxy" to the metric name.
+    metrics.iter_mut().for_each(|m| m.mut_name().insert_str(0, "flowproxy_"));
+    let mut buffer = Vec::new();
+
+    encoder.encode(&metrics, &mut buffer).unwrap();
+
+    (hyper::StatusCode::OK, [(hyper::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())], buffer)
 }
