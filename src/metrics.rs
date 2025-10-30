@@ -82,10 +82,10 @@ pub(crate) struct IngressMetrics {
     #[metric(labels = ["error"])]
     validation_errors: Counter,
     /// The duration of HTTP requests.
-    #[metric(labels = ["method", "path", "status"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(labels = ["method", "path", "status"], buckets = [0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     http_request_duration: Histogram,
     /// The duration of RPC calls.
-    #[metric(labels = ["method", "priority"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(labels = ["method", "priority"], buckets = [0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
     rpc_request_duration: Histogram,
     /// The number of transactions per bundle.
     #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
@@ -143,7 +143,7 @@ pub struct ClickhouseMetrics {
     #[metric]
     batches_committed: Counter,
     /// Duration of Clickhouse batch commits in seconds.
-    #[metric(buckets = [0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(buckets = [0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0, 4.0, 8.0, 16.0])]
     batch_commit_time: Histogram,
     /// Current size of ClickHouse backup in bytes.
     #[metric(labels = ["order", "backend"])]
