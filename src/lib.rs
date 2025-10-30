@@ -4,7 +4,7 @@ use crate::{
     builderhub::PeersUpdater,
     cache::SignerCache,
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
-    metrics::IngressMetrics,
+    metrics::{IngressMetrics, ProcessMetrics},
     primitives::SystemBundleDecoder,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
@@ -273,11 +273,11 @@ async fn spawn_prometheus_server<A: ToSocketAddrs>(address: A) -> eyre::Result<(
     let listener = TcpListener::bind(address).await?;
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
 
+    let process_metrics = ProcessMetrics::default();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let _process_metrics = metrics_process::collector::collect();
-            // TODO: Register
+            process_metrics.update(metrics_process::collector::collect());
         }
     });
 

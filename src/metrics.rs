@@ -2,6 +2,7 @@
 use std::sync::LazyLock;
 
 use prometric::{Counter, Gauge, Histogram};
+use prometric_derive::metrics;
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and
 /// initialized only once.
@@ -15,7 +16,7 @@ pub(crate) static CLICKHOUSE_METRICS: LazyLock<ClickhouseMetrics> =
     LazyLock::new(ClickhouseMetrics::default);
 
 #[derive(Debug)]
-#[prometric_derive::metrics(scope = "builderhub")]
+#[metrics(scope = "builderhub")]
 pub(crate) struct BuilderHubMetrics {
     /// The peer count.
     #[metric]
@@ -25,7 +26,7 @@ pub(crate) struct BuilderHubMetrics {
     peer_request_failures: Counter,
 }
 
-#[prometric_derive::metrics(scope = "forwarder")]
+#[metrics(scope = "forwarder")]
 pub(crate) struct HttpMetrics {
     /// The number of open HTTP connections.
     #[metric(labels = ["peer_name"])]
@@ -33,7 +34,7 @@ pub(crate) struct HttpMetrics {
 }
 
 /// Forwarder metrics.
-#[prometric_derive::metrics(scope = "forwarder")]
+#[metrics(scope = "forwarder")]
 #[derive(Debug, Clone)]
 pub(crate) struct ForwarderMetrics {
     /// The number of HTTP connection failures.
@@ -57,7 +58,7 @@ pub(crate) struct ForwarderMetrics {
 }
 
 #[derive(Debug, Clone)]
-#[prometric_derive::metrics(scope = "ingress")]
+#[metrics(scope = "ingress")]
 pub(crate) struct IngressMetrics {
     /// The number of entities.
     #[metric]
@@ -110,7 +111,7 @@ pub(crate) struct IngressMetrics {
 }
 
 #[derive(Debug)]
-#[prometric_derive::metrics(scope = "indexer")]
+#[metrics(scope = "indexer")]
 pub struct IndexerMetrics {
     /// Total number of bundle indexing failures.
     #[metric(labels = ["error"])]
@@ -121,7 +122,7 @@ pub struct IndexerMetrics {
 }
 
 #[derive(Debug, Clone)]
-#[prometric_derive::metrics(scope = "indexer_clickhouse")]
+#[metrics(scope = "indexer_clickhouse")]
 pub struct ClickhouseMetrics {
     /// Total number of ClickHouse commit failures.
     #[metric(labels = ["error"])]
@@ -167,7 +168,7 @@ pub struct ClickhouseMetrics {
     backup_disk_errors: Counter,
 }
 
-#[prometric_derive::metrics(scope = "indexer_parquet")]
+#[metrics(scope = "indexer_parquet")]
 pub(crate) struct ParquetMetrics {
     /// Current size of Parquet write queue.
     #[metric(labels = ["order"])]
@@ -175,7 +176,7 @@ pub(crate) struct ParquetMetrics {
 }
 
 #[derive(Debug, Clone)]
-#[prometric_derive::metrics(scope = "system")]
+#[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
     #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
@@ -220,7 +221,7 @@ pub(crate) struct SystemMetrics {
 //     pub threads: Option<u64>,
 // }
 #[derive(Debug)]
-#[prometric_derive::metrics(scope = "process")]
+#[metrics(scope = "process")]
 pub struct ProcessMetrics {
     /// Total user and system CPU time spent in seconds.
     #[metric]
