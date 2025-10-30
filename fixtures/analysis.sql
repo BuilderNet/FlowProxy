@@ -104,19 +104,23 @@ WITH
         ORDER BY missed_builders ASC
     ),
 
-    -- Rank builders by the number of bundles they missed.
-    lost_bundles_by_dst AS (
+    -- Rank links by the number of bundles they missed.
+    lost_bundles_by_link AS (
         SELECT
+            src_builders,
             dst_builder_name,
-            count(*) AS missed_bundle_count
+            count(*) AS missed_bundle_count,
+            (SELECT unique_bundles FROM bundle_unique_count) AS total_unique_bundles,
+            concat(toString(round(100 * missed_bundle_count / total_unique_bundles, 2)), '%') AS percent_of_total_bundles
         FROM (
             -- explode every missing_dsts array so each element = one "miss event"
             SELECT
                 double_bundle_hash,
+                src_builders,
                 arrayJoin(missing_dsts) AS dst_builder_name
             FROM lost_bundles_detailed
         )
-        GROUP BY dst_builder_name
+        GROUP BY dst_builder_name, src_builders
         ORDER BY missed_bundle_count DESC
     ),
 
@@ -124,7 +128,7 @@ WITH
 
     -- Should match
     lost_bundles_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles),
-    lost_bundles_by_dst_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_dst),
+    lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
 
     ------------ LATENCY QUERIES -------------
 
