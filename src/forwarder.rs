@@ -6,7 +6,7 @@ use crate::{
         MEV_SEND_BUNDLE_METHOD,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
-    metrics::{ForwarderMetrics, SystemMetrics},
+    metrics::{ForwarderMetrics, SYSTEM_METRICS},
     primitives::{
         EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithEncoding,
@@ -506,37 +506,41 @@ fn send_http_request(
 
         match order {
             EncodedOrder::Bundle(_) => {
-                SystemMetrics::record_e2e_bundle_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    is_big,
-                );
+                SYSTEM_METRICS
+                    .bundle_processing_time(
+                        order.priority().as_str(),
+                        direction.as_str(),
+                        is_big.to_string(),
+                    )
+                    .observe(order.received_at().elapsed().as_secs_f64());
             }
             EncodedOrder::MevShareBundle(_) => {
-                SystemMetrics::record_e2e_mev_share_bundle_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    is_big,
-                );
+                SYSTEM_METRICS
+                    .mev_share_bundle_processing_time(
+                        order.priority().as_str(),
+                        direction.as_str(),
+                        is_big.to_string(),
+                    )
+                    .observe(order.received_at().elapsed().as_secs_f64());
             }
             EncodedOrder::Transaction(_) => {
-                SystemMetrics::record_e2e_transaction_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    is_big,
-                );
+                SYSTEM_METRICS
+                    .transaction_processing_time(
+                        order.priority().as_str(),
+                        direction.as_str(),
+                        is_big.to_string(),
+                    )
+                    .observe(order.received_at().elapsed().as_secs_f64());
             }
             EncodedOrder::SystemOrder(_) => {
-                SystemMetrics::record_e2e_system_order_processing_time(
-                    order.received_at().elapsed(),
-                    order.priority(),
-                    direction,
-                    order_type,
-                    is_big,
-                );
+                SYSTEM_METRICS
+                    .system_order_processing_time(
+                        order.priority().as_str(),
+                        direction.as_str(),
+                        order_type,
+                        is_big.to_string(),
+                    )
+                    .observe(order.received_at().elapsed().as_secs_f64());
             }
         }
 

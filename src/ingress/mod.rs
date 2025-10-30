@@ -10,7 +10,7 @@ use crate::{
     forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
-    metrics::{IngressMetrics, SystemMetrics},
+    metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
         EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleDecoder,
@@ -73,8 +73,10 @@ pub struct OrderflowIngress {
     pub local_builder_url: Option<Url>,
     pub builder_ready_endpoint: Option<Url>,
     pub indexer_handle: IndexerHandle,
-    pub user_metrics: IngressMetrics,
-    pub system_metrics: IngressMetrics,
+
+    // Metrics
+    pub(crate) user_metrics: IngressMetrics,
+    pub(crate) system_metrics: IngressMetrics,
 }
 
 impl OrderflowIngress {
@@ -114,12 +116,12 @@ impl OrderflowIngress {
         let available_permits = self.pqueues.available_permits_for(priority);
         let total_permits = self.pqueues.total_permits_for(priority);
         if available_permits == 0 {
-            SystemMetrics::increment_queue_capacity_hit(priority);
+            SYSTEM_METRICS.queue_capacity_hits(priority.as_str()).inc();
         }
 
         // Record queue capacity almost hit if the queue is at 75% of capacity.
         if available_permits <= total_permits / 4 {
-            SystemMetrics::increment_queue_capacity_almost_hit(priority);
+            SYSTEM_METRICS.queue_capacity_almost_hits(priority.as_str()).inc();
         }
     }
 

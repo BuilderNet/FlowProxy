@@ -17,7 +17,7 @@ use crate::{
         default_disk_backup_database_path, primitives::ClickhouseRowExt, ClickhouseIndexableOrder,
         MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
     },
-    metrics::{ClickhouseMetrics, IndexerMetrics},
+    metrics::ClickhouseMetrics,
     primitives::{backoff::BackoffInterval, Quantities},
     tasks::TaskExecutor,
     utils::FormatBytes,
@@ -516,31 +516,26 @@ impl<T: ClickhouseRowExt> Backup<T> {
         match self.disk_backup.save(&failed_commit) {
             Ok(stats) => {
                 tracing::debug!(target: TARGET, order = T::ORDER, total_size = stats.size_bytes.format_bytes(), elapsed = ?start.elapsed(), "saved failed commit to disk");
-                IndexerMetrics::set_clickhouse_disk_backup_size(
-                    stats.size_bytes,
-                    stats.total_batches,
-                    T::ORDER,
-                );
+                self.metrics.backup_size_bytes(T::ORDER, "disk").set(stats.size_bytes as i64);
+                self.metrics.backup_size_batches(T::ORDER, "disk").set(stats.total_batches as i64);
 
                 return;
             }
             Err(e) => {
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to write commit, trying in-memory");
-                IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+                self.metrics.backup_disk_errors(T::ORDER, e.to_string()).inc();
             }
         };
 
         let stats = self.memory_backup.save(failed_commit);
-        IndexerMetrics::set_clickhouse_memory_backup_size(
-            stats.size_bytes,
-            stats.total_batches,
-            T::ORDER,
-        );
+        self.metrics.backup_size_bytes(T::ORDER, "memory").set(stats.size_bytes as i64);
+        self.metrics.backup_size_batches(T::ORDER, "memory").set(stats.total_batches as i64);
         tracing::debug!(target: TARGET, order = T::ORDER, bytes = ?quantities.bytes, rows = ?quantities.rows, ?stats, "saved failed commit in-memory");
 
         if let Some((stats, oldest_quantities)) = self.memory_backup.drop_excess() {
             tracing::warn!(target: TARGET, order = T::ORDER, ?stats, "failed commits exceeded max memory backup size, dropping oldest");
-            IndexerMetrics::process_clickhouse_backup_data_lost_quantities(&oldest_quantities);
+            self.metrics.backup_data_lost_bytes().inc_by(oldest_quantities.bytes);
+            self.metrics.backup_data_lost_rows().inc_by(oldest_quantities.rows);
             // Clear the cached last commit if it was from memory and we just dropped it.
             self.last_cached =
                 self.last_cached.take().filter(|cached| cached.source != BackupSource::Memory);
@@ -571,7 +566,7 @@ impl<T: ClickhouseRowExt> Backup<T> {
             }
             Err(e) => {
                 tracing::error!(target: TARGET, order = T::ORDER, ?e, "failed to retrieve oldest failed commit from disk");
-                IndexerMetrics::increment_clickhouse_backup_disk_errors(T::ORDER, e.as_ref());
+                self.metrics.backup_disk_errors(T::ORDER, e.to_string()).inc();
                 None
             }
         }

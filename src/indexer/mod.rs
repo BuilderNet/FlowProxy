@@ -120,7 +120,7 @@ pub struct IndexerHandle {
 }
 
 impl IndexerHandle {
-    pub fn new(senders: OrderSenders) -> Self {
+    fn new(senders: OrderSenders) -> Self {
         Self { senders, metrics: IndexerMetrics::default() }
     }
 }

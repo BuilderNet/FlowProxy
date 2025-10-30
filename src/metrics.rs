@@ -1,11 +1,14 @@
-//! Metrics for the system. We don't use `metrics_derive` here because it doesn't allow for dynamic
-//! label
-use std::time::Duration;
+//! FlowProxy metrics with [`prometric_derive`].
+use std::sync::LazyLock;
 
-use metrics::{counter, describe_counter, describe_histogram, histogram};
 use prometric::{Counter, Gauge, Histogram};
 
-use crate::{forwarder::ForwardingDirection, priority::Priority};
+/// The system metrics. We use a lazy lock here to make sure they're globally accessible and
+/// initialized only once.
+pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> =
+    LazyLock::new(|| SystemMetrics::default());
+
+pub(crate) static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| HttpMetrics::default());
 
 #[prometric_derive::metrics(scope = "builderhub")]
 pub(crate) struct BuilderHubMetrics {
@@ -15,6 +18,13 @@ pub(crate) struct BuilderHubMetrics {
     /// The number of peer request failures.
     #[metric(labels = ["error"])]
     peer_request_failures: Counter,
+}
+
+#[prometric_derive::metrics(scope = "forwarder")]
+pub(crate) struct HttpMetrics {
+    /// The number of open HTTP connections.
+    #[metric(labels = ["peer_name"])]
+    open_http_connections: Gauge,
 }
 
 /// Forwarder metrics.
@@ -30,9 +40,6 @@ pub(crate) struct ForwarderMetrics {
     /// The number of inflight HTTP requests.
     #[metric]
     inflight_requests: Gauge,
-    /// The number of open HTTP connections.
-    #[metric]
-    open_http_connections: Gauge,
     /// The number of JSON-RPC decoding failures.
     #[metric]
     json_rpc_decoding_failures: Counter,
@@ -44,7 +51,7 @@ pub(crate) struct ForwarderMetrics {
     rpc_call_failures: Counter,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[prometric_derive::metrics(scope = "ingress")]
 pub(crate) struct IngressMetrics {
     /// The number of entities.
@@ -62,18 +69,9 @@ pub(crate) struct IngressMetrics {
     /// The number of order cache hits.
     #[metric(labels = ["order_type"])]
     order_cache_hit: Counter,
-    /// The number of order cache misses.
-    #[metric(labels = ["order_type"])]
-    order_cache_miss: Counter,
     /// Request body size in bytes.
     #[metric(rename = "request_body_size_bytes", labels = ["method"])]
     request_body_size: Histogram,
-    /// The number of signer cache hits.
-    #[metric]
-    signer_cache_hit: Counter,
-    /// The number of signer cache misses.
-    #[metric]
-    signer_cache_miss: Counter,
     /// The number of validation errors.
     #[metric(labels = ["error"])]
     validation_errors: Counter,
@@ -106,6 +104,7 @@ pub(crate) struct IngressMetrics {
     signer_cache_entry_count: Gauge,
 }
 
+#[derive(Debug)]
 #[prometric_derive::metrics(scope = "indexer")]
 pub struct IndexerMetrics {
     /// Total number of bundle indexing failures.
@@ -116,6 +115,7 @@ pub struct IndexerMetrics {
     bundle_receipt_indexing_failures: Counter,
 }
 
+#[derive(Debug, Clone)]
 #[prometric_derive::metrics(scope = "indexer_clickhouse")]
 pub struct ClickhouseMetrics {
     /// Total number of ClickHouse commit failures.
@@ -163,143 +163,31 @@ pub struct ClickhouseMetrics {
 }
 
 #[prometric_derive::metrics(scope = "indexer_parquet")]
-pub struct ParquetMetrics {
+pub(crate) struct ParquetMetrics {
     /// Current size of Parquet write queue.
     #[metric(labels = ["order"])]
     queue_size: Gauge,
 }
 
-mod name {
-    /// System processing metrics.
-    pub(crate) mod system {
-        pub(crate) const E2E_BUNDLE_PROCESSING_TIME: &str = "system_e2e_bundle_processing_time";
-        pub(crate) const E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME: &str =
-            "system_e2e_mev_share_bundle_processing_time";
-        pub(crate) const E2E_TRANSACTION_PROCESSING_TIME: &str =
-            "system_e2e_transaction_processing_time";
-        pub(crate) const E2E_SYSTEM_ORDER_PROCESSING_TIME: &str =
-            "system_e2e_system_order_processing_time";
-        pub(crate) const QUEUE_CAPACITY_HITS: &str = "system_queue_capacity_hits";
-        pub(crate) const QUEUE_CAPACITY_ALMOST_HITS: &str = "system_queue_capacity_almost_hits";
-    }
-}
-
-use name::*;
-
-pub fn describe() {
-    // Indexer metrics
-
-    // System end-to-end processing metrics
-    describe_histogram!(
-        system::E2E_BUNDLE_PROCESSING_TIME,
-        "End-to-end bundle processing time in seconds"
-    );
-    describe_histogram!(
-        system::E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME,
-        "End-to-end MEV-share bundle processing time in seconds"
-    );
-    describe_histogram!(
-        system::E2E_TRANSACTION_PROCESSING_TIME,
-        "End-to-end transaction processing time in seconds"
-    );
-    describe_histogram!(
-        system::E2E_SYSTEM_ORDER_PROCESSING_TIME,
-        "End-to-end system order processing time in seconds"
-    );
-    describe_counter!(
-        system::QUEUE_CAPACITY_HITS,
-        "Number of times the queue capacity was hit per priority"
-    );
-    describe_counter!(
-        system::QUEUE_CAPACITY_ALMOST_HITS,
-        "Number of times the queue capacity was almost hit per priority (>= 75% of capacity)"
-    );
-}
-
-/// Metrics related to the whole system.
 #[derive(Debug, Clone)]
-pub struct SystemMetrics;
-
-#[allow(missing_debug_implementations)]
-impl SystemMetrics {
-    #[inline]
-    pub fn record_e2e_bundle_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_BUNDLE_PROCESSING_TIME, &labels).record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn record_e2e_mev_share_bundle_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_MEV_SHARE_BUNDLE_PROCESSING_TIME, &labels)
-            .record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn record_e2e_transaction_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_TRANSACTION_PROCESSING_TIME, &labels).record(duration.as_secs_f64());
-    }
-
-    pub fn record_e2e_system_order_processing_time(
-        duration: Duration,
-        priority: Priority,
-        direction: ForwardingDirection,
-        order_type: &'static str,
-        big_request: bool,
-    ) {
-        let big_request = if big_request { "true" } else { "false" };
-        let labels = [
-            ("order_type", order_type),
-            ("priority", priority.as_str()),
-            ("direction", direction.as_str()),
-            ("big_request", big_request),
-        ];
-
-        histogram!(system::E2E_SYSTEM_ORDER_PROCESSING_TIME, &labels)
-            .record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    pub fn increment_queue_capacity_hit(priority: Priority) {
-        counter!(system::QUEUE_CAPACITY_HITS, "priority" => priority.as_str()).increment(1);
-    }
-
-    #[inline]
-    pub fn increment_queue_capacity_almost_hit(priority: Priority) {
-        counter!(system::QUEUE_CAPACITY_ALMOST_HITS, "priority" => priority.as_str()).increment(1);
-    }
+#[prometric_derive::metrics(scope = "system")]
+pub(crate) struct SystemMetrics {
+    /// End-to-end bundle processing time in seconds.
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    bundle_processing_time: Histogram,
+    /// End-to-end MEV-share bundle processing time in seconds.
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    mev_share_bundle_processing_time: Histogram,
+    /// End-to-end transaction processing time in seconds.
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"])]
+    transaction_processing_time: Histogram,
+    /// End-to-end system order processing time in seconds.
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"])]
+    system_order_processing_time: Histogram,
+    /// Number of times the queue capacity was hit per priority.
+    #[metric(labels = ["priority"])]
+    queue_capacity_hits: Counter,
+    /// Number of times the queue capacity was almost hit per priority (>= 75% of capacity).
+    #[metric(labels = ["priority"])]
+    queue_capacity_almost_hits: Counter,
 }

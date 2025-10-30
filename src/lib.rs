@@ -15,7 +15,7 @@ use crate::{
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
-    extract::{DefaultBodyLimit, Request},
+    extract::{DefaultBodyLimit, Request, State},
     middleware::Next,
     response::Response,
     routing::{get, post},
@@ -82,7 +82,6 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
 
     if let Some(ref metrics_addr) = args.metrics {
         spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?)?;
-        metrics::describe();
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
@@ -234,7 +233,10 @@ pub async fn run_with_listeners(
         .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
-        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressUserMetrics>))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(ingress.user_metrics.clone()),
+            track_server_metrics,
+        ))
         .with_state(ingress.clone());
     let addr = user_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting user ingress server");
@@ -246,9 +248,11 @@ pub async fn run_with_listeners(
         .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
-        .layer(DefaultBodyLimit::max(args.max_request_size))
         // TODO: After mTLS, we can probably take this out.
-        .route_layer(axum::middleware::from_fn(track_server_metrics::<IngressSystemMetrics>))
+        .route_layer(axum::middleware::from_fn_with_state(
+            Arc::new(ingress.user_metrics.clone()),
+            track_server_metrics,
+        ))
         .with_state(ingress.clone());
     let addr = system_listener.local_addr()?;
     info!(target: "ingress", ?addr, "Starting system ingress server");
@@ -390,16 +394,20 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
 }
 
 /// Middleware to track server metrics.
-async fn track_server_metrics<T: IngressMetrics>(request: Request, next: Next) -> Response {
+async fn track_server_metrics(
+    State(metrics): State<Arc<IngressMetrics>>,
+    request: Request,
+    next: Next,
+) -> Response {
     let path = request.uri().path().to_string();
-    let method = request.method().clone();
+    let method = request.method().to_string();
 
     let start = Instant::now();
     let response = next.run(request).await;
     let latency = start.elapsed();
-    let status = response.status();
+    let status = response.status().as_u16().to_string();
 
-    T::record_http_request(&method, path, status, latency);
+    metrics.http_request_duration(&method, &path, &status).observe(latency.as_secs_f64());
 
     response
 }
