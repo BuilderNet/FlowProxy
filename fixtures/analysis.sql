@@ -21,20 +21,20 @@ WITH
             *
         FROM buildernet.bundle_receipts_wo_bundle_hash
         WHERE received_at >= t_since AND received_at <= t_until
-          AND dst_builder_name != 'buildernet-flashbots-mkosi-test-1'
+            AND dst_builder_name != 'buildernet-flashbots-mkosi-test-1'
     ),
 
     ------------ METADATA QUERIES ------------
 
     -- Get all unique builders in the dataset.
     builders AS (
-      SELECT groupUniqArray(dst_builder_name) AS dsts
-      FROM bundle_receipts
+        SELECT groupUniqArray(dst_builder_name) AS dsts
+        FROM bundle_receipts
     ),
 
     -- Count total number of unique builders (scalar).
     builders_count AS (
-      SELECT length(dsts) AS total_builders FROM builders
+        SELECT length(dsts) AS total_builders FROM builders
     ),
 
     ------------ BUNDLE VISIBILITY ------------
@@ -51,16 +51,16 @@ WITH
 
     -- For each bundle, determine which builders have not seen it.
     bundle_not_seen_by AS (
-      SELECT
-        double_bundle_hash,
-        src_builders,
-        -- We have to exclude source builders since they won't see their own bundles.
-        arrayFilter(
-          x -> (NOT has(src_builders, x)) AND (NOT has(seen_dsts, x)),
-          (SELECT dsts FROM builders)
-        ) AS missing_dsts
-      FROM bundle_seen_by
-      WHERE length(missing_dsts) > 0
+        SELECT
+            double_bundle_hash,
+            src_builders,
+            -- We have to exclude source builders since they won't see their own bundles.
+            arrayFilter(
+                x -> (NOT has(src_builders, x)) AND (NOT has(seen_dsts, x)),
+                (SELECT dsts FROM builders)
+            ) AS missing_dsts
+        FROM bundle_seen_by
+        WHERE length(missing_dsts) > 0
     ),
 
     ------------ OCCURRENCE COUNTS ------------
@@ -82,7 +82,7 @@ WITH
         SELECT *
         FROM bundle_occurrences
         -- We have to subtract 1 because source builder won't see its own bundle receipt.
-        WHERE occurrences < (SELECT total_builders FROM builders_count) - 1 
+        WHERE occurrences < (SELECT total_builders FROM builders_count) - 1
     ),
 
     -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
@@ -128,4 +128,4 @@ WITH
 -- Final query
 -- ===================================
 SELECT *
-FROM lost_bundles
+FROM lost_bundles;
