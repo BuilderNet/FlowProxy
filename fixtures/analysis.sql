@@ -36,6 +36,18 @@ WITH
         FROM bundle_receipts
     ),
 
+    bundle_duplicates AS (
+        select
+            double_bundle_hash,
+            occurrences
+        FROM (SELECT
+              double_bundle_hash,
+              count() AS occurrences
+            FROM bundle_receipts
+            GROUP by double_bundle_hash)
+        WHERE occurrences > 5 -- TODO: do not hardcode this.
+    ),
+
     ------------ METADATA QUERIES ------------
 
     -- Get all unique builders in the dataset.
@@ -71,6 +83,18 @@ WITH
         FROM bundle_receipts
         GROUP BY double_bundle_hash
         ORDER BY occurrences ASC
+    ),
+
+    -- Count occurrences of bundle receipts by source-destination builder pairs.
+    -- TODO: duplicates mess this up a little bit.
+    bundle_occurrences_by_link AS (
+        SELECT
+            src_builder_name,
+            dst_builder_name,
+            count() AS occurrences
+        FROM bundle_receipts
+        GROUP BY double_bundle_hash, src_builder_name, dst_builder_name
+        ORDER BY occurrences DESC
     ),
 
     ------------ LOST BUNDLES QUERIES ---------
