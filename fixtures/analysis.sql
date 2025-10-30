@@ -1,7 +1,8 @@
+WITH
 -- ===================================
 -- Constants / utility functions
 -- ===================================
-WITH
+
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
@@ -149,5 +150,6 @@ WITH
 -- ===================================
 -- Final query
 -- ===================================
+
 SELECT *
 FROM lost_bundles;
