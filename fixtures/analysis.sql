@@ -112,12 +112,18 @@ WITH
         ORDER BY observations ASC
     ),
 
-    -- Rank builders by the number of bundles they missed. TODO: this is broken.
+    -- Rank builders by the number of bundles they missed.
     lost_bundles_by_dst AS (
         SELECT
-            arrayJoin(missing_dsts) AS dst_builder_name,
-            count() AS missed_bundle_count
-        FROM bundle_not_seen_by
+            dst_builder_name,
+            count(*) AS missed_bundle_count
+        FROM (
+            -- explode every missing_dsts array so each element = one "miss event"
+            SELECT
+                double_bundle_hash,
+                arrayJoin(missing_dsts) AS dst_builder_name
+            FROM bundle_not_seen_by
+        )
         GROUP BY dst_builder_name
         ORDER BY missed_bundle_count DESC
     ),
