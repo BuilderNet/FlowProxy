@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{convert::Infallible, path::PathBuf};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -169,8 +169,8 @@ pub struct OrderflowIngressArgs {
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_READY_ENDPOINT", id = "BUILDER_READY_ENDPOINT", default_value = "http://127.0.0.1:6070")]
     pub builder_ready_endpoint: Option<String>,
 
-    /// The name of the local builder.
-    #[clap(long, env = "BUILDERNET_NODE_NAME", id = "BUILDERNET_NODE_NAME")]
+    /// The name of the local builder. For consistency with BuilderHub data, dashes will be replaced with underscores.
+    #[clap(long, env = "BUILDERNET_NODE_NAME", id = "BUILDERNET_NODE_NAME", value_parser = replace_dashes_with_underscores)]
     pub builder_name: String,
 
     /// The URL of BuilderHub.
@@ -338,6 +338,12 @@ impl OrderflowIngressArgs {
         self.disable_forwarding = true;
         self
     }
+}
+
+/// Replace dashes with underscores in a string. Returns a `Result` so that it can be used
+/// as a `clap` value parser.
+fn replace_dashes_with_underscores(s: &str) -> Result<String, Infallible> {
+    Ok(s.replace('-', "_"))
 }
 
 /// Test that optional indexing args are validated correctly and match expected usage.
