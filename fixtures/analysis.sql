@@ -121,7 +121,9 @@ WITH
     lost_bundles AS (
         SELECT
             missed_builders,
-            count() AS observations,
+            -- If we had more than one source builder for a bundle, it means
+            -- multiple observations of bundle loss.
+            sum(length(src_builders)) AS observations,
             (SELECT unique_bundles FROM bundle_unique_count) AS total_unique_bundles,
             concat(toString(round(100 * observations / total_unique_bundles, 2)), '%') AS percent_of_total_bundles
         FROM lost_bundles_detailed
@@ -130,7 +132,6 @@ WITH
     ),
 
     -- Rank links by the number of bundles they missed.
-    -- TODO: double check correctness.
     lost_bundles_by_link AS (
         WITH loss_events AS (
             -- For each lost bundle, explode the missing_dsts and src_builders to get individual loss events.
@@ -162,8 +163,7 @@ WITH
 
     -------- sanity checks ---------
 
-    -- Should match, or be really really close. `lost_bundles_by_link` might be slightly higher
-    -- because of `loss_events_by_link` expanding multiple `src_builders` per bundle.
+    -- Should match
     lost_bundles_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles),
     lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
 
