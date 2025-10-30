@@ -5044,7 +5044,8 @@ dependencies = [
 [[package]]
 name = "prometric"
 version = "0.1.0"
-source = "git+https://github.com/chainbound/prometric#0f5ce902b821e0c9a7610e54943b70d1b49ab417"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f715407af471ce4efc347f703a8ce8c7a184fab20878340229b40da37ace7979"
 dependencies = [
  "prometheus",
 ]
@@ -5052,7 +5053,8 @@ dependencies = [
 [[package]]
 name = "prometric-derive"
 version = "0.1.0"
-source = "git+https://github.com/chainbound/prometric#0f5ce902b821e0c9a7610e54943b70d1b49ab417"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb7f1acaf7f78cfb7e9f657b64de5df80fed8928c1b3abef6b39c3d3613e32be"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
