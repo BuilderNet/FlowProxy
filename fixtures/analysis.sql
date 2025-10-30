@@ -7,7 +7,7 @@ WITH
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
     toDateTime64('2025-10-30 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-30 12:00:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-30 06:00:00', 6, 'UTC') AS t_until,
 
 -- ===================================
 -- Common reusable subqueries
@@ -56,20 +56,6 @@ WITH
         GROUP BY double_bundle_hash
     ),
 
-    -- For each bundle, determine which builders have not seen it.
-    bundle_not_seen_by AS (
-        SELECT
-            double_bundle_hash,
-            src_builders,
-            -- We have to exclude source builders since they won't see their own bundles.
-            arrayFilter(
-                x -> (NOT has(src_builders, x)) AND (NOT has(seen_dsts, x)),
-                (SELECT dsts FROM builders)
-            ) AS missing_dsts
-        FROM bundle_seen_by
-        WHERE length(missing_dsts) > 0
-    ),
-
     ------------ OCCURRENCE COUNTS ------------
 
     -- Count occurrences of each bundle receipt, grouped by double_bundle_hash.
@@ -84,23 +70,21 @@ WITH
 
     ------------ LOST BUNDLES QUERIES ---------
 
-    -- A detailed list of bundles that were not seen by all builders. 
+    -- For each bundle, determine which builders have not seen it.
     --
-    -- Since a bundle can be sent from multiple sources, and each source won't
-    -- track the receipt of its own bundles, we consider a bundle "lost" if the
-    -- total number of unique source builders and destination builders that have
-    -- seen it is less than the total number of builders.
+    -- This filters the list of bundles to those that have been missed by at least one builder.
     lost_bundles_detailed AS (
         SELECT
             double_bundle_hash,
-            seen_dsts,
             src_builders,
-            length(src_builders) AS src_count,
-            length(seen_dsts) AS seen_count,
-            (SELECT total_builders FROM builders_count) AS total_builders,
-            total_builders - src_count - seen_count AS missed_builders
+            -- We have to exclude source builders since they won't see their own bundles.
+            arrayFilter(
+                x -> (NOT has(src_builders, x)) AND (NOT has(seen_dsts, x)),
+                (SELECT dsts FROM builders)
+            ) AS missing_dsts,
+            length(missing_dsts) AS missed_builders
         FROM bundle_seen_by
-        WHERE src_count + seen_count < total_builders
+        WHERE missed_builders > 0
     ),
 
     -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
@@ -123,7 +107,7 @@ WITH
             SELECT
                 double_bundle_hash,
                 arrayJoin(missing_dsts) AS dst_builder_name
-            FROM bundle_not_seen_by
+            FROM lost_bundles_detailed
         )
         GROUP BY dst_builder_name
         ORDER BY missed_bundle_count DESC
