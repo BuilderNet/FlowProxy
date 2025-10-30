@@ -288,7 +288,7 @@ async fn metrics_handler(State(registry): State<prometheus::Registry>) -> impl I
     let encoder = TextEncoder::new();
     let mut metrics = registry.gather();
     // Prepend "orderflow_proxy" to the metric name.
-    metrics.iter_mut().for_each(|m| m.mut_name().insert_str(0, "orderflow_proxy"));
+    metrics.iter_mut().for_each(|m| m.mut_name().insert_str(0, "flowproxy_"));
     let mut buffer = Vec::new();
 
     encoder.encode(&metrics, &mut buffer).unwrap();
