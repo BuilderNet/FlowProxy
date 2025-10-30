@@ -5,8 +5,8 @@ WITH
     -- Take bytes and convert to hex with '0x' prefix
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis.
-    toDateTime64('2025-10-30 08:22:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-30 09:15:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-30 08:40:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-10-30 09:30:00', 6, 'UTC') AS t_until,
 
 -- ===================================
 -- Common reusable subqueries
@@ -26,7 +26,7 @@ WITH
         GROUP BY double_bundle_hash
         ORDER BY occurrences ASC
     ),
-    dropped_bundles AS (
+    lost_bundles AS (
         SELECT * FROM occurrences WHERE occurrences < 5
     ),
     src_dst_quantiles AS (
@@ -50,5 +50,5 @@ WITH
 -- ===================================
 -- Final query
 -- ===================================
-SELECT * FROM src_dst_quantiles;
+SELECT * FROM lost_bundles;
 
