@@ -5,8 +5,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-10-30 09:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-30 10:30:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-30 12:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-10-30 12:30:00', 6, 'UTC') AS t_until,
 
 -- ===================================
 -- Common reusable subqueries
@@ -26,6 +26,7 @@ WITH
             priority
         FROM buildernet.bundle_receipts_wo_bundle_hash
         WHERE received_at >= t_since AND received_at <= t_until
+            -- Skip test builders
             AND dst_builder_name != 'buildernet_flashbots_mkosi_test_1'
     ),
 
@@ -91,11 +92,12 @@ WITH
     lost_bundles_detailed AS (
         SELECT
             double_bundle_hash,
-            src_builders,
             seen_dsts,
+            src_builders,
             length(src_builders) AS src_count,
             length(seen_dsts) AS seen_count,
-            (SELECT total_builders FROM builders_count) AS total_builders
+            (SELECT total_builders FROM builders_count) AS total_builders,
+            total_builders - src_count - seen_count AS missed_builders
         FROM bundle_seen_by
         WHERE src_count + seen_count < total_builders
     ),
@@ -103,12 +105,11 @@ WITH
     -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
     lost_bundles AS (
         SELECT
-            (SELECT total_builders FROM builders_count) - occurrences AS missed_builders,
-            (SELECT total_builders FROM builders_count) AS total_builders,
+            missed_builders,
             count() AS observations
         FROM lost_bundles_detailed
-        GROUP BY occurrences
-        ORDER BY occurrences ASC
+        GROUP BY missed_builders
+        ORDER BY observations ASC
     ),
 
     -- Rank builders by the number of bundles they missed. TODO: this is broken.
