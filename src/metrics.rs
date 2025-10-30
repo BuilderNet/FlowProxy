@@ -8,8 +8,14 @@ use prometric::{Counter, Gauge, Histogram};
 pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> =
     LazyLock::new(|| SystemMetrics::default());
 
+/// Global HTTP metrics.
 pub(crate) static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(|| HttpMetrics::default());
 
+/// Global Clickhouse metrics.
+pub(crate) static CLICKHOUSE_METRICS: LazyLock<ClickhouseMetrics> =
+    LazyLock::new(|| ClickhouseMetrics::default());
+
+#[derive(Debug)]
 #[prometric_derive::metrics(scope = "builderhub")]
 pub(crate) struct BuilderHubMetrics {
     /// The peer count.

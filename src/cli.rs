@@ -3,15 +3,12 @@ use std::path::PathBuf;
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
 use clap::{Args, Parser, ValueHint};
+use rbuilder_utils::clickhouse::indexer::{
+    default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES, MAX_MEMORY_BACKUP_SIZE_BYTES,
+};
 
 use crate::{
-    indexer::{
-        click::{
-            default_disk_backup_database_path, MAX_DISK_BACKUP_SIZE_BYTES,
-            MAX_MEMORY_BACKUP_SIZE_BYTES,
-        },
-        BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME,
-    },
+    indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
     SystemBundleDecoder,
 };
 
@@ -130,11 +127,14 @@ pub struct IndexerArgs {
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
 pub struct CacheArgs {
     /// The order cache TTL in seconds.
-    #[clap(long = "order-cache.ttl", default_value_t = 24)]
+    #[clap(long = "order-cache.ttl", default_value_t = 60)]
     pub order_cache_ttl: u64,
 
     /// The order cache size.
-    #[clap(long = "order-cache.size", default_value_t = 4096)]
+    ///
+    /// Defaults to 1,048,576 entries (~1 million). Since each entry is just a 32-byte hash, this
+    /// results in a maximum memory usage of ~32 MiB.
+    #[clap(long = "order-cache.size", default_value_t = 1_048_576)]
     pub order_cache_size: u64,
 
     /// The signer cache TTL in seconds.

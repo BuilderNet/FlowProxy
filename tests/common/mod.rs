@@ -36,7 +36,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
-    let task_manager = flowproxy::tasks::TaskManager::current();
+    let task_manager = rbuilder_utils::tasks::TaskManager::current();
 
     tokio::spawn(
         async move {

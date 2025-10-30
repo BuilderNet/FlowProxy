@@ -24,7 +24,7 @@ use rbuilder_primitives::{
     Bundle, BundleReplacementData, ShareBundle,
 };
 use revm_primitives::B256;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -32,8 +32,6 @@ use crate::{
     consts::{ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
     priority::Priority,
 };
-
-pub mod backoff;
 
 /// Metadata about a [`SystemBundle`].
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -51,8 +49,6 @@ pub struct SystemBundleMetadata {
 pub struct SystemBundle {
     /// The inner bundle. Wrapped in [`Arc`] to make cloning cheaper.
     pub raw_bundle: Arc<RawBundle>,
-    /// The bundle hash.
-    pub bundle_hash: B256,
     /// The decoded bundle.
     pub decoded_bundle: Arc<DecodedBundle>,
     /// Metadata about the bundle.
@@ -291,17 +287,13 @@ impl SystemBundleDecoder {
     /// function for the transaction signers. Returns an error if the raw bundle fails to decode.
     fn try_decode_inner(
         &self,
-        mut bundle: RawBundle,
+        bundle: RawBundle,
         metadata: SystemBundleMetadata,
         lookup: Option<impl Fn(B256) -> Option<Address>>,
     ) -> Result<SystemBundle, SystemBundleDecodingError> {
         if bundle.txs.len() > self.max_txs_per_bundle {
             return Err(SystemBundleDecodingError::TooManyTransactions);
         }
-
-        let raw_bundle_hash = bundle.bundle_hash();
-        // Set the bundle hash in the metadata.
-        bundle.metadata.bundle_hash = Some(raw_bundle_hash);
 
         let mut decoded = if let Some(lookup) = lookup {
             bundle.clone().decode_with_signer_lookup(TxEncoding::WithBlobData, lookup)?.into()
@@ -316,7 +308,6 @@ impl SystemBundleDecoder {
         Ok(SystemBundle {
             raw_bundle: Arc::new(bundle),
             decoded_bundle: Arc::new(decoded),
-            bundle_hash: raw_bundle_hash,
             metadata,
         })
     }
@@ -338,7 +329,8 @@ impl SystemBundle {
 
     /// Returns the bundle hash.
     pub fn bundle_hash(&self) -> B256 {
-        self.bundle_hash
+        // Use the provided bundle hash if available, otherwise compute it.
+        self.raw_bundle.metadata.bundle_hash.unwrap_or_else(|| self.raw_bundle.bundle_hash())
     }
 
     /// Returns the bundle if it is a new bundle.
@@ -381,6 +373,7 @@ impl SystemBundle {
 pub struct RawOrderMetadata {
     pub priority: Priority,
     pub received_at: UtcInstant,
+    pub hash: B256,
 }
 
 /// Decoded MEV Share bundle.
@@ -531,8 +524,8 @@ impl SystemTransaction {
 
 /// The receipt of a bundle received from the system endpoint, to be indexed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// The hash of the raw bundle.
 pub struct BundleReceipt {
-    /// The hash of the raw bundle.
     pub bundle_hash: B256,
     /// The time the bundle has been sent, according to the field provided in the JSON-RPC request
     /// header. `None` if the bundle was sent on the user endpoint.
@@ -570,6 +563,16 @@ pub enum EthResponse {
     BundleHash(B256),
     #[serde(untagged)]
     TxHash(B256),
+}
+
+impl EthResponse {
+    /// Returns the hash contained in the response.
+    pub fn hash(&self) -> B256 {
+        match self {
+            EthResponse::BundleHash(hash) => *hash,
+            EthResponse::TxHash(hash) => *hash,
+        }
+    }
 }
 
 /// A UTC timestamp along with a monotonic `Instant` to measure elapsed time.
@@ -662,6 +665,16 @@ impl EncodedOrder {
             EncodedOrder::Transaction(_) => "transaction",
         }
     }
+
+    /// Returns the hash of the order.
+    pub fn hash(&self) -> B256 {
+        match self {
+            EncodedOrder::SystemOrder(order) => order.inner.hash,
+            EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash(),
+            EncodedOrder::MevShareBundle(bundle) => bundle.inner.bundle_hash(),
+            EncodedOrder::Transaction(tx) => tx.inner.tx_hash(),
+        }
+    }
 }
 
 impl From<WithEncoding<SystemBundle>> for EncodedOrder {
@@ -695,76 +708,6 @@ impl Samplable for B256 {
         first.copy_from_slice(&self.0[..8]);
         let every = every as u64;
         u64::from_be_bytes(first) % every == 0
-    }
-}
-
-/// A simple sampler that executes a closure every `sample_size` calls, or if a certain amount of
-/// time has passed since last sampling call.
-#[derive(Debug, Clone)]
-pub struct Sampler {
-    sample_size: usize,
-    counter: usize,
-    start: Instant,
-    interval: Duration,
-}
-
-impl Default for Sampler {
-    fn default() -> Self {
-        Self {
-            sample_size: 4096,
-            counter: 0,
-            start: Instant::now(),
-            interval: Duration::from_secs(10),
-        }
-    }
-}
-
-impl Sampler {
-    pub fn with_sample_size(mut self, sample_size: usize) -> Self {
-        self.sample_size = sample_size;
-        self
-    }
-
-    pub fn with_interval(mut self, interval: Duration) -> Self {
-        self.start = Instant::now() - interval;
-        self
-    }
-
-    /// Call this function to potentially execute the sample closure if we have reached the sample
-    /// size, or enough time has passed. Otherwise, it increments the internal counter.
-    pub fn sample(&mut self, f: impl FnOnce()) {
-        if self.counter >= self.sample_size || self.start.elapsed() >= self.interval {
-            self.counter = 0;
-            self.start = Instant::now();
-            f();
-        } else {
-            self.counter += 1;
-        }
-    }
-}
-
-/// Equilalent of `clickhouse::inserter::Quantities` with more traits derived.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct Quantities {
-    pub bytes: u64,
-    pub rows: u64,
-    pub transactions: u64,
-}
-
-impl Quantities {
-    /// Just zero quantities, nothing special.
-    pub const ZERO: Quantities = Quantities { bytes: 0, rows: 0, transactions: 0 };
-}
-
-impl From<clickhouse::inserter::Quantities> for Quantities {
-    fn from(value: clickhouse::inserter::Quantities) -> Self {
-        Self { bytes: value.bytes, rows: value.rows, transactions: value.transactions }
-    }
-}
-
-impl From<Quantities> for clickhouse::inserter::Quantities {
-    fn from(value: Quantities) -> Self {
-        Self { bytes: value.bytes, rows: value.rows, transactions: value.transactions }
     }
 }
 
@@ -819,6 +762,7 @@ mod tests {
                 bundle_hash: None,
             },
         };
+
         let metadata = SystemBundleMetadata {
             signer: Address::ZERO,
             received_at: UtcInstant::now(),

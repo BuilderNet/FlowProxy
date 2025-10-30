@@ -1,9 +1,8 @@
 use crate::{
-    builderhub::BuilderHubBuilder,
+    builderhub,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
-        MEV_SEND_BUNDLE_METHOD,
+        FLASHBOTS_SIGNATURE_HEADER,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::{ForwarderMetrics, SYSTEM_METRICS},
@@ -12,16 +11,16 @@ use crate::{
         UtcInstant, WithEncoding,
     },
     priority::{pchannel, Priority},
-    tasks::TaskExecutor,
     utils::UtcDateTimeHeader as _,
 };
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use alloy_signer::SignerSync as _;
 use alloy_signer_local::PrivateKeySigner;
 use axum::http::HeaderValue;
 use dashmap::DashMap;
 use futures::{stream::FuturesUnordered, StreamExt};
 use hyper::{header::CONTENT_TYPE, HeaderMap, StatusCode};
+use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use revm_primitives::keccak256;
 use serde_json::json;
@@ -36,8 +35,6 @@ use std::{
 use time::UtcDateTime;
 use tokio::sync::mpsc;
 use tracing::*;
-
-const FORWARDER: &str = "ingress::forwarder";
 
 #[derive(Debug)]
 pub struct IngressForwarders {
@@ -68,23 +65,23 @@ impl IngressForwarders {
     }
 
     /// Broadcast bundle to all forwarders.
-    pub fn broadcast_bundle(&self, bundle: SystemBundle) {
+    pub(crate) fn broadcast_bundle(&self, bundle: SystemBundle) {
         let encoded_bundle = bundle.encode();
 
         // Create local request first
-        let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = ForwardingRequest::user_to_system(
+        let forward = Arc::new(ForwardingRequest::user_to_system(
             encoded_bundle.into(),
             signature_header,
             UtcDateTime::now(),
-        );
+        ));
 
-        debug!(target: FORWARDER, name = %ETH_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -92,19 +89,19 @@ impl IngressForwarders {
     pub fn broadcast_mev_share_bundle(&self, priority: Priority, bundle: SystemMevShareBundle) {
         let encoded_bundle = bundle.encode();
         // Create local request first
-        let local = ForwardingRequest::user_to_local(encoded_bundle.clone().into());
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
         let _ = self.local.send(priority, local);
 
         let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = ForwardingRequest::user_to_system(
+        let forward = Arc::new(ForwardingRequest::user_to_system(
             encoded_bundle.into(),
             signature_header,
             UtcDateTime::now(),
-        );
+        ));
 
-        debug!(target: FORWARDER, name = %MEV_SEND_BUNDLE_METHOD, peers = %self.peers.len(), "Sending bundle to peers");
+        debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
     }
 
@@ -112,19 +109,19 @@ impl IngressForwarders {
     pub fn broadcast_transaction(&self, transaction: SystemTransaction) {
         let encoded_transaction = transaction.encode();
 
-        let local = ForwardingRequest::user_to_local(encoded_transaction.clone().into());
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_transaction.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signature_header = self.build_signature_header(encoded_transaction.encoding.as_ref());
 
         // Difference: we add the signature header.
-        let forward = ForwardingRequest::user_to_system(
+        let forward = Arc::new(ForwardingRequest::user_to_system(
             encoded_transaction.into(),
             signature_header,
             UtcDateTime::now(),
-        );
+        ));
 
-        debug!(target: FORWARDER, name = %ETH_SEND_RAW_TRANSACTION_METHOD, peers = %self.peers.len(), "Sending transaction to peers");
+        debug!(peers = %self.peers.len(), "sending transaction to peers");
         self.broadcast(forward);
     }
 
@@ -138,7 +135,10 @@ impl IngressForwarders {
     /// Broadcast request to all peers.
     fn broadcast(&self, forward: Arc<ForwardingRequest>) {
         for entry in self.peers.iter() {
-            let _ = entry.value().sender.send(forward.priority(), forward.clone());
+            let handle = entry.value();
+            if let Err(e) = handle.sender.send(forward.priority(), forward.clone()) {
+                error!(?e, peer = %handle.info.name,  "failed to send forwarding request to peer");
+            }
         }
     }
 
@@ -148,6 +148,7 @@ impl IngressForwarders {
         priority: Priority,
         method: &str,
         param: serde_json::Value,
+        hash: B256,
         received_at: UtcInstant,
     ) {
         let json = json!({
@@ -159,11 +160,11 @@ impl IngressForwarders {
 
         let body = serde_json::to_vec(&json).expect("to JSON serialize request");
         // TODO: raw orders have no priority, but this will change, assume medium for now
-        let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at };
+        let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at, hash };
         let order =
             EncodedOrder::SystemOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
 
-        let local = ForwardingRequest::system_to_local(order);
+        let local = Arc::new(ForwardingRequest::system_to_local(order));
         let _ = self.local.send(priority, local);
     }
 }
@@ -171,7 +172,7 @@ impl IngressForwarders {
 #[derive(Debug)]
 pub struct PeerHandle {
     /// Peer info.
-    pub info: BuilderHubBuilder,
+    pub info: builderhub::Peer,
     /// Sender to the peer forwarder.
     pub sender: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
 }
@@ -180,7 +181,7 @@ pub fn spawn_forwarder(
     name: String,
     url: String,
     client: reqwest::Client, // request client to be reused for http senders
-    task_executor: TaskExecutor,
+    task_executor: &TaskExecutor,
 ) -> eyre::Result<pchannel::UnboundedSender<Arc<ForwardingRequest>>> {
     let (request_tx, request_rx) = pchannel::unbounded_channel();
     match Url::parse(&url)?.scheme() {
@@ -237,32 +238,54 @@ pub struct ForwardingRequest {
 
     /// The direction of the forwarding request.
     pub direction: ForwardingDirection,
+
+    /// The tracing span associated with this request.
+    pub span: tracing::Span,
 }
 
 impl ForwardingRequest {
-    pub fn user_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
+    pub fn user_to_local(encoded_order: EncodedOrder) -> Self {
         let headers =
             Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
-        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::UserToLocal })
+        Self {
+            encoded_order,
+            headers,
+            direction: ForwardingDirection::UserToLocal,
+            span: tracing::Span::current(),
+        }
     }
 
     pub fn user_to_system(
         encoded_order: EncodedOrder,
         signature_header: String,
         sent_at_header: UtcDateTime,
-    ) -> Arc<Self> {
+    ) -> Self {
         let headers = Self::create_headers(
             encoded_order.priority(),
             Some(signature_header),
             Some(sent_at_header),
         );
-        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::UserToSystem })
+        Self {
+            encoded_order,
+            headers,
+            direction: ForwardingDirection::UserToSystem,
+            span: tracing::Span::current(),
+        }
     }
 
-    pub fn system_to_local(encoded_order: EncodedOrder) -> Arc<Self> {
+    pub fn system_to_local(encoded_order: EncodedOrder) -> Self {
         let headers =
             Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
-        Arc::new(Self { encoded_order, headers, direction: ForwardingDirection::SystemToLocal })
+        Self {
+            encoded_order,
+            headers,
+            direction: ForwardingDirection::SystemToLocal,
+            span: tracing::Span::current(),
+        }
+    }
+
+    pub fn with_span(self, span: tracing::Span) -> Self {
+        Self { span, ..self }
     }
 
     /// Create a new forwarding request to a builder. The [`BUILDERNET_SENT_AT_HEADER`] is formatted
@@ -300,23 +323,34 @@ impl ForwardingRequest {
     pub fn is_big(&self) -> bool {
         self.encoded_order.encoding().len() > BIG_REQUEST_SIZE_THRESHOLD_KB
     }
+
+    /// Returns the hash of the encoded order.
+    pub fn hash(&self) -> B256 {
+        self.encoded_order.hash()
+    }
 }
 
+/// The response received by the [`HttpForwarder`] after sending a request.
 #[derive(Debug)]
-struct Response<Ok, Err> {
+struct ForwarderResponse<Ok, Err> {
     /// Whether this was a big request.
     is_big: bool,
     /// The type of the order.
     order_type: &'static str,
+    /// The hash of the order forwarded.
+    hash: B256,
     /// The instant at which request was sent.
     start_time: Instant,
     /// Builder response.
     response: Result<Ok, Err>,
+
+    /// The parent span associated with this response.
+    span: tracing::Span,
 }
 
-type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = Response<Ok, Err>> + Send>>;
+type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
 
-/// An HTTP forwarder that forwards requests to a builder.
+/// An HTTP forwarder that forwards requests to a peer.
 struct HttpForwarder {
     client: reqwest::Client,
     /// The name of the builder we're forwarding to.
@@ -326,7 +360,7 @@ struct HttpForwarder {
     /// The receiver of forwarding requests.
     request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The sender to decode [`reqwest::Response`] errors.
-    error_decoder_tx: mpsc::Sender<(reqwest::Response, Duration)>,
+    error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
     /// The metrics for the forwarder.
@@ -348,6 +382,7 @@ impl HttpForwarder {
             rx: error_decoder_rx,
             metrics: metrics.clone(),
         };
+
         (
             Self {
                 client,
@@ -362,22 +397,116 @@ impl HttpForwarder {
         )
     }
 
-    fn on_response(&mut self, response: Response<reqwest::Response, reqwest::Error>) {
-        let Response { start_time, response: response_result, order_type, is_big } = response;
+    /// Send an HTTP request to the peer, returning a future that resolves to the response.
+    fn send_http_request(
+        &self,
+        request: Arc<ForwardingRequest>,
+    ) -> RequestFut<reqwest::Response, reqwest::Error> {
+        let client = self.client.clone();
+        let peer_url = self.peer_url.clone();
+
+        let request_span = request.span.clone();
+        let span = tracing::info_span!(parent: request_span.clone(), "http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
+
+        let fut = async move {
+            let direction = request.direction;
+            let is_big = request.is_big();
+            let hash = request.hash();
+
+            // Try to avoid cloning the body and headers if there is only one reference.
+            let (order, headers) = Arc::try_unwrap(request).map_or_else(
+                |req| (req.encoded_order.clone(), req.headers.clone()),
+                |inner| (inner.encoded_order, inner.headers),
+            );
+
+            match order {
+                EncodedOrder::Bundle(_) => {
+                    SYSTEM_METRICS
+                        .bundle_processing_time(
+                            order.priority().as_str(),
+                            direction.as_str(),
+                            is_big.to_string(),
+                        )
+                        .observe(order.received_at().elapsed().as_secs_f64());
+                }
+                EncodedOrder::MevShareBundle(_) => {
+                    SYSTEM_METRICS
+                        .mev_share_bundle_processing_time(
+                            order.priority().as_str(),
+                            direction.as_str(),
+                            is_big.to_string(),
+                        )
+                        .observe(order.received_at().elapsed().as_secs_f64());
+                }
+                EncodedOrder::Transaction(_) => {
+                    SYSTEM_METRICS
+                        .transaction_processing_time(
+                            order.priority().as_str(),
+                            direction.as_str(),
+                            is_big.to_string(),
+                        )
+                        .observe(order.received_at().elapsed().as_secs_f64());
+                }
+                EncodedOrder::SystemOrder(_) => {
+                    SYSTEM_METRICS
+                        .system_order_processing_time(
+                            order.priority().as_str(),
+                            direction.as_str(),
+                            order.order_type(),
+                            is_big.to_string(),
+                        )
+                        .observe(order.received_at().elapsed().as_secs_f64());
+                }
+            }
+
+            let order_type = order.order_type();
+            let start_time = Instant::now();
+            let response =
+                client.post(peer_url).body(order.encoding().to_vec()).headers(headers).send().await;
+            tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
+
+            ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
+        } // We first want to enter the parent span, then the local span.
+        .instrument(span);
+
+        Box::pin(fut)
+    }
+
+    #[tracing::instrument(skip_all, name = "http_forwarder_response"
+        fields(
+            peer_url = %self.peer_url,
+            is_big = response.is_big,
+            elapsed = tracing::field::Empty,
+            status = tracing::field::Empty,
+    ))]
+    fn on_response(&mut self, response: ForwarderResponse<reqwest::Response, reqwest::Error>) {
+        let ForwarderResponse {
+            start_time,
+            response: response_result,
+            order_type,
+            is_big,
+            hash,
+            ..
+        } = response;
         let elapsed = start_time.elapsed();
+
+        tracing::Span::current().record("elapsed", tracing::field::debug(&elapsed));
 
         match response_result {
             Ok(response) => {
                 let status = response.status();
+                tracing::Span::current().record("status", tracing::field::debug(&status));
 
                 // Print warning if the RPC call took more than 1 second.
                 if elapsed > Duration::from_secs(1) {
-                    warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Long RPC call");
+                    warn!("long rpc call");
                 }
 
                 if status.is_success() {
+                    trace!("received success response");
+
                     if status != StatusCode::OK {
-                        warn!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Non-OK status code");
+                        warn!("non-ok status code");
                     }
 
                     // Only record success if the status is OK.
@@ -386,15 +515,25 @@ impl HttpForwarder {
                         .observe(elapsed.as_secs_f64());
                 } else {
                     // If we have a non-OK status code, also record it.
-                    error!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Error forwarding request");
-                    self.metrics.rpc_call_failures(status.as_u16().to_string()).inc();
-                    if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
-                        error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
+                    error!("failed to forward request");
+                    self.metrics
+                        .http_call_failures(
+                            status
+                                .canonical_reason()
+                                .map(String::from)
+                                .unwrap_or(status.to_string()),
+                        )
+                        .inc();
+
+                    if let Err(e) =
+                        self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
+                    {
+                        error!(?e, "failed to send error response to decoder");
                     }
                 }
             }
             Err(error) => {
-                error!(target: FORWARDER, peer_name = %self.peer_name, ?error, ?elapsed, "Error forwarding request");
+                error!("error forwarding request");
 
                 // Parse the reason, which is either the status code reason of the error message
                 // itself. If the request fails for non-network reasons, the status code may be
@@ -405,7 +544,7 @@ impl HttpForwarder {
                     .unwrap_or(format!("{error:?}"));
 
                 if error.is_connect() {
-                    warn!(target: FORWARDER, peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
+                    warn!(?reason, "connection error");
                     self.metrics.http_connect_failures(reason).inc();
                 } else {
                     self.metrics.http_call_failures(reason).inc();
@@ -424,31 +563,53 @@ impl Future for HttpForwarder {
         loop {
             // First poll for completed work.
             if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
-                this.on_response(response);
+                response.span.clone().in_scope(|| {
+                    this.on_response(response);
+                });
                 continue;
             }
 
             // Then accept new requests.
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
-                    info!(target: FORWARDER, name = %this.peer_name, "Terminating forwarder");
+                    info!(name = %this.peer_name, "terminating forwarder");
                     return Poll::Ready(());
                 };
 
-                trace!(target: FORWARDER, name = %this.peer_name, ?request, "Sending request");
-                this.pending.push(send_http_request(
-                    this.client.clone(),
-                    this.peer_url.clone(),
-                    request,
-                ));
+                let fut = this.send_http_request(request);
+                this.pending.push(fut);
 
                 this.metrics.inflight_requests().set(this.pending.len() as i64);
-
                 continue;
             }
 
             return Poll::Pending;
         }
+    }
+}
+
+/// The input to the error decoder, containing the response to the request and its associated order
+/// hash.
+#[derive(Debug)]
+pub struct ErrorDecoderInput {
+    /// The hash of the order forwarded.
+    pub hash: B256,
+    /// The error response to be decoded.
+    pub response: reqwest::Response,
+
+    /// The tracing span associated with this data.
+    pub span: tracing::Span,
+}
+
+impl ErrorDecoderInput {
+    /// Create a new error decoder input.
+    pub fn new(hash: B256, response: reqwest::Response) -> Self {
+        Self { hash, response, span: tracing::Span::current() }
+    }
+
+    /// Set the tracing span for this input.
+    pub fn with_span(self, span: tracing::Span) -> Self {
+        Self { span, ..self }
     }
 }
 
@@ -461,96 +622,35 @@ pub struct ResponseErrorDecoder {
     /// The url of the builder
     pub peer_url: String,
     /// The receiver of the error responses.
-    pub rx: mpsc::Receiver<(reqwest::Response, Duration)>,
-    /// The metrics for the error decoder.
-    metrics: ForwarderMetrics,
+    pub rx: mpsc::Receiver<ErrorDecoderInput>,
+    /// Metrics from the associated forwarder.
+    pub metrics: ForwarderMetrics,
 }
 
 impl ResponseErrorDecoder {
-    pub async fn run(mut self) {
-        while let Some((response, elapsed)) = self.rx.recv().await {
-            let status = response.status();
-
-            match response.json::<JsonRpcResponse<serde_json::Value>>().await {
-                Ok(body) => {
-                    if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                        error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
-                        self.metrics.rpc_call_failures(code.to_string()).inc();
-                    }
+    #[tracing::instrument(skip_all, name = "response_error_decode")]
+    async fn decode(&self, input: ErrorDecoderInput) {
+        match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
+            Ok(body) => {
+                if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
+                    error!(%code, %message, "decoded error response from builder");
+                    self.metrics.rpc_call_failures(code.to_string()).inc();
                 }
-                Err(e) => {
-                    warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
-                    self.metrics.json_rpc_decoding_failures().inc();
-                }
+            }
+            Err(e) => {
+                warn!(?e, "failed to decode response into json-rpc");
+                self.metrics.json_rpc_decoding_failures().inc();
             }
         }
     }
-}
 
-fn send_http_request(
-    client: reqwest::Client,
-    url: String,
-    request: Arc<ForwardingRequest>,
-) -> RequestFut<reqwest::Response, reqwest::Error> {
-    Box::pin(async move {
-        let direction = request.direction;
-        let is_big = request.is_big();
-
-        // Try to avoid cloning the body and headers if there is only one reference.
-        let (order, headers) = Arc::try_unwrap(request).map_or_else(
-            |req| (req.encoded_order.clone(), req.headers.clone()),
-            |inner| (inner.encoded_order, inner.headers),
-        );
-
-        let order_type = order.order_type();
-
-        match order {
-            EncodedOrder::Bundle(_) => {
-                SYSTEM_METRICS
-                    .bundle_processing_time(
-                        order.priority().as_str(),
-                        direction.as_str(),
-                        is_big.to_string(),
-                    )
-                    .observe(order.received_at().elapsed().as_secs_f64());
-            }
-            EncodedOrder::MevShareBundle(_) => {
-                SYSTEM_METRICS
-                    .mev_share_bundle_processing_time(
-                        order.priority().as_str(),
-                        direction.as_str(),
-                        is_big.to_string(),
-                    )
-                    .observe(order.received_at().elapsed().as_secs_f64());
-            }
-            EncodedOrder::Transaction(_) => {
-                SYSTEM_METRICS
-                    .transaction_processing_time(
-                        order.priority().as_str(),
-                        direction.as_str(),
-                        is_big.to_string(),
-                    )
-                    .observe(order.received_at().elapsed().as_secs_f64());
-            }
-            EncodedOrder::SystemOrder(_) => {
-                SYSTEM_METRICS
-                    .system_order_processing_time(
-                        order.priority().as_str(),
-                        direction.as_str(),
-                        order_type,
-                        is_big.to_string(),
-                    )
-                    .observe(order.received_at().elapsed().as_secs_f64());
-            }
+    /// Run the error decoder actor in loop.
+    pub async fn run(mut self) {
+        while let Some(input) = self.rx.recv().await {
+            let span = input.span.clone();
+            self.decode(input).instrument(span).await;
         }
-
-        let order_type = order.order_type();
-        let start_time = Instant::now();
-        let response =
-            client.post(&url).body(order.encoding().to_vec()).headers(headers).send().await;
-
-        Response { start_time, response, is_big, order_type }
-    })
+    }
 }
 
 #[cfg(test)]

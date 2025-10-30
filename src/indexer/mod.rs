@@ -3,6 +3,7 @@
 
 use std::fmt::Debug;
 
+use rbuilder_utils::tasks::TaskExecutor;
 use tokio::sync::mpsc;
 
 use crate::{
@@ -10,7 +11,6 @@ use crate::{
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     metrics::IndexerMetrics,
     primitives::{BundleReceipt, SystemBundle},
-    tasks::TaskExecutor,
 };
 
 pub(crate) mod click;
@@ -42,7 +42,7 @@ pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-
 const TARGET: &str = "indexer";
 
 /// Trait for adding order indexing functionality.
-pub trait OrderIndexer: Sync + Send {
+pub(crate) trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt);
 }
@@ -177,7 +177,8 @@ pub(crate) mod tests {
 
     use crate::{
         primitives::{
-            BundleReceipt, SystemBundle, SystemBundleDecoder, SystemBundleMetadata, UtcInstant,
+            BundleHash, BundleReceipt, SystemBundle, SystemBundleDecoder, SystemBundleMetadata,
+            UtcInstant,
         },
         priority::Priority,
     };
@@ -234,7 +235,9 @@ pub(crate) mod tests {
 
     /// An example system bundle to use for testing.
     pub(crate) fn system_bundle_example() -> SystemBundle {
-        let bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
+        let mut bundle = serde_json::from_str::<RawBundle>(TEST_BUNDLE).unwrap();
+        bundle.metadata.bundle_hash = bundle.bundle_hash().into();
+
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
 
@@ -246,7 +249,9 @@ pub(crate) mod tests {
 
     /// An example cancel bundle to use for testing.
     pub(crate) fn system_cancel_bundle_example() -> SystemBundle {
-        let bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
+        let mut bundle = serde_json::from_str::<RawBundle>(TEST_CANCEL_BUNDLE).unwrap();
+        bundle.metadata.bundle_hash = bundle.bundle_hash().into();
+
         let signer = alloy_primitives::address!("0xff31f52c4363b1dacb25d9de07dff862bf1d0e1c");
         let received_at = UtcInstant::now();
 
