@@ -4,99 +4,107 @@ use std::time::Duration;
 
 use hyper::{Method, StatusCode};
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
+use prometric::{Counter, Gauge, Histogram};
 
 use crate::{forwarder::ForwardingDirection, primitives::Quantities, priority::Priority};
 
-#[prom_derive::metrics(scope = "builderhub")]
+#[prometric_derive::metrics(scope = "builderhub")]
 pub(crate) struct BuilderHubMetrics {
     /// The peer count.
-    #[metric(labels = ["peer_name"])]
-    peer_count: IntGauge,
-    /// The number of registration failures.
-    #[metric(labels = ["error"])]
-    registration_failures: IntCounter,
+    #[metric]
+    peer_count: Gauge,
     /// The number of peer request failures.
     #[metric(labels = ["error"])]
-    peer_request_failures: IntCounter,
+    peer_request_failures: Counter,
 }
 
 /// Forwarder metrics.
-#[prom_derive::metrics(scope = "forwarder")]
+#[prometric_derive::metrics(scope = "forwarder")]
 #[derive(Debug, Clone)]
 pub(crate) struct ForwarderMetrics {
     /// The number of HTTP connection failures.
-    #[metric(labels = ["peer_name", "reason"])]
-    http_connect_failures: IntCounter,
+    #[metric(labels = ["reason"])]
+    http_connect_failures: Counter,
     /// The number of HTTP call failures.
-    #[metric(labels = ["peer_name", "reason"])]
-    http_call_failures: IntCounter,
+    #[metric(labels = ["reason"])]
+    http_call_failures: Counter,
     /// The number of inflight HTTP requests.
-    #[metric(labels = ["peer_name"])]
-    inflight_requests: IntGauge,
+    #[metric]
+    inflight_requests: Gauge,
     /// The number of open HTTP connections.
-    #[metric(labels = ["peer_name"])]
-    open_http_connections: IntGauge,
+    #[metric]
+    open_http_connections: Gauge,
     /// The number of JSON-RPC decoding failures.
-    #[metric(labels = ["peer_name"])]
-    json_rpc_decoding_failures: IntCounter,
+    #[metric]
+    json_rpc_decoding_failures: Counter,
     /// The duration of RPC calls.
-    #[metric(labels = ["peer_name", "order_type", "big_request"])]
+    #[metric(labels = ["order_type", "big_request"])]
     rpc_call_duration: Histogram,
     /// The number of RPC call failures.
-    #[metric(labels = ["peer_name", "rpc_code"])]
-    rpc_call_failures: IntCounter,
+    #[metric(labels = ["rpc_code"])]
+    rpc_call_failures: Counter,
 }
 
-#[prom_derive::metrics(scope = "ingress")]
+#[derive(Debug)]
+#[prometric_derive::metrics(scope = "ingress")]
 pub(crate) struct IngressMetrics {
     /// The number of entities.
-    #[metric(labels = ["handler"])]
-    entity_count: IntGauge,
+    #[metric]
+    entity_count: Gauge,
     /// The number of requests rate limited.
-    #[metric(labels = ["handler"])]
-    requests_rate_limited: IntCounter,
+    #[metric]
+    requests_rate_limited: Counter,
     /// The number of JSON-RPC parsing errors.
-    #[metric(labels = ["handler", "method"])]
-    json_rpc_parse_errors: IntCounter,
+    #[metric(labels = ["method"])]
+    json_rpc_parse_errors: Counter,
     /// The number of JSON-RPC unknown methods.
-    #[metric(labels = ["handler", "method"])]
-    json_rpc_unknown_method: IntCounter,
+    #[metric(labels = ["method"])]
+    json_rpc_unknown_method: Counter,
     /// The number of order cache hits.
-    #[metric(labels = ["handler", "order_type"])]
-    order_cache_hit: IntCounter,
+    #[metric(labels = ["order_type"])]
+    order_cache_hit: Counter,
     /// The number of order cache misses.
-    #[metric(labels = ["handler", "order_type"])]
-    order_cache_miss: IntCounter,
+    #[metric(labels = ["order_type"])]
+    order_cache_miss: Counter,
+    /// Request body size in bytes.
+    #[metric(rename = "request_body_size_bytes", labels = ["method"])]
+    request_body_size: Histogram,
     /// The number of signer cache hits.
-    #[metric(labels = ["handler"])]
-    signer_cache_hit: IntCounter,
+    #[metric]
+    signer_cache_hit: Counter,
     /// The number of signer cache misses.
-    #[metric(labels = ["handler"])]
-    signer_cache_miss: IntCounter,
+    #[metric]
+    signer_cache_miss: Counter,
     /// The number of validation errors.
-    #[metric(labels = ["handler", "error"])]
-    validation_errors: IntCounter,
+    #[metric(labels = ["error"])]
+    validation_errors: Counter,
     /// The duration of HTTP requests.
-    #[metric(labels = ["handler", "method", "path", "status"])]
+    #[metric(labels = ["method", "path", "status"])]
     http_request_duration: Histogram,
+    /// The duration of RPC calls.
+    #[metric(labels = ["method", "priority"])]
+    rpc_request_duration: Histogram,
     /// The number of transactions per bundle.
-    #[metric(labels = ["handler"])]
+    #[metric]
     txs_per_bundle: Histogram,
     /// The number of transactions per MEV-share bundle.
-    #[metric(labels = ["handler"])]
+    #[metric]
     txs_per_mev_share_bundle: Histogram,
     /// The number of empty bundles.
-    #[metric(labels = ["handler"])]
-    total_empty_bundles: IntCounter,
+    #[metric]
+    total_empty_bundles: Counter,
     /// The order cache hit ratio.
-    #[metric(labels = ["handler"])]
+    #[metric]
     order_cache_hit_ratio: Gauge,
     /// The signer cache hit ratio.
-    #[metric(labels = ["handler"])]
+    #[metric]
     signer_cache_hit_ratio: Gauge,
     /// The order cache entry count.
-    #[metric(labels = ["handler"])]
-    order_cache_entry_count: IntGauge,
+    #[metric]
+    order_cache_entry_count: Gauge,
+    /// The signer cache entry count.
+    #[metric]
+    signer_cache_entry_count: Gauge,
 }
 
 mod name {
@@ -132,28 +140,6 @@ mod name {
             "indexer_clickhouse_backup_disk_errors";
 
         pub(crate) const PARQUET_QUEUE_SIZE: &str = "indexer_parquet_queue_size";
-    }
-
-    /// Ingress metrics.
-    pub(crate) mod ingress {
-        pub(crate) const ENTITY_COUNT: &str = "ingress_entity_count";
-        pub(crate) const HTTP_REQUEST_DURATION: &str = "ingress_http_request_duration";
-        pub(crate) const JSON_RPC_PARSE_ERRORS: &str = "ingress_json_rpc_parse_errors";
-        pub(crate) const JSON_RPC_UNKNOWN_METHOD: &str = "ingress_json_rpc_unknown_method";
-        pub(crate) const ORDER_CACHE_HIT: &str = "ingress_order_cache_hit";
-        pub(crate) const REQUESTS_RATE_LIMITED: &str = "ingress_requests_rate_limited";
-        pub(crate) const RPC_REQUEST_DURATION: &str = "ingress_rpc_request_duration";
-        pub(crate) const VALIDATION_ERRORS: &str = "ingress_validation_errors";
-
-        pub(crate) const REQUEST_BODY_SIZE_DECOMPRESSED: &str =
-            "ingress_request_body_size_decompressed";
-        pub(crate) const TXS_PER_BUNDLE: &str = "ingress_txs_per_bundle";
-        pub(crate) const TXS_PER_MEV_SHARE_BUNDLE: &str = "ingress_txs_per_mev_share_bundle";
-        pub(crate) const TOTAL_EMPTY_BUNDLES: &str = "ingress_total_empty_bundles";
-        pub(crate) const ORDER_CACHE_HIT_RATIO: &str = "ingress_order_cache_hit_ratio";
-        pub(crate) const SIGNER_CACHE_HIT_RATIO: &str = "ingress_signer_cache_hit_ratio";
-        pub(crate) const ORDER_CACHE_ENTRY_COUNT: &str = "ingress_order_cache_entry_count";
-        pub(crate) const SIGNER_CACHE_ENTRY_COUNT: &str = "ingress_signer_cache_entry_count";
     }
 
     /// System processing metrics.
@@ -241,49 +227,6 @@ pub fn describe() {
     );
     describe_gauge!(indexer::PARQUET_QUEUE_SIZE, "Current size of Parquet write queue");
 
-    // Ingress metrics
-    describe_gauge!(ingress::ENTITY_COUNT, "Current number of tracked entities");
-    describe_histogram!(
-        ingress::HTTP_REQUEST_DURATION,
-        "Duration of incoming HTTP request handling in seconds"
-    );
-    describe_counter!(ingress::JSON_RPC_PARSE_ERRORS, "Total number of JSON-RPC parsing errors");
-    describe_counter!(
-        ingress::JSON_RPC_UNKNOWN_METHOD,
-        "Total number of incoming unknown JSON-RPC method calls"
-    );
-    describe_counter!(ingress::ORDER_CACHE_HIT, "Total number of order cache hits");
-    describe_gauge!(
-        ingress::ORDER_CACHE_HIT_RATIO,
-        "Ratio of order cache hits (successful cache hits / total orders) by order type"
-    );
-    describe_counter!(
-        ingress::REQUESTS_RATE_LIMITED,
-        "Total number of incoming rate-limited requests"
-    );
-    describe_histogram!(
-        ingress::RPC_REQUEST_DURATION,
-        "Duration of incoming RPC requests in seconds"
-    );
-    describe_counter!(ingress::VALIDATION_ERRORS, "Total number of validation errors");
-
-    describe_histogram!(
-        ingress::REQUEST_BODY_SIZE_DECOMPRESSED,
-        "Size of incoming request bodies in bytes, decompressed"
-    );
-    describe_histogram!(ingress::TXS_PER_BUNDLE, "Number of transactions per bundle");
-    describe_histogram!(
-        ingress::TXS_PER_MEV_SHARE_BUNDLE,
-        "Number of transactions per MEV-share bundle"
-    );
-    describe_counter!(ingress::TOTAL_EMPTY_BUNDLES, "Total number of cancellation bundles");
-    describe_gauge!(
-        ingress::SIGNER_CACHE_HIT_RATIO,
-        "Ratio of transaction signer cache hits (successful cache hits / total transactions)"
-    );
-    describe_gauge!(ingress::ORDER_CACHE_ENTRY_COUNT, "Number of entries in the order cache");
-    describe_gauge!(ingress::SIGNER_CACHE_ENTRY_COUNT, "Number of entries in the signer cache");
-
     // System end-to-end processing metrics
     describe_histogram!(
         system::E2E_BUNDLE_PROCESSING_TIME,
@@ -309,137 +252,6 @@ pub fn describe() {
         system::QUEUE_CAPACITY_ALMOST_HITS,
         "Number of times the queue capacity was almost hit per priority (>= 75% of capacity)"
     );
-}
-
-pub trait IngressHandlerMetricsExt {
-    const HANDLER: &str;
-
-    #[inline]
-    fn set_entity_count(count: usize) {
-        gauge!(ingress::ENTITY_COUNT).set(count as f64);
-    }
-
-    #[inline]
-    fn increment_requests_rate_limited() {
-        counter!(ingress::REQUESTS_RATE_LIMITED, "handler" => Self::HANDLER).increment(1);
-    }
-
-    #[inline]
-    fn increment_json_rpc_parse_errors(method: &'static str) {
-        counter!(ingress::JSON_RPC_PARSE_ERRORS, "handler" => Self::HANDLER, "method" => method)
-            .increment(1);
-    }
-
-    #[inline]
-    fn increment_json_rpc_unknown_method(method: String) {
-        counter!(ingress::JSON_RPC_UNKNOWN_METHOD, "handler" => Self::HANDLER, "method" => method)
-            .increment(1);
-    }
-
-    #[inline]
-    fn increment_validation_errors<E: std::error::Error>(error: &E) {
-        counter!(ingress::VALIDATION_ERRORS, "handler" => Self::HANDLER, "error" => error.to_string()).increment(1);
-    }
-
-    #[inline]
-    fn increment_order_cache_hit(order_type: &'static str) {
-        counter!(ingress::ORDER_CACHE_HIT, "handler" => Self::HANDLER, "order_type" => order_type)
-            .increment(1);
-    }
-
-    #[inline]
-    fn record_http_request(method: &Method, path: String, status: StatusCode, duration: Duration) {
-        let method = match *method {
-            Method::GET => "GET",
-            Method::POST => "POST",
-            Method::PUT => "PUT",
-            _ => "Unhandled",
-        };
-
-        let reason = status.canonical_reason().unwrap_or("unknown");
-
-        histogram!(ingress::HTTP_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => method, "path" => path, "status" => reason).record(duration.as_secs_f64());
-    }
-
-    // BUNDLES
-    #[inline]
-    fn record_txs_per_bundle(txs: usize) {
-        histogram!(ingress::TXS_PER_BUNDLE, "handler" => Self::HANDLER).record(txs as f64);
-    }
-
-    #[inline]
-    fn record_txs_per_mev_share_bundle(txs: usize) {
-        histogram!(ingress::TXS_PER_MEV_SHARE_BUNDLE, "handler" => Self::HANDLER)
-            .record(txs as f64);
-    }
-
-    #[inline]
-    fn record_request_body_size_bytes(size: usize, method: &'static str) {
-        histogram!(ingress::REQUEST_BODY_SIZE_DECOMPRESSED, "handler" => Self::HANDLER, method => "method")
-            .record(size as f64);
-    }
-
-    /// The duration of the `eth_sendBundle` RPC call.
-    #[inline]
-    fn record_bundle_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "eth_sendBundle", "priority" => priority.as_str())
-            .record(duration.as_secs_f64());
-    }
-
-    /// The duration of the `mev_sendBundle` RPC call.
-    #[inline]
-    fn record_mev_share_bundle_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "mev_sendBundle", "priority" => priority.as_str())
-            .record(duration.as_secs_f64());
-    }
-
-    /// The duration of the `eth_sendRawTransaction` RPC call.
-    #[inline]
-    fn record_transaction_rpc_duration(priority: Priority, duration: Duration) {
-        histogram!(ingress::RPC_REQUEST_DURATION, "handler" => Self::HANDLER, "method" => "eth_sendRawTransaction", "priority" => priority.as_str())
-            .record(duration.as_secs_f64());
-    }
-
-    #[inline]
-    fn increment_empty_bundles() {
-        counter!(ingress::TOTAL_EMPTY_BUNDLES, "handler" => Self::HANDLER).increment(1);
-    }
-
-    /// Set the order cache hit ratio.
-    #[inline]
-    fn set_order_cache_hit_ratio(ratio: f64) {
-        gauge!(ingress::ORDER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
-    }
-
-    #[inline]
-    fn set_order_cache_entry_count(count: u64) {
-        gauge!(ingress::ORDER_CACHE_ENTRY_COUNT, "handler" => Self::HANDLER).set(count as f64);
-    }
-
-    /// Set the signer cache hit ratio.
-    #[inline]
-    fn set_signer_cache_hit_ratio(ratio: f64) {
-        gauge!(ingress::SIGNER_CACHE_HIT_RATIO, "handler" => Self::HANDLER).set(ratio);
-    }
-
-    #[inline]
-    fn set_signer_cache_entry_count(count: u64) {
-        gauge!(ingress::SIGNER_CACHE_ENTRY_COUNT, "handler" => Self::HANDLER).set(count as f64);
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct IngressUserMetrics;
-
-impl IngressHandlerMetricsExt for IngressUserMetrics {
-    const HANDLER: &'static str = "user";
-}
-
-#[derive(Clone, Debug)]
-pub struct IngressSystemMetrics;
-
-impl IngressHandlerMetricsExt for IngressSystemMetrics {
-    const HANDLER: &'static str = "system";
 }
 
 /// Metrics related to the whole system.

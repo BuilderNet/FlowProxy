@@ -341,7 +341,7 @@ impl HttpForwarder {
         request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> (Self, ResponseErrorDecoder) {
         let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
-        let metrics = ForwarderMetrics::default();
+        let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
         let decoder = ResponseErrorDecoder {
             peer_name: name.clone(),
             peer_url: url.clone(),
@@ -382,19 +382,12 @@ impl HttpForwarder {
 
                     // Only record success if the status is OK.
                     self.metrics
-                        .rpc_call_duration()
-                        .big_request(is_big.to_string())
-                        .order_type(order_type)
-                        .peer_name(self.peer_name.clone())
+                        .rpc_call_duration(order_type, is_big.to_string())
                         .observe(elapsed.as_secs_f64());
                 } else {
                     // If we have a non-OK status code, also record it.
                     error!(target: FORWARDER, name = %self.peer_url, ?elapsed, order_type, is_big, %status, "Error forwarding request");
-                    self.metrics
-                        .rpc_call_failures()
-                        .peer_name(self.peer_name.clone())
-                        .rpc_code(status.as_u16().to_string())
-                        .inc();
+                    self.metrics.rpc_call_failures(status.as_u16().to_string()).inc();
                     if let Err(e) = self.error_decoder_tx.try_send((response, elapsed)) {
                         error!(target: FORWARDER, peer_name = %self.peer_name, ?e, "Failed to send error response to decoder");
                     }
@@ -413,17 +406,9 @@ impl HttpForwarder {
 
                 if error.is_connect() {
                     warn!(target: FORWARDER, peer_name = %self.peer_name, ?reason, ?elapsed, "Connection error");
-                    self.metrics
-                        .http_connect_failures()
-                        .peer_name(self.peer_name.clone())
-                        .reason(reason)
-                        .inc();
+                    self.metrics.http_connect_failures(reason).inc();
                 } else {
-                    self.metrics
-                        .http_call_failures()
-                        .peer_name(self.peer_name.clone())
-                        .reason(reason)
-                        .inc();
+                    self.metrics.http_call_failures(reason).inc();
                 }
             }
         }
@@ -457,10 +442,7 @@ impl Future for HttpForwarder {
                     request,
                 ));
 
-                this.metrics
-                    .inflight_requests()
-                    .peer_name(this.peer_name.clone())
-                    .set(this.pending.len() as i64);
+                this.metrics.inflight_requests().set(this.pending.len() as i64);
 
                 continue;
             }
@@ -493,19 +475,12 @@ impl ResponseErrorDecoder {
                 Ok(body) => {
                     if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
                         error!(target: FORWARDER, peer_name = %self.peer_name, peer_url = %self.peer_url, %code, %message, ?elapsed, "Decoded error response from builder");
-                        self.metrics
-                            .rpc_call_failures()
-                            .peer_name(self.peer_name.clone())
-                            .rpc_code(code.to_string())
-                            .inc();
+                        self.metrics.rpc_call_failures(code.to_string()).inc();
                     }
                 }
                 Err(e) => {
                     warn!(target: FORWARDER,  ?e, peer_name = %self.peer_name, peer_url = %self.peer_url, %status, ?elapsed, "Failed decode response into JSON-RPC");
-                    self.metrics
-                        .json_rpc_decoding_failures()
-                        .peer_name(self.peer_name.clone())
-                        .inc();
+                    self.metrics.json_rpc_decoding_failures().inc();
                 }
             }
         }

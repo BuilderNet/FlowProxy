@@ -6,9 +6,7 @@ use crate::{
         DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
         DEFAULT_POOL_IDLE_TIMEOUT_SECS,
     },
-    metrics::{
-        BuilderHubMetrics, IngressHandlerMetricsExt, IngressSystemMetrics, IngressUserMetrics,
-    },
+    metrics::{BuilderHubMetrics, IngressMetrics},
     primitives::SystemBundleDecoder,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
@@ -217,6 +215,8 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
+        system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
 
     // Spawn a state maintenance task.
@@ -290,7 +290,7 @@ async fn run_update_peers(
         let builders = match peer_store.get_peers().await {
             Ok(builders) => builders,
             Err(error) => {
-                metrics.peer_request_failures().error(error.to_string()).inc();
+                metrics.peer_request_failures(error.to_string()).inc();
                 error!(target: "ingress::builderhub", ?error, "Error requesting builders from BuilderHub");
                 tokio::time::sleep(delay).await;
                 continue;
@@ -390,10 +390,7 @@ fn spawn_prometheus_server<A: Into<SocketAddr>>(address: A) -> eyre::Result<()> 
 }
 
 /// Middleware to track server metrics.
-async fn track_server_metrics<T: IngressHandlerMetricsExt>(
-    request: Request,
-    next: Next,
-) -> Response {
+async fn track_server_metrics<T: IngressMetrics>(request: Request, next: Next) -> Response {
     let path = request.uri().path().to_string();
     let method = request.method().clone();
 
