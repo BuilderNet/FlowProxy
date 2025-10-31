@@ -3,6 +3,8 @@ import * as resources from "@pulumi/azure-native/resources";
 import * as network from "@pulumi/azure-native/network";
 import * as compute from "@pulumi/azure-native/compute";
 import * as privatedns from "@pulumi/azure-native/privatedns";
+import * as fs from "fs";
+import * as crypto from "crypto";
 
 // Configuration
 const config = new pulumi.Config();
@@ -10,6 +12,14 @@ const adminUsername = config.get("adminUsername") || "azureuser";
 const sshPublicKey = config.require("sshPublicKey"); // e.g. contents of ~/.ssh/id_rsa.pub
 const allowedSshCidr = config.get("allowedSshCidr") || "0.0.0.0/0"; // restrict in config for better security
 const tailscaleAuthKey = config.getSecret("tailscaleAuthKey"); // optional: set as Pulumi secret
+const haProxyVersion = config.get("haProxyVersion") || "3.0.6"; // can include @sha256:digest for Docker image
+const haproxyCfg = fs.readFileSync("haproxy.cfg", "utf8");
+// Azure limit: forceUpdateTag max 50 chars; use a short hash (32 chars)
+const haExtTag = crypto
+    .createHash("sha256")
+    .update(haproxyCfg + String(haProxyVersion))
+    .digest("hex")
+    .slice(0, 32);
 
 // Target regions (Azure names)
 const eastRegion = "eastus";
@@ -63,8 +73,41 @@ function createNsg(name: string, rg: resources.ResourceGroup, location: pulumi.I
                 destinationAddressPrefix: "*",
             },
             {
-                name: "Allow-ICMP-From-Peer",
+                name: "Allow-HTTP",
                 priority: 1010,
+                direction: "Inbound",
+                access: "Allow",
+                protocol: "Tcp",
+                sourcePortRange: "*",
+                destinationPortRange: "80",
+                sourceAddressPrefix: "*",
+                destinationAddressPrefix: "*",
+            },
+            {
+                name: "Allow-HTTPS",
+                priority: 1020,
+                direction: "Inbound",
+                access: "Allow",
+                protocol: "Tcp",
+                sourcePortRange: "*",
+                destinationPortRange: "443",
+                sourceAddressPrefix: "*",
+                destinationAddressPrefix: "*",
+            },
+            {
+                name: "Allow-HAProxy-5544",
+                priority: 1030,
+                direction: "Inbound",
+                access: "Allow",
+                protocol: "Tcp",
+                sourcePortRange: "*",
+                destinationPortRange: "5544",
+                sourceAddressPrefix: "*",
+                destinationAddressPrefix: "*",
+            },
+            {
+                name: "Allow-ICMP-From-Peer",
+                priority: 1100,
                 direction: "Inbound",
                 access: "Allow",
                 protocol: "Icmp",
@@ -141,29 +184,7 @@ const ubuntuImageRef = {
     version: "latest",
 };
 
-function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.Input<string>, nicId: pulumi.Input<string>) {
-    // Optional cloud-init to install and bring up Tailscale
-    const customData = tailscaleAuthKey
-        ? tailscaleAuthKey.apply(key =>
-              Buffer.from(`#cloud-config
-package_update: true
-package_upgrade: false
-write_files:
-  - path: /etc/sysctl.d/99-tailscale-ipforward.conf
-    permissions: '0644'
-    owner: root:root
-    content: |
-      net.ipv4.ip_forward=1
-      net.ipv6.conf.all.forwarding=1
-runcmd:
-  - apt-get update
-  - apt-get install -y curl
-  - curl -fsSL https://tailscale.com/install.sh | sh
-  - systemctl enable --now tailscaled
-  - tailscale up --authkey=${key} --hostname=${name} --ssh
-`).toString("base64"))
-        : undefined;
-
+function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.Input<string>, nicId: pulumi.Input<string>, opts?: pulumi.CustomResourceOptions) {
     return new compute.VirtualMachine(name, {
         resourceGroupName: rg.name,
         location,
@@ -174,7 +195,6 @@ runcmd:
         osProfile: {
             adminUsername,
             computerName: name,
-            customData,
             linuxConfiguration: {
                 disablePasswordAuthentication: true,
                 ssh: {
@@ -195,11 +215,11 @@ runcmd:
                 managedDisk: { storageAccountType: "Standard_LRS" },
             },
         },
-    });
+    }, opts);
 }
 
-const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id);
-const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id);
+const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, { ignoreChanges: ["osProfile"] });
+const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, { ignoreChanges: ["osProfile"] });
 
 // VNet Peering (bi-directional)
 const eastToWest = new network.VirtualNetworkPeering("east-to-west", {
@@ -217,6 +237,75 @@ const westToEast = new network.VirtualNetworkPeering("west-to-east", {
     allowVirtualNetworkAccess: true,
     allowForwardedTraffic: true,
 });
+
+// VM Extensions: Provision HAProxy via Docker (no VM recreate)
+const haproxyCfgB64 = Buffer.from(haproxyCfg).toString("base64");
+function buildHaProxyCommand(hostname: string): pulumi.Input<string> {
+    const script = (key?: string) => `#!/usr/bin/env bash
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y docker.io curl ca-certificates openssl
+mkdir -p /usr/local/etc/haproxy/certs /usr/local/etc/haproxy/static
+echo "${haproxyCfgB64}" | base64 -d > /usr/local/etc/haproxy/haproxy.cfg
+printf "\n" >> /usr/local/etc/haproxy/haproxy.cfg || true
+if [ ! -f /usr/local/etc/haproxy/static/le.cer ]; then echo "placeholder-certificate-content" > /usr/local/etc/haproxy/static/le.cer; fi
+if [ ! -f /usr/local/etc/haproxy/certs/default.pem ]; then
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /usr/local/etc/haproxy/certs/default.key \
+    -out /usr/local/etc/haproxy/certs/default.crt \
+    -subj "/CN=localhost";
+  cat /usr/local/etc/haproxy/certs/default.key /usr/local/etc/haproxy/certs/default.crt > /usr/local/etc/haproxy/certs/default.pem;
+fi
+rm -f /usr/local/etc/haproxy/certs/default.crt || true
+systemctl enable --now docker
+docker rm -f haproxy || true
+docker pull haproxy:${haProxyVersion}
+docker run -d --name haproxy --restart unless-stopped -p 80:80 -p 443:443 -p 5544:5544 -p 8405:8405 -v /usr/local/etc/haproxy:/usr/local/etc/haproxy:ro haproxy:${haProxyVersion}
+${key ? `apt-get update
+apt-get install -y curl
+curl -fsSL https://tailscale.com/install.sh | sh
+systemctl enable --now tailscaled
+tailscale up --authkey=${key} --hostname=${hostname} --ssh` : ``}
+`;
+
+    const build = (k?: string) => {
+        const b64 = Buffer.from(script(k)).toString("base64");
+        return `/bin/bash -lc 'echo ${b64} | base64 -d > /tmp/provision.sh && bash /tmp/provision.sh'`;
+    };
+
+    return (tailscaleAuthKey as any)?.apply
+        ? (tailscaleAuthKey as pulumi.Output<string>).apply(k => build(k))
+        : build(undefined);
+}
+
+const haExtEast = new compute.VirtualMachineExtension("haproxy-ext-east", {
+    resourceGroupName: rgEast.name,
+    vmName: vmEast.name,
+    location: rgEast.location,
+    publisher: "Microsoft.Azure.Extensions",
+    type: "CustomScript",
+    typeHandlerVersion: "2.1",
+    forceUpdateTag: haExtTag,
+    autoUpgradeMinorVersion: true,
+    protectedSettings: {
+        commandToExecute: buildHaProxyCommand("vm-eastus"),
+    },
+}, { dependsOn: [vmEast] });
+
+const haExtWest = new compute.VirtualMachineExtension("haproxy-ext-west", {
+    resourceGroupName: rgWest.name,
+    vmName: vmWest.name,
+    location: rgWest.location,
+    publisher: "Microsoft.Azure.Extensions",
+    type: "CustomScript",
+    typeHandlerVersion: "2.1",
+    forceUpdateTag: haExtTag,
+    autoUpgradeMinorVersion: true,
+    protectedSettings: {
+        commandToExecute: buildHaProxyCommand("vm-westeurope"),
+    },
+}, { dependsOn: [vmWest] });
 
 // Private DNS zone for cross-VNet name resolution
 const privateZoneName = "flowproxy.internal";

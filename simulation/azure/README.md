@@ -10,9 +10,11 @@
 
 - Set config values:
 ```bash
-pulumi config set --secret flowproxy-staging:sshPublicKey "ssh-ed25519 ..."
 pulumi config set flowproxy-staging:adminUsername "<your-username>"
 pulumi config set flowproxy-staging:haProxyVersion "3.0.6@sha256:0f3127e63b00982c3f12b2a9a17ecbd0595003a191ec1cb403741a692f7a39a9"
+
+pulumi config set --secret flowproxy-staging:sshPublicKey "ssh-ed25519 ..."
+
 # Optional
 pulumi config set --secret flowproxy-staging:tailscaleAuthKey "<your-tailscale-auth-key>"
 ```
