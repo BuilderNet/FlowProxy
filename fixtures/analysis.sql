@@ -9,6 +9,11 @@ WITH
     toDateTime64('2025-10-31 00:00:00', 6, 'UTC') AS t_since,
     toDateTime64('2025-10-31 06:00:00', 6, 'UTC') AS t_until,
 
+    -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
+    12 as slot_time,
+    toUnixTimestamp('2025-06-14 10:39:35') AS base_offset,
+    (x -> mod((toUnixTimestamp(x) - toUnixTimestamp(base_offset)), slot_time)) as to_time_bucket,
+
 -- ===================================
 -- Common reusable subqueries
 -- ===================================
@@ -24,7 +29,8 @@ WITH
             replaceAll(dst_builder_name, '-', '_') AS dst_builder_name,
             src_builder_name,
             payload_size,
-            priority
+            priority,
+            to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM buildernet.bundle_receipts_wo_bundle_hash
         WHERE received_at >= t_since AND received_at <= t_until
             -- Skip test builders
@@ -184,7 +190,36 @@ WITH
         WHERE sent_at IS NOT NULL
         GROUP BY src_builder_name, dst_builder_name
         ORDER BY p99_latency_sec DESC
+    ),
+
+    -- Calculate latency quantiles distributed over slot seconds.
+    latency_over_slot AS (
+        WITH total_receipts AS (
+            SELECT count() AS total FROM bundle_receipts
+        ),
+        latency_events AS (
+            SELECT
+                sent_at_second_in_slot,
+                received_at - sent_at AS latency,
+                payload_size
+            FROM bundle_receipts
+        )
+        SELECT
+            sent_at_second_in_slot,
+            quantileExact(0.5)(latency) AS p50_latency_sec,
+            quantileExact(0.9)(latency) AS p90_latency_sec,
+            quantileExact(0.99)(latency) AS p99_latency_sec,
+            quantileExact(0.999)(latency) AS p999_latency_sec,
+            round(corr(toFloat64(payload_size), toFloat64(latency)), 2) AS corr_payload_latency,
+            count() AS observations,
+            (SELECT total from total_receipts) AS total_receipts,
+            concat(toString(round(100 * observations / total_receipts, 2)), '%') AS percent_of_total_receipts
+        FROM latency_events
+        GROUP BY sent_at_second_in_slot
+        ORDER BY p99_latency_sec DESC
     )
+
+    
 
 -- ===================================
 -- Final query
