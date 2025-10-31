@@ -7,7 +7,7 @@ WITH
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
     toDateTime64('2025-10-31 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-31 06:00:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-31 01:00:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -113,7 +113,7 @@ WITH
     -- This filters the list of bundles to those that have been missed by at least one builder.
     -- NOTE: because we don't track self-receipts, it means every bundle here
     -- has been seen by at least one builder.
-    lost_bundles_detailed AS (
+    lost_bundles_srcs_dsts AS (
         SELECT
             double_bundle_hash,
             src_builders,
@@ -127,8 +127,17 @@ WITH
         WHERE missed_builders > 0
     ),
 
+    -- A detailed, flattened view of lost bundles with their source and missing destination builders.
+    lost_bundles_detailed AS (
+        SELECT
+            double_bundle_hash,
+            arrayJoin(src_builders) AS src_builder_name,
+            arrayJoin(missing_dsts) AS dst_builder_name
+        FROM lost_bundles_srcs_dsts
+    ),
+
     -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
-    lost_bundles AS (
+    lost_bundles_by_builder_count_summary AS (
         SELECT
             missed_builders,
             -- If we had more than one source builder for a bundle, it means
@@ -136,26 +145,20 @@ WITH
             sum(length(src_builders)) AS observations,
             (SELECT unique_bundles FROM bundle_unique_count) AS total_unique_bundles,
             concat(toString(round(100 * observations / total_unique_bundles, 2)), '%') AS percent_of_total_bundles
-        FROM lost_bundles_detailed
+        FROM lost_bundles_srcs_dsts
         GROUP BY missed_builders
         ORDER BY missed_builders ASC
     ),
 
     -- Rank links by the number of bundles they missed.
     lost_bundles_by_link AS (
-        WITH loss_events AS (
-            -- For each lost bundle, explode the missing_dsts and src_builders to get individual loss events.
-            SELECT
-                arrayJoin(src_builders) AS src_builder_name,
-                arrayJoin(missing_dsts) AS dst_builder_name
-            FROM lost_bundles_detailed
-        ), loss_events_by_link AS (
+        WITH loss_events_by_link AS (
             -- Aggregate loss events by source-destination builder pairs.
             SELECT
                 src_builder_name,
                 dst_builder_name,
                 count() AS missed_bundle_count
-            FROM loss_events
+            FROM lost_bundles_detailed
             GROUP BY src_builder_name, dst_builder_name
         )
         SELECT
@@ -174,7 +177,8 @@ WITH
     -------- sanity checks ---------
 
     -- Should match
-    lost_bundles_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles),
+    lost_bundles_detailed_count AS (SELECT count() FROM lost_bundles_detailed),
+    lost_bundles_by_builder_count_summary_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles_by_builder_count_summary),
     lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
 
     ------------ LATENCY QUERIES -------------
@@ -230,4 +234,4 @@ WITH
 -- ===================================
 
 SELECT *
-FROM lost_bundles;
+FROM lost_bundles_by_builder_count_summary;
