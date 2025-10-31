@@ -37,6 +37,8 @@ WITH
             AND dst_builder_name != 'buildernet_flashbots_mkosi_test_1'
     ),
 
+    -- NOTE: given we don't track self-receipts, if a sender completely fails
+    -- to send a bundle to anyone, it won't be captured in this dataset.
     bundle_unique_count AS (
         SELECT count(DISTINCT double_bundle_hash) AS unique_bundles
         FROM bundle_receipts
@@ -109,6 +111,8 @@ WITH
     -- For each bundle hash, determine which builders have not seen it, along with their sources.
     --
     -- This filters the list of bundles to those that have been missed by at least one builder.
+    -- NOTE: because we don't track self-receipts, it means every bundle here
+    -- has been seen by at least one builder.
     lost_bundles_detailed AS (
         SELECT
             double_bundle_hash,
@@ -158,8 +162,8 @@ WITH
             l.src_builder_name AS src_builder_name,
             l.dst_builder_name AS dst_builder_name,
             missed_bundle_count,
-            bobl.occurrences AS total_bundles_sent_between_link,
-            concat(toString(round(100 * missed_bundle_count / total_bundles_sent_between_link, 2)), '%') AS percent_of_total_bundles
+            (bobl.occurrences + missed_bundle_count) AS expected_bundles_sent_between_link,
+            concat(toString(round(100 * missed_bundle_count / expected_bundles_sent_between_link, 2)), '%') AS percent_of_total_bundles
         FROM loss_events_by_link AS l
         JOIN bundle_occurrences_by_link bobl
              ON l.src_builder_name = bobl.src_builder_name
