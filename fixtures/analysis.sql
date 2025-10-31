@@ -7,7 +7,7 @@ WITH
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
     toDateTime64('2025-10-31 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-31 02:00:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-31 00:30:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -207,13 +207,75 @@ WITH
         ORDER BY missed_bundle_count DESC
     ),
 
+    ------------ EXTENDED RECEIPTS ------------
+
+    -- Combine real receipts with synthetic missing receipts for lost bundles.
+    bundle_receipts_extended AS (
+        -- 1️⃣ Real receipts
+        SELECT
+            double_bundle_hash,
+            sent_at,
+            received_at,
+            dst_builder_name,
+            src_builder_name,
+            payload_size,
+            priority,
+            sent_at_second_in_slot,
+            0 AS is_lost
+        FROM bundle_receipts
+
+        UNION ALL
+
+        SELECT
+            double_bundle_hash,
+            sent_at,
+            NULL AS received_at, -- no receipt recorded
+            dst_builder_name,
+            src_builder_name,
+            payload_size,
+            priority,
+            sent_at_second_in_slot,
+            1 AS is_lost
+        FROM lost_bundles_detailed
+    ),
+    
+    -- Aggregate extended receipts over slot seconds.
+    bundle_receipts_extended_over_slot AS (
+        SELECT
+            sent_at_second_in_slot,
+            count() AS total_receipts
+        FROM bundle_receipts_extended
+        GROUP BY sent_at_second_in_slot
+    ),
+
+    -- Aggregate lost bundles over slot seconds.
+    lost_bundles_over_slot AS (
+        SELECT
+            sent_at_second_in_slot,
+            count() AS lost_bundles
+        FROM lost_bundles_detailed
+        GROUP BY sent_at_second_in_slot
+    ),
+
+    -- Combine lost bundles with total receipts to get percentage lost over slot seconds.
+    lost_bundles_over_slot_percentage AS (
+        SELECT
+            lbsos.sent_at_second_in_slot,
+            lbsos.lost_bundles,
+            breos.total_receipts,
+            concat(toString(round(100 * lbsos.lost_bundles / breos.total_receipts, 2)), '%') AS percent_lost_bundles
+        FROM lost_bundles_over_slot AS lbsos
+        INNER JOIN bundle_receipts_extended_over_slot AS breos
+            USING (sent_at_second_in_slot)
+    ),
+
     -------- sanity checks ---------
 
     -- Should match
     lost_bundles_detailed_count AS (SELECT count() FROM lost_bundles_detailed),
-    lost_bundles_by_builder_count_summary_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles_by_builder_count_summary),
+    -- lost_bundles_by_builder_count_summary_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles_by_builder_count_summary),
     lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
-    lost_bundles_over_slot_count AS (SELECT sum(missed_builders) FROM lost_bundles_over_slot),
+    lost_bundles_over_slot_count AS (SELECT sum(lost_bundles) FROM lost_bundles_over_slot),
 
     ------------ LATENCY QUERIES -------------
 
@@ -234,7 +296,6 @@ WITH
         ORDER BY p99_latency_sec DESC
     ),
 
-    -- Calculate latency quantiles distributed over slot seconds.
     latency_over_slot AS (
         WITH total_receipts AS (
             SELECT count() AS total FROM bundle_receipts
@@ -257,15 +318,33 @@ WITH
             (SELECT total from total_receipts) AS total_receipts,
             concat(toString(round(100 * observations / total_receipts, 2)), '%') AS percent_of_total_receipts
         FROM latency_events
+        INNER JOIN lost_bundles_over_slot_percentage lbosp USING (sent_at_second_in_slot)
         GROUP BY sent_at_second_in_slot
         ORDER BY p99_latency_sec DESC
-    )
+    ),
 
-    
+    -- Calculate latency quantiles and bundles lost distributed over slot seconds.
+    stats_over_slot AS (
+        SELECT
+            sent_at_second_in_slot,
+            p50_latency_sec,
+            p90_latency_sec,
+            p99_latency_sec,
+            p999_latency_sec,
+            corr_payload_latency,
+            observations,
+            total_receipts,
+            percent_of_total_receipts,
+            lbosp.lost_bundles AS lost_bundles,
+            lbosp.percent_lost_bundles AS percent_lost_bundles
+            FROM latency_over_slot
+        INNER JOIN lost_bundles_over_slot_percentage lbosp USING (sent_at_second_in_slot)
+        ORDER BY p99_latency_sec DESC
+    )
 
 -- ===================================
 -- Final query
 -- ===================================
 
 SELECT *
-FROM lost_bundles_by_builder_count_summary;
+FROM stats_over_slot
