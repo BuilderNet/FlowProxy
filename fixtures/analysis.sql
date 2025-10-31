@@ -7,7 +7,7 @@ WITH
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
     toDateTime64('2025-10-31 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-31 01:00:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-31 02:00:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -95,7 +95,7 @@ WITH
     ),
 
     -- Count occurrences of bundle receipts by source-destination builder pairs.
-    -- NOTE: duplicates will inflate these counts.
+    -- NOTE: The same bundle may be sent multiple times between the same pair, increasing the count.
     bundle_occurrences_by_link AS (
         SELECT
             src_builder_name,
@@ -128,7 +128,9 @@ WITH
     ),
 
     -- A detailed, flattened view of lost bundles with their source and missing destination builders.
-    lost_bundles_detailed AS (
+    -- NOTE: This doesn't represent every attempt to send a lost bundle, just the combinations of
+    -- source and missing destination builders.
+    lost_bundles_links_flattened AS (
         SELECT
             double_bundle_hash,
             arrayJoin(src_builders) AS src_builder_name,
@@ -136,7 +138,38 @@ WITH
         FROM lost_bundles_srcs_dsts
     ),
 
+    -- Detailed view of lost bundles with metadata from bundle_receipts.
+    -- This represents _every_ attempt to send a certain lost bundle from a source to a missing destination.
+    lost_bundles_detailed AS (
+        -- 1️⃣ First, gather per-(bundle, source) metadata from bundle_receipts
+        WITH bundle_meta AS (
+            SELECT
+                double_bundle_hash,
+                src_builder_name,
+                -- Gather every sent_at time for this (bundle, source) pair
+                groupUniqArray(sent_at) AS sent_ats,       
+                -- We assume these fields are consistent across sends
+                any(payload_size) AS payload_size,
+                any(priority) AS priority
+            FROM bundle_receipts
+            GROUP BY double_bundle_hash, src_builder_name
+        )
+        -- 2️⃣ Now, join lost bundles with that metadata
+        SELECT
+            lbd.double_bundle_hash,
+            lbd.src_builder_name,
+            lbd.dst_builder_name,
+            -- Explode multiple sent_ats, since we want to count multiple attempts.
+            arrayJoin(bm.sent_ats) AS sent_at,
+            bm.payload_size,
+            bm.priority,
+            to_time_bucket(sent_at) AS sent_at_second_in_slot
+        FROM lost_bundles_links_flattened AS lbd
+        INNER JOIN bundle_meta bm USING (double_bundle_hash, src_builder_name)
+    ),
+
     -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
+    -- FIX: this is okay but doesn't take into account multiple attempts for the same bundle yet.
     lost_bundles_by_builder_count_summary AS (
         SELECT
             missed_builders,
@@ -180,6 +213,7 @@ WITH
     lost_bundles_detailed_count AS (SELECT count() FROM lost_bundles_detailed),
     lost_bundles_by_builder_count_summary_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles_by_builder_count_summary),
     lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
+    lost_bundles_over_slot_count AS (SELECT sum(missed_builders) FROM lost_bundles_over_slot),
 
     ------------ LATENCY QUERIES -------------
 
