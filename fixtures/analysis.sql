@@ -6,8 +6,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-10-30 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-30 06:00:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-10-31 00:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-10-31 06:00:00', 6, 'UTC') AS t_until,
 
 -- ===================================
 -- Common reusable subqueries
@@ -178,6 +178,7 @@ WITH
             quantileExact(0.9)(received_at - sent_at) AS p90_latency_sec,
             quantileExact(0.99)(received_at - sent_at) AS p99_latency_sec,
             quantileExact(0.999)(received_at - sent_at) AS p999_latency_sec,
+            round(corr(toFloat64(payload_size), toFloat64(received_at - sent_at)), 2) AS corr_payload_latency,
             count() AS observations
         FROM bundle_receipts
         WHERE sent_at IS NOT NULL
