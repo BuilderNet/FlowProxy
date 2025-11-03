@@ -6,8 +6,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-10-31 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-10-31 00:30:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-11-02 23:39:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-11-02 23:45:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -33,8 +33,10 @@ WITH
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM buildernet.bundle_receipts_wo_bundle_hash
         WHERE received_at >= t_since AND received_at <= t_until
-            -- Skip test builders
-            AND dst_builder_name != 'buildernet_flashbots_mkosi_test_1'
+    ),
+
+    bundle_receipts_count AS (
+        SELECT count() AS total_receipts FROM bundle_receipts
     ),
 
     -- NOTE: given we don't track self-receipts, if a sender completely fails
@@ -100,7 +102,9 @@ WITH
         SELECT
             src_builder_name,
             dst_builder_name,
-            count() AS occurrences
+            count() AS occurrences,
+            (SELECT total_receipts FROM bundle_receipts_count) AS total_receipts,
+            concat(toString(round(100 * occurrences / total_receipts, 2)), '%') AS percent_of_total_receipts
         FROM bundle_receipts
         GROUP BY src_builder_name, dst_builder_name
         ORDER BY occurrences DESC
@@ -288,7 +292,7 @@ WITH
             quantileExact(0.9)(received_at - sent_at) AS p90_latency_sec,
             quantileExact(0.99)(received_at - sent_at) AS p99_latency_sec,
             quantileExact(0.999)(received_at - sent_at) AS p999_latency_sec,
-            round(corr(toFloat64(payload_size), toFloat64(received_at - sent_at)), 2) AS corr_payload_latency,
+            round(corr(toFloat64(payload_size), toFloat64(received_at - sent_at)), 2) AS corr_payload_size,
             count() AS observations
         FROM bundle_receipts
         WHERE sent_at IS NOT NULL
