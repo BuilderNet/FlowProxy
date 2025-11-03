@@ -6,8 +6,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-11-02 23:39:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-11-02 23:45:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-11-02 23:09:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-11-03 00:09:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -94,6 +94,19 @@ WITH
         FROM bundle_receipts
         GROUP BY double_bundle_hash
         ORDER BY occurrences ASC
+    ),
+
+    -- Count occurrences of bundle receipts by source builder.
+    -- NOTE: The same bundle may be sent multiple times between the same pair, increasing the count.
+    bundle_occurrences_by_src AS (
+        SELECT
+            src_builder_name,
+            count() AS occurrences,
+            (SELECT total_receipts FROM bundle_receipts_count) AS total_receipts,
+            concat(toString(round(100 * occurrences / total_receipts, 2)), '%') AS percent_of_total_receipts
+        FROM bundle_receipts
+        GROUP BY src_builder_name
+        ORDER BY occurrences DESC
     ),
 
     -- Count occurrences of bundle receipts by source-destination builder pairs.
@@ -343,7 +356,7 @@ WITH
             lbosp.percent_lost_bundles AS percent_lost_bundles
             FROM latency_over_slot
         INNER JOIN lost_bundles_over_slot_percentage lbosp USING (sent_at_second_in_slot)
-        ORDER BY p99_latency_sec DESC
+        ORDER BY sent_at_second_in_slot ASC
     )
 
 -- ===================================
