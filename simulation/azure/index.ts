@@ -13,11 +13,17 @@ const sshPublicKey = config.require("sshPublicKey"); // e.g. contents of ~/.ssh/
 const allowedSshCidr = config.get("allowedSshCidr") || "0.0.0.0/0"; // restrict in config for better security
 const tailscaleAuthKey = config.getSecret("tailscaleAuthKey"); // optional: set as Pulumi secret
 const haProxyVersion = config.get("haProxyVersion") || "3.0.6"; // can include @sha256:digest for Docker image
+const flowProxyArtifact = config.require("flowProxyArtifact");
+const githubToken = config.requireSecret("githubToken"); // required: GH token for artifact download
 const haproxyCfg = fs.readFileSync("haproxy.cfg", "utf8");
+const flowproxyEnv = fs.readFileSync("flowproxy.env", "utf8");
+const flowproxyServiceTmpl = fs.readFileSync("flowproxy@.service", "utf8");
+const flowproxyEnvB64 = Buffer.from(flowproxyEnv).toString("base64");
+const flowproxySvcB64 = Buffer.from(flowproxyServiceTmpl).toString("base64");
 // Azure limit: forceUpdateTag max 50 chars; use a short hash (32 chars)
 const haExtTag = crypto
     .createHash("sha256")
-    .update(haproxyCfg + String(haProxyVersion))
+    .update(haproxyCfg + String(haProxyVersion) + flowproxyEnv + flowproxyServiceTmpl + String(flowProxyArtifact))
     .digest("hex")
     .slice(0, 32);
 
@@ -240,12 +246,13 @@ const westToEast = new network.VirtualNetworkPeering("west-to-east", {
 
 // VM Extensions: Provision HAProxy via Docker (no VM recreate)
 const haproxyCfgB64 = Buffer.from(haproxyCfg).toString("base64");
-function buildHaProxyCommand(hostname: string): pulumi.Input<string> {
-    const script = (key?: string) => `#!/usr/bin/env bash
+function buildInstanceCommand(hostname: string): pulumi.Input<string> {
+    const artifactApiUrl = toApiZip(flowProxyArtifact);
+    const script = (key?: string, token?: string) => `#!/usr/bin/env bash
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io curl ca-certificates openssl
+apt-get install -y docker.io curl ca-certificates openssl unzip
 mkdir -p /usr/local/etc/haproxy/certs /usr/local/etc/haproxy/static
 echo "${haproxyCfgB64}" | base64 -d > /usr/local/etc/haproxy/haproxy.cfg
 printf "\n" >> /usr/local/etc/haproxy/haproxy.cfg || true
@@ -267,16 +274,40 @@ apt-get install -y curl
 curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable --now tailscaled
 tailscale up --authkey=${key} --hostname=${hostname} --ssh` : ``}
+
+# --- FlowProxy install ---
+tmpzip=$(mktemp /tmp/flowproxy.XXXXXX.zip)
+curl -fL -o "$tmpzip" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "${artifactApiUrl}" 
+mkdir -p /usr/local/bin
+unzip -o "$tmpzip" -d /usr/local/bin || true
+chmod +x /usr/local/bin/flowproxy
+mkdir -p /etc/flowproxy
+echo "${flowproxyEnvB64}" | base64 -d > /etc/flowproxy/flowproxy.env
+echo "${flowproxySvcB64}" | base64 -d > /etc/systemd/system/flowproxy@.service
+systemctl daemon-reload
+systemctl enable --now flowproxy@${hostname}
+systemctl status flowproxy@${hostname} --no-pager || journalctl -u flowproxy@${hostname} --no-pager -n 100
 `;
 
-    const build = (k?: string) => {
-        const b64 = Buffer.from(script(k)).toString("base64");
+    const build = (k?: string, t?: string) => {
+        const b64 = Buffer.from(script(k, t)).toString("base64");
         return `/bin/bash -lc 'echo ${b64} | base64 -d > /tmp/provision.sh && bash /tmp/provision.sh'`;
     };
 
-    return (tailscaleAuthKey as any)?.apply
-        ? (tailscaleAuthKey as pulumi.Output<string>).apply(k => build(k))
-        : build(undefined);
+    const ts = (tailscaleAuthKey as any)?.apply ? (tailscaleAuthKey as pulumi.Output<string>) : undefined;
+    const gh = (githubToken as any)?.apply ? (githubToken as pulumi.Output<string>) : undefined;
+    if (ts && gh) {
+        return pulumi.all([ts, gh]).apply(([k, t]) => build(k, t));
+    } else if (ts) {
+        return ts.apply(k => build(k, undefined as any));
+    } else if (gh) {
+        return gh.apply(t => build(undefined as any, t));
+    }
+    return build(undefined, undefined);
 }
 
 const haExtEast = new compute.VirtualMachineExtension("haproxy-ext-east", {
@@ -289,7 +320,7 @@ const haExtEast = new compute.VirtualMachineExtension("haproxy-ext-east", {
     forceUpdateTag: haExtTag,
     autoUpgradeMinorVersion: true,
     protectedSettings: {
-        commandToExecute: buildHaProxyCommand("vm-eastus"),
+        commandToExecute: buildInstanceCommand("vm-eastus"),
     },
 }, { dependsOn: [vmEast] });
 
@@ -303,9 +334,22 @@ const haExtWest = new compute.VirtualMachineExtension("haproxy-ext-west", {
     forceUpdateTag: haExtTag,
     autoUpgradeMinorVersion: true,
     protectedSettings: {
-        commandToExecute: buildHaProxyCommand("vm-westeurope"),
+        commandToExecute: buildInstanceCommand("vm-westeurope"),
     },
 }, { dependsOn: [vmWest] });
+
+function toApiZip(url: string): string {
+    // Convert GitHub actions artifact page URL to API ZIP endpoint when possible
+    // Example input: https://github.com/ORG/REPO/actions/runs/<run>/artifacts/<artifactId>
+    // Output: https://api.github.com/repos/ORG/REPO/actions/artifacts/<artifactId>/zip
+    const m = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/actions\/runs\/\d+\/artifacts\/(\d+)/);
+    if (m) {
+        const [_, org, repo, id] = m;
+        return `https://api.github.com/repos/${org}/${repo}/actions/artifacts/${id}/zip`;
+    }
+    // If it's already an API URL or something else, return as-is
+    return url;
+}
 
 // Private DNS zone for cross-VNet name resolution
 const privateZoneName = "flowproxy.internal";
