@@ -64,6 +64,10 @@ async fn register_credentials(
         },
     };
 
+    if registry.builders.contains_key(&signer) {
+        return StatusCode::OK;
+    }
+
     registry.builders.insert(signer, builder);
 
     StatusCode::OK

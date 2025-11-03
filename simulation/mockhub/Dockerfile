@@ -26,7 +26,7 @@ RUN apt-get update && \
 COPY --from=builder /app/target/release/mockhub /app/mockhub
 
 # Expose the port the app runs on
-EXPOSE 5544
+EXPOSE 3000
 
 # Set default environment variables (can be overridden)
 ENV SYSTEM_PORT=5544
