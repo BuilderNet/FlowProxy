@@ -2,11 +2,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 use alloy_primitives::Address;
 use axum::{
+    Json, Router,
     extract::{ConnectInfo, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -53,10 +53,19 @@ async fn register_credentials(
     let signer = creds.ecdsa_pubkey_address;
     let cert = creds.tls_cert.clone().unwrap_or_default();
 
+    let (dns, name) = match dns_lookup::lookup_addr(&addr.ip()) {
+        Ok(dns) => {
+            let name =
+                dns.clone().split('.').next().map(|s| s.to_string()).unwrap_or(signer.to_string());
+            (dns, name)
+        }
+        Err(_) => (addr.ip().to_string(), signer.to_string()),
+    };
+
     let builder = BuilderHubBuilder {
-        name: format!("{:?}", signer),
+        name: name.to_string(),
         ip: format!("{}:{}", addr.ip(), registry.system_port),
-        dns_name: addr.ip().to_string(),
+        dns_name: dns,
         orderflow_proxy: creds,
         // NOTE: Empty TLS certificate to ensure proxies use plain HTTP.
         // If TLS is enabled, proxies will use the TLS certificate.
