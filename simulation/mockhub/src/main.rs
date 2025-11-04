@@ -2,11 +2,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 use alloy_primitives::Address;
 use axum::{
-    Json, Router,
     extract::{ConnectInfo, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
+    Json, Router,
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,7 @@ async fn register_credentials(
     tracing::info!("Registering credentials for builder: {:?}", creds.ecdsa_pubkey_address);
 
     let signer = creds.ecdsa_pubkey_address;
+    let cert = creds.tls_cert.clone().unwrap_or_default();
 
     let builder = BuilderHubBuilder {
         name: format!("{:?}", signer),
@@ -60,7 +61,7 @@ async fn register_credentials(
         // NOTE: Empty TLS certificate to ensure proxies use plain HTTP.
         // If TLS is enabled, proxies will use the TLS certificate.
         instance: BuilderHubInstanceData {
-            tls_cert: if registry.enable_tls { String::new() } else { String::new() },
+            tls_cert: if registry.enable_tls { cert } else { String::new() },
         },
     };
 
