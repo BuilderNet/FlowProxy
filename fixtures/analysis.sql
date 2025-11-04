@@ -6,8 +6,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-11-02 23:09:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-11-03 00:09:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-11-04 12:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-11-04 12:10:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -19,6 +19,17 @@ WITH
 -- ===================================
 
     ------------ BUNDLE QUERIES --------------
+
+    -- Get bundles within the specified time window.
+    bundles AS (
+        SELECT
+            hex0x(double_bundle_hash) AS double_bundle_hash,
+            hex0x(signer_address) AS signer_hash,
+            replaceAll(builder_name, '-', '_') AS builder_name,
+            received_at
+        FROM buildernet.bundles_v2_double_hash
+        WHERE received_at >= t_since AND received_at <= t_until
+    ),
 
     -- Get bundle receipts within the specified time window.
     bundle_receipts AS (
@@ -32,30 +43,59 @@ WITH
             priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM buildernet.bundle_receipts_wo_bundle_hash
-        WHERE received_at >= t_since AND received_at <= t_until
+        WHERE sent_at >= t_since AND sent_at <= t_until
     ),
 
+    -- Join bundle receipts with signer addresses from bundles table.
+    -- TODO: actually use the signer hash field
+    bundle_receipts_with_signer AS (
+        SELECT
+            br.double_bundle_hash,
+            br.sent_at,
+            br.received_at,
+            br.dst_builder_name,
+            br.src_builder_name,
+            br.payload_size,
+            br.priority,
+            br.sent_at_second_in_slot,
+            b.signer_hash
+        FROM bundle_receipts AS br
+        LEFT JOIN bundles AS b USING (double_bundle_hash)
+    ),
+
+    -- Combine real receipts with synthetic self-receipts for all bundles.
+    -- This is useful to determine lost bundles, as every bundle should at least have a self-receipt.
+    bundle_receipts_with_self AS (
+        SELECT
+            double_bundle_hash,
+            sent_at,
+            received_at,
+            dst_builder_name,
+            src_builder_name,
+            payload_size,
+            priority,
+            sent_at_second_in_slot,
+            signer_hash
+        FROM bundle_receipts_with_signer
+
+        UNION ALL
+
+        SELECT
+            double_bundle_hash,
+            received_at AS sent_at, -- self-sent at received_at time
+            received_at, -- self-received at received_at time
+            builder_name AS dst_builder_name,
+            builder_name AS src_builder_name,
+            NULL AS payload_size,
+            NULL AS priority,
+            to_time_bucket(received_at) AS sent_at_second_in_slot,
+            signer_hash
+        FROM bundles b
+    ),
+
+    -- Count total number of bundle receipts (scalar).
     bundle_receipts_count AS (
         SELECT count() AS total_receipts FROM bundle_receipts
-    ),
-
-    -- NOTE: given we don't track self-receipts, if a sender completely fails
-    -- to send a bundle to anyone, it won't be captured in this dataset.
-    bundle_unique_count AS (
-        SELECT count(DISTINCT double_bundle_hash) AS unique_bundles
-        FROM bundle_receipts
-    ),
-
-    bundle_duplicates AS (
-        select
-            double_bundle_hash,
-            occurrences
-        FROM (SELECT
-              double_bundle_hash,
-              count() AS occurrences
-            FROM bundle_receipts
-            GROUP by double_bundle_hash)
-        WHERE occurrences > 5 -- TODO: do not hardcode this.
     ),
 
     ------------ METADATA QUERIES ------------
@@ -74,13 +114,14 @@ WITH
     ------------ BUNDLE VISIBILITY ------------
 
     -- For each bundle, get the list of builders that have seen it, along with their sources.
+    -- NOTE: This contains self-receipts, so every bundle will have at least one seen_dst (its source).
     bundle_seen_by AS (
         SELECT
             double_bundle_hash,
             -- We may more than one source builder for a given bundle.
             groupUniqArray(src_builder_name) AS src_builders,
             groupUniqArray(dst_builder_name) AS seen_dsts
-        FROM bundle_receipts
+        FROM bundle_receipts_with_self
         GROUP BY double_bundle_hash
     ),
 
@@ -125,18 +166,30 @@ WITH
 
     ------------ LOST BUNDLES QUERIES ---------
 
+    -- Bundle hashes that have been missed by at least one builder.
+    lost_bundles AS (
+        WITH grouped AS (
+          SELECT
+              double_bundle_hash,
+              count() AS occurrences
+          FROM bundle_receipts_with_self
+          GROUP BY double_bundle_hash
+        ) SELECT
+            double_bundle_hash,
+            occurrences,
+            (SELECT total_builders FROM builders_count) AS total_builders,
+            total_builders - occurrences AS missed_builders
+        FROM grouped
+        WHERE missed_builders > 0
+    ),
+
     -- For each bundle hash, determine which builders have not seen it, along with their sources.
-    --
-    -- This filters the list of bundles to those that have been missed by at least one builder.
-    -- NOTE: because we don't track self-receipts, it means every bundle here
-    -- has been seen by at least one builder.
     lost_bundles_srcs_dsts AS (
         SELECT
             double_bundle_hash,
             src_builders,
-            -- We have to exclude source builders since they won't see their own bundles.
             arrayFilter(
-                x -> (NOT has(src_builders, x)) AND (NOT has(seen_dsts, x)),
+                x -> NOT has(seen_dsts, x),
                 (SELECT dsts FROM builders)
             ) AS missing_dsts,
             length(missing_dsts) AS missed_builders
@@ -165,10 +218,10 @@ WITH
                 src_builder_name,
                 -- Gather every sent_at time for this (bundle, source) pair
                 groupUniqArray(sent_at) AS sent_ats,       
-                -- We assume these fields are consistent across sends
-                any(payload_size) AS payload_size,
-                any(priority) AS priority
-            FROM bundle_receipts
+                -- We assume these fields are consistent across sends, when available.
+                anyIf(payload_size, payload_size IS NOT NULL) AS payload_size,
+                anyIf(priority, priority IS NOT NULL) AS priority
+            FROM bundle_receipts_with_self
             GROUP BY double_bundle_hash, src_builder_name
         )
         -- 2️⃣ Now, join lost bundles with that metadata
@@ -183,21 +236,6 @@ WITH
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM lost_bundles_links_flattened AS lbd
         INNER JOIN bundle_meta bm USING (double_bundle_hash, src_builder_name)
-    ),
-
-    -- Get a summary of lost bundles by counting how many bundles were missed by how many builders.
-    -- FIX: this is okay but doesn't take into account multiple attempts for the same bundle yet.
-    lost_bundles_by_builder_count_summary AS (
-        SELECT
-            missed_builders,
-            -- If we had more than one source builder for a bundle, it means
-            -- multiple observations of bundle loss.
-            sum(length(src_builders)) AS observations,
-            (SELECT unique_bundles FROM bundle_unique_count) AS total_unique_bundles,
-            concat(toString(round(100 * observations / total_unique_bundles, 2)), '%') AS percent_of_total_bundles
-        FROM lost_bundles_srcs_dsts
-        GROUP BY missed_builders
-        ORDER BY missed_builders ASC
     ),
 
     -- Rank links by the number of bundles they missed.
