@@ -3,13 +3,19 @@ FROM rust:1.89-slim AS builder
 
 WORKDIR /app
 
-# Copy manifests
+# Copy manifests first
 COPY Cargo.toml ./
 
-# Copy source code
+# Create a dummy main.rs to build dependencies
+RUN mkdir src && \
+    echo "fn main() {}" > src/main.rs && \
+    cargo build --release && \
+    rm -rf src target/release/mockhub* target/release/deps/mockhub*
+
+# Now copy the real source code
 COPY src ./src
 
-# Build release binary
+# Build the actual binary (dependencies are cached, but binary is rebuilt)
 RUN cargo build --release
 
 # Runtime stage
