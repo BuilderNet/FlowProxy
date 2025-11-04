@@ -8,6 +8,7 @@ Type=simple
 EnvironmentFile=/etc/flowproxy/flowproxy.env
 # Derive builder name/FQDN from the instance name
 Environment=BUILDER_NAME=%i
+Environment=BUILDERNET_NODE_NAME=%i
 ExecStart=/usr/local/bin/flowproxy
 Restart=always
 RestartSec=3s

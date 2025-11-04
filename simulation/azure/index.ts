@@ -20,10 +20,30 @@ const flowproxyEnv = fs.readFileSync("flowproxy.env", "utf8");
 const flowproxyServiceTmpl = fs.readFileSync("flowproxy@.service", "utf8");
 const flowproxyEnvB64 = Buffer.from(flowproxyEnv).toString("base64");
 const flowproxySvcB64 = Buffer.from(flowproxyServiceTmpl).toString("base64");
-// Azure limit: forceUpdateTag max 50 chars; use a short hash (32 chars)
+// Monitoring configs
+const prometheusConfig = fs.readFileSync("prometheus.yml", "utf8");
+const grafanaDatasource = fs.readFileSync("grafana/provisioning/datasources/datasource.yml", "utf8");
+const grafanaDashboardConfig = fs.readFileSync("grafana/provisioning/dashboards/dashboard.yml", "utf8");
+const prometheusConfigB64 = Buffer.from(prometheusConfig).toString("base64");
+const grafanaDatasourceB64 = Buffer.from(grafanaDatasource).toString("base64");
+const grafanaDashboardConfigB64 = Buffer.from(grafanaDashboardConfig).toString("base64");
+// Read all dashboard JSON files from grafana/dashboards/
+const dashboardFiles = fs.readdirSync("grafana/dashboards").filter(f => f.endsWith(".json"));
+const dashboardsB64 = dashboardFiles.map(filename => ({
+    filename,
+    content: Buffer.from(fs.readFileSync(`grafana/dashboards/${filename}`, "utf8")).toString("base64")
+}));
+
+const builderhubExtTag = crypto
+    .createHash("sha256")
+    .update(prometheusConfig + grafanaDatasource + grafanaDashboardConfig + dashboardsB64.map(d => d.content).join(""))
+    .digest("hex")
+    .slice(0, 32);
+
+// Make sure FlowProxy is updated when BuilderHub is updated, so we trigger a re-registration of the orderflow proxy credentials.
 const haExtTag = crypto
     .createHash("sha256")
-    .update(haproxyCfg + String(haProxyVersion) + flowproxyEnv + flowproxyServiceTmpl + String(flowProxyArtifact))
+    .update(haproxyCfg + String(haProxyVersion) + flowproxyEnv + flowproxyServiceTmpl + String(flowProxyArtifact) + builderhubExtTag)
     .digest("hex")
     .slice(0, 32);
 
@@ -179,6 +199,23 @@ const nicWest = new network.NetworkInterface("nic-west", {
     ],
 });
 
+// BuilderHub NIC (internal-only, no public IP)
+const nicBuilderhub = new network.NetworkInterface("nic-builderhub", {
+    resourceGroupName: rgEast.name,
+    location: rgEast.location,
+    networkSecurityGroup: { id: nsgEast.id },
+    dnsSettings: {
+        internalDnsNameLabel: "vm-builderhub",
+    },
+    ipConfigurations: [
+        {
+            name: "ipconfig1",
+            privateIPAllocationMethod: "Dynamic",
+            subnet: { id: subnetEast.id },
+        },
+    ],
+});
+
 // VM size: 2 vCPU, 4GB RAM
 const vmSize = "Standard_B2s";
 
@@ -224,6 +261,9 @@ function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.In
     }, opts);
 }
 
+// Create BuilderHub VM first (other VMs depend on it for credential registration)
+const vmBuilderhub = createVm("vm-builderhub", rgEast, rgEast.location, nicBuilderhub.id, { ignoreChanges: ["osProfile"] });
+
 const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, { ignoreChanges: ["osProfile"] });
 const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, { ignoreChanges: ["osProfile"] });
 
@@ -246,34 +286,78 @@ const westToEast = new network.VirtualNetworkPeering("west-to-east", {
 
 // VM Extensions: Provision HAProxy via Docker (no VM recreate)
 const haproxyCfgB64 = Buffer.from(haproxyCfg).toString("base64");
-function buildInstanceCommand(hostname: string): pulumi.Input<string> {
+function buildInstanceCommand(name: string): pulumi.Input<string> {
     const artifactApiUrl = toApiZip(flowProxyArtifact);
     const script = (key?: string, token?: string) => `#!/usr/bin/env bash
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y docker.io curl ca-certificates openssl unzip
+
+# Install essential packages first (with retry logic for transient apt issues)
+rm -rf /var/lib/apt/lists/*
+for i in 1 2 3; do apt-get update && break || sleep 5; done
+for i in 1 2 3; do apt-get install -y curl ca-certificates openssl unzip jq && break || sleep 5; done
+
+# Install Docker using official script
+curl -fsSL https://get.docker.com | sh
 mkdir -p /usr/local/etc/haproxy/certs /usr/local/etc/haproxy/static
 echo "${haproxyCfgB64}" | base64 -d > /usr/local/etc/haproxy/haproxy.cfg
 printf "\n" >> /usr/local/etc/haproxy/haproxy.cfg || true
 if [ ! -f /usr/local/etc/haproxy/static/le.cer ]; then echo "placeholder-certificate-content" > /usr/local/etc/haproxy/static/le.cer; fi
 if [ ! -f /usr/local/etc/haproxy/certs/default.pem ]; then
+  # Get the private IP address
+  PRIVATE_IP=$(hostname -I | awk '{print $1}')
+
+  # Create OpenSSL config with SANs
+  cat > /tmp/openssl.cnf <<EOF
+[req]
+default_bits = 2048
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = localhost
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+IP.1 = \${PRIVATE_IP}
+IP.2 = 127.0.0.1
+EOF
+
   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
     -keyout /usr/local/etc/haproxy/certs/default.key \
     -out /usr/local/etc/haproxy/certs/default.crt \
-    -subj "/CN=localhost";
-  cat /usr/local/etc/haproxy/certs/default.key /usr/local/etc/haproxy/certs/default.crt > /usr/local/etc/haproxy/certs/default.pem;
+    -config /tmp/openssl.cnf \
+    -extensions v3_req
+
+  cat /usr/local/etc/haproxy/certs/default.key /usr/local/etc/haproxy/certs/default.crt > /usr/local/etc/haproxy/certs/default.pem
+  rm /tmp/openssl.cnf
 fi
+
+
 rm -f /usr/local/etc/haproxy/certs/default.crt || true
 systemctl enable --now docker
 docker rm -f haproxy || true
 docker pull haproxy:${haProxyVersion}
-docker run -d --name haproxy --restart unless-stopped -p 80:80 -p 443:443 -p 5544:5544 -p 8405:8405 -v /usr/local/etc/haproxy:/usr/local/etc/haproxy:ro haproxy:${haProxyVersion}
-${key ? `apt-get update
+docker run -d --name haproxy --restart unless-stopped \
+    --network host \
+    --cap-add=NET_BIND_SERVICE \
+    --user root \
+    -v /usr/local/etc/haproxy:/usr/local/etc/haproxy:ro \
+    haproxy:${haProxyVersion}
+
+# Optionally install Tailscale
+${key ? `
+rm -rf /var/lib/apt/lists/*
+for i in 1 2 3; do apt-get update && break || sleep 5; done
 apt-get install -y curl
 curl -fsSL https://tailscale.com/install.sh | sh
 systemctl enable --now tailscaled
-tailscale up --authkey=${key} --hostname=${hostname} --ssh` : ``}
+tailscale up --authkey=${key} --hostname=${name} --ssh
+` : ``}
 
 # --- FlowProxy install ---
 tmpzip=$(mktemp /tmp/flowproxy.XXXXXX.zip)
@@ -286,11 +370,70 @@ mkdir -p /usr/local/bin
 unzip -o "$tmpzip" -d /usr/local/bin || true
 chmod +x /usr/local/bin/flowproxy
 mkdir -p /etc/flowproxy
-echo "${flowproxyEnvB64}" | base64 -d > /etc/flowproxy/flowproxy.env
 echo "${flowproxySvcB64}" | base64 -d > /etc/systemd/system/flowproxy@.service
+echo "${flowproxyEnvB64}" | base64 -d > /etc/flowproxy/flowproxy.env
 systemctl daemon-reload
-systemctl enable --now flowproxy@${hostname}
-systemctl status flowproxy@${hostname} --no-pager || journalctl -u flowproxy@${hostname} --no-pager -n 100
+
+# Install Foundry (for cast) to manage ECDSA keys
+curl -L https://foundry.paradigm.xyz | bash
+source /.bashrc
+
+foundryup
+
+# Persist ECDSA key across extension updates
+KEY_FILE="/etc/flowproxy/ecdsa_private_key"
+
+if [ -f "$KEY_FILE" ]; then
+  # Use existing key
+  PRIVATE_KEY=$(cat "$KEY_FILE")
+  ADDRESS=$(cast wallet address "$PRIVATE_KEY")
+  echo "Using existing ECDSA key with address: $ADDRESS"
+else
+  # Generate new key and save it
+  key_output=$(cast wallet new --json)
+  ADDRESS=$(echo "$key_output" | jq -r '.[0].address')
+  PRIVATE_KEY=$(echo "$key_output" | jq -r '.[0].private_key')
+  echo "$PRIVATE_KEY" > "$KEY_FILE"
+  chmod 600 "$KEY_FILE"
+  echo "Generated new ECDSA key with address: $ADDRESS"
+fi
+
+# Update flowproxy.env with the ECDSA private key (idempotent)
+sed -i '/^FLASHBOTS_ORDERFLOW_SIGNER=/d' /etc/flowproxy/flowproxy.env
+echo "FLASHBOTS_ORDERFLOW_SIGNER=$PRIVATE_KEY" >> /etc/flowproxy/flowproxy.env
+
+# Register credentials with BuilderHub before enabling the orderflow proxy
+set +e
+set +o pipefail
+set -x
+set -a
+source /etc/flowproxy/flowproxy.env || true
+set +a
+CERT=$(openssl x509 -in /usr/local/etc/haproxy/certs/default.pem -outform PEM 2>/dev/null || true)
+PAYLOAD=$(jq -n --arg cert "$CERT" --arg addr "$ADDRESS" '{tls_cert:$cert, ecdsa_pubkey_address:$addr}')
+URL="http://builderhub.flowproxy.internal:3000/api/l1-builder/v1/register_credentials/orderflow_proxy"
+echo "Registering orderflow proxy credentials to $URL (address=$ADDRESS)"
+success=0
+for i in 1 2 3 4 5; do
+  code=$(curl -sS -o /tmp/register.out -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' \
+    --data "$PAYLOAD" "$URL" || true)
+  if [ "$code" = "200" ] || [ "$code" = "201" ]; then
+    echo "Registration succeeded (HTTP $code)"
+    success=1
+    break
+  fi
+  echo "Registration attempt $i failed (HTTP $code). Retrying in 10s..."
+  sleep 10
+done
+if [ "$success" != "1" ]; then
+  echo "Warning: BuilderHub registration did not succeed after 5 attempts; continuing." >&2
+fi
+set -e
+set -o pipefail
+
+systemctl enable --now flowproxy@${name}
+systemctl status flowproxy@${name} --no-pager || journalctl -u flowproxy@${name} --no-pager -n 100
 `;
 
     const build = (k?: string, t?: string) => {
@@ -310,6 +453,95 @@ systemctl status flowproxy@${hostname} --no-pager || journalctl -u flowproxy@${h
     return build(undefined, undefined);
 }
 
+// BuilderHub provisioning script - installs Docker only for now
+function buildBuilderhubCommand(name: string): pulumi.Input<string> {
+    const script = (key?: string) => `#!/usr/bin/env bash
+set -euxo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+# Install Docker using official script
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+
+# Optionally install Tailscale
+${key ? `
+rm -rf /var/lib/apt/lists/*
+for i in 1 2 3; do apt-get update && break || sleep 5; done
+apt-get install -y curl
+curl -fsSL https://tailscale.com/install.sh | sh
+systemctl enable --now tailscaled
+tailscale up --authkey=${key} --hostname=${name} --ssh
+` : ``}
+
+# Make sure we delete the old builderhub container
+docker rm -f builderhub || true
+docker run -d --name builderhub --restart unless-stopped -p 3000:3000 -e ENABLE_TLS=true mempirate/mockhub:v0.0.3
+
+# === Prometheus Setup ===
+mkdir -p /etc/prometheus
+echo "${prometheusConfigB64}" | base64 -d > /etc/prometheus/prometheus.yml
+
+docker rm -f prometheus || true
+docker run -d --name prometheus --restart unless-stopped \
+  --network host \
+  -v /etc/prometheus:/etc/prometheus \
+  prom/prometheus:latest \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/prometheus
+
+# === Grafana Setup ===
+mkdir -p /etc/grafana/provisioning/datasources
+mkdir -p /etc/grafana/provisioning/dashboards
+mkdir -p /etc/grafana/dashboards
+
+echo "${grafanaDatasourceB64}" | base64 -d > /etc/grafana/provisioning/datasources/datasource.yml
+echo "${grafanaDashboardConfigB64}" | base64 -d > /etc/grafana/provisioning/dashboards/dashboard.yml
+
+# Copy dashboard JSON files
+${dashboardsB64.map(d => `echo "${d.content}" | base64 -d > /etc/grafana/dashboards/${d.filename}`).join("\n")}
+
+docker rm -f grafana || true
+docker run -d --name grafana --restart unless-stopped \
+  --network host \
+  --user root \
+  --cap-add=NET_BIND_SERVICE \
+  -v /etc/grafana/provisioning:/etc/grafana/provisioning \
+  -v /etc/grafana/dashboards:/etc/grafana/dashboards \
+  -e GF_SERVER_HTTP_PORT=80 \
+  -e GF_SECURITY_ADMIN_USER=admin \
+  -e GF_SECURITY_ADMIN_PASSWORD=grafana \
+  -e GF_AUTH_ANONYMOUS_ENABLED=true \
+  -e GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer \
+  grafana/grafana:latest
+`;
+
+    const build = (k?: string) => {
+        const b64 = Buffer.from(script(k)).toString("base64");
+        return `/bin/bash -lc 'echo ${b64} | base64 -d > /tmp/provision.sh && bash /tmp/provision.sh'`;
+    };
+
+    const ts = (tailscaleAuthKey as any)?.apply ? (tailscaleAuthKey as pulumi.Output<string>) : undefined;
+    if (ts) {
+        return ts.apply(k => build(k));
+    }
+    return build(undefined);
+}
+
+
+const builderhubExt = new compute.VirtualMachineExtension("builderhub-ext", {
+    resourceGroupName: rgEast.name,
+    vmName: vmBuilderhub.name,
+    location: rgEast.location,
+    publisher: "Microsoft.Azure.Extensions",
+    type: "CustomScript",
+    typeHandlerVersion: "2.1",
+    forceUpdateTag: builderhubExtTag,
+    autoUpgradeMinorVersion: true,
+    protectedSettings: {
+        commandToExecute: buildBuilderhubCommand("flowproxy-builderhub"),
+    },
+}, { dependsOn: [vmBuilderhub] });
+
 const haExtEast = new compute.VirtualMachineExtension("haproxy-ext-east", {
     resourceGroupName: rgEast.name,
     vmName: vmEast.name,
@@ -320,7 +552,7 @@ const haExtEast = new compute.VirtualMachineExtension("haproxy-ext-east", {
     forceUpdateTag: haExtTag,
     autoUpgradeMinorVersion: true,
     protectedSettings: {
-        commandToExecute: buildInstanceCommand("vm-eastus"),
+        commandToExecute: buildInstanceCommand("flowproxy-eastus"),
     },
 }, { dependsOn: [vmEast] });
 
@@ -334,7 +566,7 @@ const haExtWest = new compute.VirtualMachineExtension("haproxy-ext-west", {
     forceUpdateTag: haExtTag,
     autoUpgradeMinorVersion: true,
     protectedSettings: {
-        commandToExecute: buildInstanceCommand("vm-westeurope"),
+        commandToExecute: buildInstanceCommand("flowproxy-westeurope"),
     },
 }, { dependsOn: [vmWest] });
 
@@ -401,6 +633,17 @@ const westARecord = new privatedns.PrivateRecordSet("west-a", {
     ],
 });
 
+const builderhubARecord = new privatedns.PrivateRecordSet("builderhub-a", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: dnsZone.name,
+    relativeRecordSetName: "builderhub",
+    recordType: "A",
+    ttl: 60,
+    aRecords: [
+        { ipv4Address: nicBuilderhub.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress || "") },
+    ],
+});
+
 // Outputs
 export const eastPublicIp = pipEast.ipAddress;
 export const westPublicIp = pipWest.ipAddress;
@@ -408,7 +651,10 @@ export const sshEast = pulumi.interpolate`ssh ${adminUsername}@${eastPublicIp}`;
 export const sshWest = pulumi.interpolate`ssh ${adminUsername}@${westPublicIp}`;
 export const eastPrivateIp = nicEast.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
 export const westPrivateIp = nicWest.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
+export const builderhubPrivateIp = nicBuilderhub.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
 export const eastNicPrivateFqdn = nicEast.dnsSettings.apply(ds => ds?.internalFqdn);
 export const westNicPrivateFqdn = nicWest.dnsSettings.apply(ds => ds?.internalFqdn);
+export const builderhubNicPrivateFqdn = nicBuilderhub.dnsSettings.apply(ds => ds?.internalFqdn);
 export const eastPrivateFqdn = pulumi.interpolate`vm-eastus.${privateZoneName}`;
 export const westPrivateFqdn = pulumi.interpolate`vm-westeurope.${privateZoneName}`;
+export const builderhubPrivateFqdn = pulumi.interpolate`builderhub.${privateZoneName}`;
