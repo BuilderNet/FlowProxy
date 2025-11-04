@@ -36,6 +36,8 @@ use time::UtcDateTime;
 use tokio::sync::mpsc;
 use tracing::*;
 
+pub mod client;
+
 #[derive(Debug)]
 pub struct IngressForwarders {
     /// The orderflow signer.

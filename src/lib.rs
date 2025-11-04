@@ -19,7 +19,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
-use ingress::forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use reqwest::Url;
 use std::{
     net::SocketAddr,
@@ -43,6 +43,7 @@ pub mod builderhub;
 mod cache;
 pub mod consts;
 pub mod entity;
+pub mod forwarder;
 pub mod indexer;
 pub mod jsonrpc;
 pub mod metrics;

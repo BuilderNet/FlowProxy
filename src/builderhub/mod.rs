@@ -1,11 +1,7 @@
 use crate::{
-    consts::{
-        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
-        DEFAULT_POOL_IDLE_TIMEOUT_SECS,
-    },
-    ingress::forwarder::{spawn_forwarder, PeerHandle},
+    forwarder::{self, spawn_forwarder, PeerHandle},
     metrics::BuilderHubMetrics,
-    utils, DEFAULT_SYSTEM_PORT,
+    DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
@@ -240,19 +236,12 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         // Self-filter any new peers before connecting to them.
         if new_peer && peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer {
             // Create a new client for each peer.
-            let mut client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
-                .pool_idle_timeout(Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS))
-                .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                    DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                    peer.name.clone(),
-                ));
+            let mut client_builder = forwarder::client::default_http_builder();
 
             // If the TLS certificate is present, use HTTPS and configure the client to use it.
             if let Some(ref tls_cert) = peer.tls_certificate() {
-                client = client.https_only(true).add_root_certificate(tls_cert.clone())
+                client_builder =
+                    client_builder.https_only(true).add_root_certificate(tls_cert.clone())
             }
 
             if self.disable_forwarding {
@@ -260,7 +249,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
                 return;
             }
 
-            let client = client.build().expect("Failed to build client");
+            let client = client_builder.build().expect("failed to build client");
 
             let sender = spawn_forwarder(
                 peer.name.clone(),
