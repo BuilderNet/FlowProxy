@@ -1,0 +1,52 @@
+name: Release (Profiling Build)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract-version:
+    name: Extract version
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.extract_version.outputs.VERSION }}
+    steps:
+      - name: Extract version
+        id: extract_version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="$(echo ${GITHUB_SHA} | cut -c1-7)"
+          fi
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+          echo "${VERSION}"
+
+          echo "### Version: \`${VERSION}\`" >> $GITHUB_STEP_SUMMARY
+          echo "|                     |                        |" >> $GITHUB_STEP_SUMMARY
+          echo "| ------------------- | ---------------------- |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`GITHUB_REF_TYPE\` | \`${GITHUB_REF_TYPE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`GITHUB_REF_NAME\` | \`${GITHUB_REF_NAME}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`GITHUB_REF\`      | \`${GITHUB_REF}\`      |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`GITHUB_SHA\`      | \`${GITHUB_SHA}\`      |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`VERSION\`         | \`${VERSION}\`         |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`FEATURES\`        | \`${{ github.event.inputs.features || 'none' }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  build:
+    name: Build profiling binary
+    needs: extract-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build profiling binary
+        run: cargo build --profile profiling --target x86_64-unknown-linux-gnu --locked
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowproxy-${{ needs.extract-version.outputs.VERSION }}-profiling-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/profiling/flowproxy
