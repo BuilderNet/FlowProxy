@@ -84,10 +84,10 @@ pub(crate) struct IngressMetrics {
     #[metric(labels = ["error"])]
     validation_errors: Counter,
     /// The duration of HTTP requests.
-    #[metric(labels = ["method", "path", "status"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(labels = ["method", "path", "status"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     http_request_duration: Histogram,
     /// The duration of RPC calls.
-    #[metric(labels = ["method", "priority"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(labels = ["method", "priority"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     rpc_request_duration: Histogram,
     /// The number of transactions per bundle.
     #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
@@ -181,13 +181,13 @@ pub(crate) struct ParquetMetrics {
 #[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
-    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     bundle_processing_time: Histogram,
     /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     mev_share_bundle_processing_time: Histogram,
     /// End-to-end transaction processing time in seconds.
-    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     transaction_processing_time: Histogram,
     /// End-to-end system order processing time in seconds.
     #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
