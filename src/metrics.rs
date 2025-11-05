@@ -204,7 +204,9 @@ pub(crate) async fn spawn_process_collector() -> eyre::Result<()> {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
+            let start = std::time::Instant::now();
             process_metrics.collect();
+            tracing::debug!(elapsed = ?start.elapsed(), "collected process metrics");
         }
     });
 
