@@ -218,7 +218,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             self.process_peer(builder);
         }
 
-        self.metrics.peer_count().set(self.peers.len() as i64);
+        self.metrics.peer_count().set(self.peers.len());
     }
 
     /// Process a single peer, updating the local list of connected peers and spawning order

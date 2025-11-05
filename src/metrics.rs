@@ -1,10 +1,8 @@
 //! FlowProxy metrics with [`prometric_derive`].
 use std::{sync::LazyLock, time::Duration};
 
-use prometheus::{Encoder as _, TextEncoder};
-use prometric::{Counter, Gauge, Histogram};
+use prometric::{process::ProcessCollector, Counter, Gauge, Histogram};
 use prometric_derive::metrics;
-use tokio::net::ToSocketAddrs;
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and
 /// initialized only once.
@@ -100,10 +98,10 @@ pub(crate) struct IngressMetrics {
     total_empty_bundles: Counter,
     /// The order cache hit ratio.
     #[metric]
-    order_cache_hit_ratio: Gauge,
+    order_cache_hit_ratio: Gauge<f64>,
     /// The signer cache hit ratio.
     #[metric]
-    signer_cache_hit_ratio: Gauge,
+    signer_cache_hit_ratio: Gauge<f64>,
     /// The current order cache entry count.
     #[metric]
     order_cache_entry_count: Gauge,
@@ -200,82 +198,15 @@ pub(crate) struct SystemMetrics {
     queue_capacity_almost_hits: Counter,
 }
 
-#[derive(Debug)]
-#[metrics(scope = "process")]
-pub struct ProcessMetrics {
-    /// Total user and system CPU time spent in seconds.
-    #[metric]
-    cpu_seconds_total: Gauge,
-    /// Number of open file descriptors.
-    #[metric]
-    open_fds: Gauge,
-    /// Maximum number of open file descriptors.
-    #[metric]
-    max_fds: Gauge,
-    /// Virtual memory size in bytes.
-    #[metric]
-    virtual_memory_bytes: Gauge,
-    /// Maximum amount of virtual memory available in bytes.
-    #[metric]
-    virtual_memory_max_bytes: Gauge,
-    /// Resident memory size in bytes.
-    #[metric]
-    resident_memory_bytes: Gauge,
-    /// Start time of the process since unix epoch in seconds.
-    #[metric]
-    start_time_seconds: Gauge,
-    /// Numberof OS threads in the process.
-    #[metric]
-    threads: Gauge,
-}
+pub(crate) async fn spawn_process_collector() -> eyre::Result<()> {
+    let mut process_metrics = ProcessCollector::new(prometheus::default_registry());
 
-impl ProcessMetrics {
-    pub fn update(&self, metrics: metrics_process::collector::Metrics) {
-        self.cpu_seconds_total().set(metrics.cpu_seconds_total.unwrap_or(0.0) as i64);
-        self.open_fds().set(metrics.open_fds.unwrap_or(0) as i64);
-        self.max_fds().set(metrics.max_fds.unwrap_or(0) as i64);
-        self.virtual_memory_bytes().set(metrics.virtual_memory_bytes.unwrap_or(0) as i64);
-        self.virtual_memory_max_bytes().set(metrics.virtual_memory_max_bytes.unwrap_or(0) as i64);
-        self.resident_memory_bytes().set(metrics.resident_memory_bytes.unwrap_or(0) as i64);
-        self.start_time_seconds().set(metrics.start_time_seconds.unwrap_or(0) as i64);
-        self.threads().set(metrics.threads.unwrap_or(0) as i64);
-    }
-}
-
-/// Start prometheus at provider address.
-pub(crate) async fn spawn_prometheus_server<A: ToSocketAddrs>(address: A) -> eyre::Result<()> {
-    // Get the default registry
-    let registry = prometheus::default_registry().clone();
-
-    let router = axum::Router::new()
-        .route("/metrics", axum::routing::get(metrics_handler))
-        .route("/", axum::routing::get(metrics_handler))
-        .with_state(registry);
-
-    let listener = tokio::net::TcpListener::bind(address).await?;
-    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
-
-    let process_metrics = ProcessMetrics::default();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            process_metrics.update(metrics_process::collector::collect());
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            process_metrics.collect();
         }
     });
 
     Ok(())
-}
-
-async fn metrics_handler(
-    axum::extract::State(registry): axum::extract::State<prometheus::Registry>,
-) -> impl axum::response::IntoResponse {
-    let encoder = TextEncoder::new();
-    let mut metrics = registry.gather();
-    // Prepend "orderflow_proxy" to the metric name.
-    metrics.iter_mut().for_each(|m| m.mut_name().insert_str(0, "flowproxy_"));
-    let mut buffer = Vec::new();
-
-    encoder.encode(&metrics, &mut buffer).unwrap();
-
-    (hyper::StatusCode::OK, [(hyper::header::CONTENT_TYPE, mime::TEXT_PLAIN.as_ref())], buffer)
 }

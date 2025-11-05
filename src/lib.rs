@@ -20,9 +20,9 @@ use axum::{
 use dashmap::DashMap;
 use entity::SpamThresholds;
 use ingress::forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
-    net::SocketAddr,
     str::FromStr as _,
     sync::Arc,
     time::{Duration, Instant},
@@ -62,7 +62,8 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     fdlimit::raise_fd_limit()?;
 
     if let Some(ref metrics_addr) = args.metrics {
-        metrics::spawn_prometheus_server(SocketAddr::from_str(metrics_addr)?).await?;
+        ExporterBuilder::new().with_address(metrics_addr).with_namespace("flowproxy").install()?;
+        metrics::spawn_process_collector().await?;
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;

@@ -247,7 +247,7 @@ impl ParquetRunner {
             tokio::select! {
                 maybe_receipt = self.rx.recv() => {
                     sampler.sample(|| {
-                        self.metrics.queue_size("bundle_receipt").set(self.rx.len() as i64);
+                        self.metrics.queue_size("bundle_receipt").set(self.rx.len());
                     });
 
                     let Some(receipt) = maybe_receipt else {

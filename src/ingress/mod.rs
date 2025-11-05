@@ -133,7 +133,7 @@ impl OrderflowIngress {
         let len_after = self.entities.len();
         let num_removed = len_before.saturating_sub(len_after);
 
-        self.user_metrics.entity_count().set(len_after as i64);
+        self.user_metrics.entity_count().set(len_after);
         tracing::info!(entries = len_after, num_removed, "finished state maintenance");
     }
 
@@ -423,11 +423,11 @@ impl OrderflowIngress {
                         ingress
                             .system_metrics
                             .order_cache_hit_ratio()
-                            .set((ingress.order_cache.hit_ratio() * 100.0) as i64);
+                            .set(ingress.order_cache.hit_ratio() * 100.0);
                         ingress
                             .system_metrics
                             .order_cache_entry_count()
-                            .set(ingress.order_cache.entry_count() as i64);
+                            .set(ingress.order_cache.entry_count());
                     }
 
                     return JsonRpcResponse::result(
@@ -491,7 +491,7 @@ impl OrderflowIngress {
                         ingress
                             .system_metrics
                             .order_cache_hit_ratio()
-                            .set((ingress.order_cache.hit_ratio() * 100.0) as i64);
+                            .set(ingress.order_cache.hit_ratio() * 100.0);
                     }
 
                     return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
@@ -536,7 +536,7 @@ impl OrderflowIngress {
                         ingress
                             .system_metrics
                             .order_cache_hit_ratio()
-                            .set((ingress.order_cache.hit_ratio() * 100.0) as i64);
+                            .set(ingress.order_cache.hit_ratio() * 100.0);
                     }
 
                     return JsonRpcResponse::result(
@@ -634,12 +634,8 @@ impl OrderflowIngress {
             self.user_metrics.order_cache_hit("bundle").inc();
 
             if sample {
-                self.user_metrics
-                    .order_cache_hit_ratio()
-                    .set((self.order_cache.hit_ratio() * 100.0) as i64);
-                self.user_metrics
-                    .order_cache_entry_count()
-                    .set(self.order_cache.entry_count() as i64);
+                self.user_metrics.order_cache_hit_ratio().set(self.order_cache.hit_ratio() * 100.0);
+                self.user_metrics.order_cache_entry_count().set(self.order_cache.entry_count());
             }
 
             return Ok(bundle_hash);
@@ -682,12 +678,8 @@ impl OrderflowIngress {
 
         // Sample the signer cache hit ratio.
         if sample {
-            self.user_metrics
-                .signer_cache_hit_ratio()
-                .set((self.signer_cache.hit_ratio() * 100.0) as i64);
-            self.user_metrics
-                .signer_cache_entry_count()
-                .set(self.signer_cache.entry_count() as i64);
+            self.user_metrics.signer_cache_hit_ratio().set(self.signer_cache.hit_ratio() * 100.0);
+            self.user_metrics.signer_cache_entry_count().set(self.signer_cache.entry_count());
         }
 
         if bundle.is_empty() {
@@ -731,9 +723,7 @@ impl OrderflowIngress {
             self.user_metrics.order_cache_hit("mev_share_bundle").inc();
 
             if bundle_hash.sample(10) {
-                self.user_metrics
-                    .order_cache_hit_ratio()
-                    .set((self.order_cache.hit_ratio() * 100.0) as i64);
+                self.user_metrics.order_cache_hit_ratio().set(self.order_cache.hit_ratio() * 100.0);
             }
 
             return Ok(bundle_hash);
@@ -801,9 +791,7 @@ impl OrderflowIngress {
             self.user_metrics.order_cache_hit("transaction").inc();
 
             if tx_hash.sample(10) {
-                self.user_metrics
-                    .order_cache_hit_ratio()
-                    .set((self.order_cache.hit_ratio() * 100.0) as i64);
+                self.user_metrics.order_cache_hit_ratio().set(self.order_cache.hit_ratio() * 100.0);
             }
 
             return Ok(tx_hash);
