@@ -35,6 +35,38 @@ scrape_configs:
           region: 'westeurope'
           instance: 'haproxy-westeurope'
 
+  # FlowProxy metrics (eastus-2)
+  - job_name: 'flowproxy-eastus-2'
+    static_configs:
+      - targets: ['vm-eastus-2.flowproxy.internal:8090']
+        labels:
+          region: 'eastus'
+          instance: 'flowproxy-eastus-2'
+
+  # FlowProxy metrics (westeurope-2)
+  - job_name: 'flowproxy-westeurope-2'
+    static_configs:
+      - targets: ['vm-westeurope-2.flowproxy.internal:8090']
+        labels:
+          region: 'westeurope'
+          instance: 'flowproxy-westeurope-2'
+
+  # HAProxy metrics (eastus-2)
+  - job_name: 'haproxy-eastus-2'
+    static_configs:
+      - targets: ['vm-eastus-2.flowproxy.internal:8405']
+        labels:
+          region: 'eastus'
+          instance: 'haproxy-eastus-2'
+
+  # HAProxy metrics (westeurope-2)
+  - job_name: 'haproxy-westeurope-2'
+    static_configs:
+      - targets: ['vm-westeurope-2.flowproxy.internal:8405']
+        labels:
+          region: 'westeurope'
+          instance: 'haproxy-westeurope-2'
+
   # Prometheus self-monitoring
   - job_name: 'prometheus'
     static_configs:

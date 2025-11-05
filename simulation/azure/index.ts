@@ -216,6 +216,39 @@ const nicBuilderhub = new network.NetworkInterface("nic-builderhub", {
     ],
 });
 
+// Additional FlowProxy NICs (internal-only, no public IPs)
+const nicEast2 = new network.NetworkInterface("nic-east-2", {
+    resourceGroupName: rgEast.name,
+    location: rgEast.location,
+    networkSecurityGroup: { id: nsgEast.id },
+    dnsSettings: {
+        internalDnsNameLabel: "vm-eastus-2",
+    },
+    ipConfigurations: [
+        {
+            name: "ipconfig1",
+            privateIPAllocationMethod: "Dynamic",
+            subnet: { id: subnetEast.id },
+        },
+    ],
+});
+
+const nicWest2 = new network.NetworkInterface("nic-west-2", {
+    resourceGroupName: rgWest.name,
+    location: rgWest.location,
+    networkSecurityGroup: { id: nsgWest.id },
+    dnsSettings: {
+        internalDnsNameLabel: "vm-westeurope-2",
+    },
+    ipConfigurations: [
+        {
+            name: "ipconfig1",
+            privateIPAllocationMethod: "Dynamic",
+            subnet: { id: subnetWest.id },
+        },
+    ],
+});
+
 // VM size: 2 vCPU, 4GB RAM
 const vmSize = "Standard_B2s";
 
@@ -266,6 +299,8 @@ const vmBuilderhub = createVm("vm-builderhub", rgEast, rgEast.location, nicBuild
 
 const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, { ignoreChanges: ["osProfile"] });
 const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, { ignoreChanges: ["osProfile"] });
+const vmEast2 = createVm("vm-eastus-2", rgEast, rgEast.location, nicEast2.id, { ignoreChanges: ["osProfile"] });
+const vmWest2 = createVm("vm-westeurope-2", rgWest, rgWest.location, nicWest2.id, { ignoreChanges: ["osProfile"] });
 
 // VNet Peering (bi-directional)
 const eastToWest = new network.VirtualNetworkPeering("east-to-west", {
@@ -299,6 +334,11 @@ for i in 1 2 3; do apt-get install -y curl ca-certificates openssl unzip jq && b
 
 # Install Docker using official script
 curl -fsSL https://get.docker.com | sh
+
+# Configure journald to limit log storage to 12GB
+sed -i 's/#SystemMaxUse=/SystemMaxUse=12G/' /etc/systemd/journald.conf
+systemctl restart systemd-journald
+
 mkdir -p /usr/local/etc/haproxy/certs /usr/local/etc/haproxy/static
 echo "${haproxyCfgB64}" | base64 -d > /usr/local/etc/haproxy/haproxy.cfg
 printf "\n" >> /usr/local/etc/haproxy/haproxy.cfg || true
@@ -463,6 +503,10 @@ export DEBIAN_FRONTEND=noninteractive
 curl -fsSL https://get.docker.com | sh
 systemctl enable --now docker
 
+# Configure journald to limit log storage to 12GB
+sed -i 's/#SystemMaxUse=/SystemMaxUse=12G/' /etc/systemd/journald.conf
+systemctl restart systemd-journald
+
 # Optionally install Tailscale
 ${key ? `
 rm -rf /var/lib/apt/lists/*
@@ -475,7 +519,7 @@ tailscale up --authkey=${key} --hostname=${name} --ssh
 
 # Make sure we delete the old builderhub container
 docker rm -f builderhub || true
-docker run -d --name builderhub --restart unless-stopped -p 3000:3000 -e ENABLE_TLS=true mempirate/mockhub:v0.0.3
+docker run -d --name builderhub --restart unless-stopped -p 3000:3000 -e ENABLE_TLS=true mempirate/mockhub:v0.0.6
 
 # === Prometheus Setup ===
 mkdir -p /etc/prometheus
@@ -570,6 +614,34 @@ const haExtWest = new compute.VirtualMachineExtension("haproxy-ext-west", {
     },
 }, { dependsOn: [vmWest] });
 
+const haExtEast2 = new compute.VirtualMachineExtension("haproxy-ext-east-2", {
+    resourceGroupName: rgEast.name,
+    vmName: vmEast2.name,
+    location: rgEast.location,
+    publisher: "Microsoft.Azure.Extensions",
+    type: "CustomScript",
+    typeHandlerVersion: "2.1",
+    forceUpdateTag: haExtTag,
+    autoUpgradeMinorVersion: true,
+    protectedSettings: {
+        commandToExecute: buildInstanceCommand("flowproxy-eastus-2"),
+    },
+}, { dependsOn: [vmEast2] });
+
+const haExtWest2 = new compute.VirtualMachineExtension("haproxy-ext-west-2", {
+    resourceGroupName: rgWest.name,
+    vmName: vmWest2.name,
+    location: rgWest.location,
+    publisher: "Microsoft.Azure.Extensions",
+    type: "CustomScript",
+    typeHandlerVersion: "2.1",
+    forceUpdateTag: haExtTag,
+    autoUpgradeMinorVersion: true,
+    protectedSettings: {
+        commandToExecute: buildInstanceCommand("flowproxy-westeurope-2"),
+    },
+}, { dependsOn: [vmWest2] });
+
 function toApiZip(url: string): string {
     // Convert GitHub actions artifact page URL to API ZIP endpoint when possible
     // Example input: https://github.com/ORG/REPO/actions/runs/<run>/artifacts/<artifactId>
@@ -610,6 +682,56 @@ const linkWest = new privatedns.VirtualNetworkLink("dns-link-west", {
     virtualNetwork: { id: vnetWest.id },
 });
 
+// Reverse DNS zones for PTR records
+const reverseDnsZoneEast = new privatedns.PrivateZone("reverse-dns-east", {
+    resourceGroupName: rgEast.name,
+    location: "global",
+    privateZoneName: "1.10.10.in-addr.arpa",
+});
+
+const reverseDnsZoneWest = new privatedns.PrivateZone("reverse-dns-west", {
+    resourceGroupName: rgEast.name,
+    location: "global",
+    privateZoneName: "1.20.10.in-addr.arpa",
+});
+
+// Link reverse DNS zones to both VNets
+const reverseLinkEastToEast = new privatedns.VirtualNetworkLink("reverse-link-east-east", {
+    resourceGroupName: rgEast.name,
+    location: "global",
+    privateZoneName: reverseDnsZoneEast.name,
+    virtualNetworkLinkName: "link-east",
+    registrationEnabled: false,
+    virtualNetwork: { id: vnetEast.id },
+});
+
+const reverseLinkEastToWest = new privatedns.VirtualNetworkLink("reverse-link-east-west", {
+    resourceGroupName: rgEast.name,
+    location: "global",
+    privateZoneName: reverseDnsZoneEast.name,
+    virtualNetworkLinkName: "link-west",
+    registrationEnabled: false,
+    virtualNetwork: { id: vnetWest.id },
+});
+
+const reverseLinkWestToEast = new privatedns.VirtualNetworkLink("reverse-link-west-east", {
+    resourceGroupName: rgEast.name,
+    location: "global",
+    privateZoneName: reverseDnsZoneWest.name,
+    virtualNetworkLinkName: "link-east",
+    registrationEnabled: false,
+    virtualNetwork: { id: vnetEast.id },
+});
+
+const reverseLinkWestToWest = new privatedns.VirtualNetworkLink("reverse-link-west-west", {
+    resourceGroupName: rgEast.name,
+    location: "global",
+    privateZoneName: reverseDnsZoneWest.name,
+    virtualNetworkLinkName: "link-west",
+    registrationEnabled: false,
+    virtualNetwork: { id: vnetWest.id },
+});
+
 // A records for VMs in the private zone
 const eastARecord = new privatedns.PrivateRecordSet("east-a", {
     resourceGroupName: rgEast.name,
@@ -644,11 +766,103 @@ const builderhubARecord = new privatedns.PrivateRecordSet("builderhub-a", {
     ],
 });
 
+const east2ARecord = new privatedns.PrivateRecordSet("east-2-a", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: dnsZone.name,
+    relativeRecordSetName: "vm-eastus-2",
+    recordType: "A",
+    ttl: 60,
+    aRecords: [
+        { ipv4Address: nicEast2.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress || "") },
+    ],
+});
+
+const west2ARecord = new privatedns.PrivateRecordSet("west-2-a", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: dnsZone.name,
+    relativeRecordSetName: "vm-westeurope-2",
+    recordType: "A",
+    ttl: 60,
+    aRecords: [
+        { ipv4Address: nicWest2.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress || "") },
+    ],
+});
+
+// PTR records for reverse DNS lookups (East US VMs in 1.10.10.in-addr.arpa zone)
+const eastPtrRecord = new privatedns.PrivateRecordSet("east-ptr", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: reverseDnsZoneEast.name,
+    relativeRecordSetName: nicEast.ipConfigurations.apply(cfg => {
+        const ip = cfg?.[0]?.privateIPAddress || "";
+        return ip.split(".")[3] || "";
+    }),
+    recordType: "PTR",
+    ttl: 60,
+    ptrRecords: [
+        { ptrdname: pulumi.interpolate`vm-eastus.${privateZoneName}` },
+    ],
+});
+
+const east2PtrRecord = new privatedns.PrivateRecordSet("east-2-ptr", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: reverseDnsZoneEast.name,
+    relativeRecordSetName: nicEast2.ipConfigurations.apply(cfg => {
+        const ip = cfg?.[0]?.privateIPAddress || "";
+        return ip.split(".")[3] || "";
+    }),
+    recordType: "PTR",
+    ttl: 60,
+    ptrRecords: [
+        { ptrdname: pulumi.interpolate`vm-eastus-2.${privateZoneName}` },
+    ],
+});
+
+const builderhubPtrRecord = new privatedns.PrivateRecordSet("builderhub-ptr", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: reverseDnsZoneEast.name,
+    relativeRecordSetName: nicBuilderhub.ipConfigurations.apply(cfg => {
+        const ip = cfg?.[0]?.privateIPAddress || "";
+        return ip.split(".")[3] || "";
+    }),
+    recordType: "PTR",
+    ttl: 60,
+    ptrRecords: [
+        { ptrdname: pulumi.interpolate`builderhub.${privateZoneName}` },
+    ],
+});
+
+// PTR records for West Europe VMs in 1.20.10.in-addr.arpa zone
+const westPtrRecord = new privatedns.PrivateRecordSet("west-ptr", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: reverseDnsZoneWest.name,
+    relativeRecordSetName: nicWest.ipConfigurations.apply(cfg => {
+        const ip = cfg?.[0]?.privateIPAddress || "";
+        return ip.split(".")[3] || "";
+    }),
+    recordType: "PTR",
+    ttl: 60,
+    ptrRecords: [
+        { ptrdname: pulumi.interpolate`vm-westeurope.${privateZoneName}` },
+    ],
+});
+
+const west2PtrRecord = new privatedns.PrivateRecordSet("west-2-ptr", {
+    resourceGroupName: rgEast.name,
+    privateZoneName: reverseDnsZoneWest.name,
+    relativeRecordSetName: nicWest2.ipConfigurations.apply(cfg => {
+        const ip = cfg?.[0]?.privateIPAddress || "";
+        return ip.split(".")[3] || "";
+    }),
+    recordType: "PTR",
+    ttl: 60,
+    ptrRecords: [
+        { ptrdname: pulumi.interpolate`vm-westeurope-2.${privateZoneName}` },
+    ],
+});
+
 // Outputs
 export const eastPublicIp = pipEast.ipAddress;
 export const westPublicIp = pipWest.ipAddress;
-export const sshEast = pulumi.interpolate`ssh ${adminUsername}@${eastPublicIp}`;
-export const sshWest = pulumi.interpolate`ssh ${adminUsername}@${westPublicIp}`;
 export const eastPrivateIp = nicEast.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
 export const westPrivateIp = nicWest.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
 export const builderhubPrivateIp = nicBuilderhub.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
@@ -657,4 +871,10 @@ export const westNicPrivateFqdn = nicWest.dnsSettings.apply(ds => ds?.internalFq
 export const builderhubNicPrivateFqdn = nicBuilderhub.dnsSettings.apply(ds => ds?.internalFqdn);
 export const eastPrivateFqdn = pulumi.interpolate`vm-eastus.${privateZoneName}`;
 export const westPrivateFqdn = pulumi.interpolate`vm-westeurope.${privateZoneName}`;
+export const east2PrivateFqdn = pulumi.interpolate`vm-eastus-2.${privateZoneName}`;
+export const west2PrivateFqdn = pulumi.interpolate`vm-westeurope-2.${privateZoneName}`;
 export const builderhubPrivateFqdn = pulumi.interpolate`builderhub.${privateZoneName}`;
+export const east2PrivateIp = nicEast2.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
+export const west2PrivateIp = nicWest2.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
+export const east2NicPrivateFqdn = nicEast2.dnsSettings.apply(ds => ds?.internalFqdn);
+export const west2NicPrivateFqdn = nicWest2.dnsSettings.apply(ds => ds?.internalFqdn);
