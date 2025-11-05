@@ -14,10 +14,6 @@ Restart=always
 RestartSec=3s
 LimitNOFILE=65536
 
-# Journald logs
-StandardOutput=journal
-StandardError=journal
-
 [Install]
 WantedBy=multi-user.target
 

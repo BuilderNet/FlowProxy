@@ -288,19 +288,19 @@ function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.In
             osDisk: {
                 name: pulumi.interpolate`${name}-osdisk`,
                 createOption: "FromImage",
-                managedDisk: { storageAccountType: "Standard_LRS" },
+                managedDisk: { storageAccountType: "StandardSSD_LRS" },
             },
         },
     }, opts);
 }
 
 // Create BuilderHub VM first (other VMs depend on it for credential registration)
-const vmBuilderhub = createVm("vm-builderhub", rgEast, rgEast.location, nicBuilderhub.id, { ignoreChanges: ["osProfile"] });
+const vmBuilderhub = createVm("vm-builderhub", rgEast, rgEast.location, nicBuilderhub.id, { ignoreChanges: ["osProfile", "storageProfile"] });
 
-const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, { ignoreChanges: ["osProfile"] });
-const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, { ignoreChanges: ["osProfile"] });
-const vmEast2 = createVm("vm-eastus-2", rgEast, rgEast.location, nicEast2.id, { ignoreChanges: ["osProfile"] });
-const vmWest2 = createVm("vm-westeurope-2", rgWest, rgWest.location, nicWest2.id, { ignoreChanges: ["osProfile"] });
+const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmEast2 = createVm("vm-eastus-2", rgEast, rgEast.location, nicEast2.id, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmWest2 = createVm("vm-westeurope-2", rgWest, rgWest.location, nicWest2.id, { ignoreChanges: ["osProfile", "storageProfile"] });
 
 // VNet Peering (bi-directional)
 const eastToWest = new network.VirtualNetworkPeering("east-to-west", {
@@ -334,10 +334,6 @@ for i in 1 2 3; do apt-get install -y curl ca-certificates openssl unzip jq && b
 
 # Install Docker using official script
 curl -fsSL https://get.docker.com | sh
-
-# Configure journald to limit log storage to 12GB
-sed -i 's/#SystemMaxUse=/SystemMaxUse=12G/' /etc/systemd/journald.conf
-systemctl restart systemd-journald
 
 mkdir -p /usr/local/etc/haproxy/certs /usr/local/etc/haproxy/static
 echo "${haproxyCfgB64}" | base64 -d > /usr/local/etc/haproxy/haproxy.cfg
