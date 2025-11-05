@@ -1,4 +1,4 @@
-name: Release
+name: Release (Profiling Build)
 
 on:
   workflow_dispatch:
@@ -32,15 +32,18 @@ jobs:
           echo "| \`FEATURES\`        | \`${{ github.event.inputs.features || 'none' }}\` |" >> $GITHUB_STEP_SUMMARY
 
   build:
-    name: Build binary
+    name: Build profiling binary
     needs: extract-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
 
-      - name: Build profile binary
-        run: cargo build --profile profiling
+      - name: Build profiling binary
+        run: cargo build --profile profiling --target x86_64-unknown-linux-gnu --locked
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
