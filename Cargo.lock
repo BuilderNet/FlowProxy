@@ -3462,7 +3462,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -3685,7 +3685,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b0f83760fb341a774ed326568e19f5a863af4a952def8c39f9ab92fd95b88e5"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.5",
+ "hashbrown 0.16.0",
  "serde",
  "serde_core",
 ]
@@ -5072,7 +5072,7 @@ dependencies = [
 [[package]]
 name = "prometric"
 version = "0.1.2"
-source = "git+https://github.com/chainbound/prometric?branch=feat%2Fprocess-metrics#45e363c6f4c038c8b777edf6175bb69952be6c3b"
+source = "git+https://github.com/chainbound/prometric?branch=feat%2Fprocess-metrics#2c49756070693871ac67973af38d48f01ea72a89"
 dependencies = [
  "hyper",
  "hyper-util",
@@ -5084,7 +5084,7 @@ dependencies = [
 [[package]]
 name = "prometric-derive"
 version = "0.1.2"
-source = "git+https://github.com/chainbound/prometric?branch=feat%2Fprocess-metrics#45e363c6f4c038c8b777edf6175bb69952be6c3b"
+source = "git+https://github.com/chainbound/prometric?branch=feat%2Fprocess-metrics#2c49756070693871ac67973af38d48f01ea72a89"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",
@@ -5210,7 +5210,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror 2.0.17",
  "tokio",
  "tracing",
@@ -5247,7 +5247,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
  "windows-sys 0.60.2",
 ]
