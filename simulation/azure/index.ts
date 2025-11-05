@@ -473,6 +473,7 @@ set -e
 set -o pipefail
 
 systemctl enable --now flowproxy@${name}
+systemctl restart flowproxy@${name}
 systemctl status flowproxy@${name} --no-pager || journalctl -u flowproxy@${name} --no-pager -n 100
 `;
 

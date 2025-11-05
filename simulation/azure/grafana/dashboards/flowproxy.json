@@ -1474,6 +1474,70 @@
             "fieldConfig": {
                 "defaults": {
                     "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 80
+                            }
+                        ]
+                    }
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 68
+            },
+            "id": 23,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.2.1",
+            "targets": [
+                {
+                    "editorMode": "builder",
+                    "expr": "flowproxy_process_open_fds{instance=\"$Instance\"}",
+                    "legendFormat": "__auto",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Open FDs",
+            "type": "stat"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
                         "fixedColor": "purple",
                         "mode": "fixed"
                     },
@@ -1496,8 +1560,8 @@
             },
             "gridPos": {
                 "h": 8,
-                "w": 12,
-                "x": 12,
+                "w": 6,
+                "x": 18,
                 "y": 68
             },
             "id": 13,
@@ -1648,7 +1712,6 @@
                     ]
                 },
                 "definition": "label_values({order=\"bundle\"},instance)",
-                "multi": true,
                 "name": "Instance",
                 "options": [],
                 "query": {
@@ -1670,5 +1733,5 @@
     "timezone": "browser",
     "title": "FlowProxy",
     "uid": "adz8rd4",
-    "version": 9
+    "version": 11
 }
