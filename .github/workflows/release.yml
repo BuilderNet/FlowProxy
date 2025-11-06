@@ -20,7 +20,7 @@ on:
 jobs:
   extract-version:
     name: Extract version
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-8x
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
     steps:
@@ -48,11 +48,7 @@ jobs:
   build:
     name: Build binary
     needs: extract-version
-    if: ${{ github.event.inputs.build-binary == 'true' || github.event_name == 'push'}} # when manually triggered or version tagged
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
+    runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx

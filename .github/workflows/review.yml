@@ -8,7 +8,7 @@ jobs:
   review-with-tracking:
     # Only run if comment contains @claude and is on a PR
     if: github.event.issue.pull_request && contains(github.event.comment.body, '@claude')
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-8x
     permissions:
       contents: read
       pull-requests: write
