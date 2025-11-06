@@ -250,7 +250,9 @@ const nicWest2 = new network.NetworkInterface("nic-west-2", {
 });
 
 // VM size: 2 vCPU, 4GB RAM
-const vmSize = "Standard_B2s";
+const smallVm = "Standard_B2s";
+
+const bigVm = "Standard_B4ls_v2"
 
 // Ubuntu image reference (22.04 LTS)
 const ubuntuImageRef = {
@@ -260,7 +262,7 @@ const ubuntuImageRef = {
     version: "latest",
 };
 
-function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.Input<string>, nicId: pulumi.Input<string>, opts?: pulumi.CustomResourceOptions) {
+function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.Input<string>, nicId: pulumi.Input<string>, vmSize: string, opts?: pulumi.CustomResourceOptions) {
     return new compute.VirtualMachine(name, {
         resourceGroupName: rg.name,
         location,
@@ -295,12 +297,12 @@ function createVm(name: string, rg: resources.ResourceGroup, location: pulumi.In
 }
 
 // Create BuilderHub VM first (other VMs depend on it for credential registration)
-const vmBuilderhub = createVm("vm-builderhub", rgEast, rgEast.location, nicBuilderhub.id, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmBuilderhub = createVm("vm-builderhub", rgEast, rgEast.location, nicBuilderhub.id, smallVm, { ignoreChanges: ["osProfile", "storageProfile"] });
 
-const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, { ignoreChanges: ["osProfile", "storageProfile"] });
-const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, { ignoreChanges: ["osProfile", "storageProfile"] });
-const vmEast2 = createVm("vm-eastus-2", rgEast, rgEast.location, nicEast2.id, { ignoreChanges: ["osProfile", "storageProfile"] });
-const vmWest2 = createVm("vm-westeurope-2", rgWest, rgWest.location, nicWest2.id, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmEast = createVm("vm-eastus", rgEast, rgEast.location, nicEast.id, smallVm, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmWest = createVm("vm-westeurope", rgWest, rgWest.location, nicWest.id, bigVm, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmEast2 = createVm("vm-eastus-2", rgEast, rgEast.location, nicEast2.id, smallVm, { ignoreChanges: ["osProfile", "storageProfile"] });
+const vmWest2 = createVm("vm-westeurope-2", rgWest, rgWest.location, nicWest2.id, smallVm, { ignoreChanges: ["osProfile", "storageProfile"] });
 
 // VNet Peering (bi-directional)
 const eastToWest = new network.VirtualNetworkPeering("east-to-west", {
@@ -410,22 +412,20 @@ echo "${flowproxySvcB64}" | base64 -d > /etc/systemd/system/flowproxy@.service
 echo "${flowproxyEnvB64}" | base64 -d > /etc/flowproxy/flowproxy.env
 systemctl daemon-reload
 
+rm /.bashrc || true
+export HOME=/root
 # This bashrc contains the foundry bin path
-source /.bashrc
 # Install Foundry (for cast) to manage ECDSA keys
 if ! command -v cast &> /dev/null; then
     curl -L https://foundry.paradigm.xyz | bash
-    source /.bashrc
+    export PATH="$HOME/.foundry/bin:$PATH"
 
     foundryup
 fi
 
 # Install Samply for profiling
 if ! command -v samply &> /dev/null; then
-    export HOME=/root
     curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-installer.sh | sh
-    source /.bashrc
-    source $HOME/.bashrc
     echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
 fi
 
@@ -533,12 +533,15 @@ docker run -d --name builderhub --restart unless-stopped -p 3000:3000 -e ENABLE_
 
 # === Prometheus Setup ===
 mkdir -p /etc/prometheus
+mkdir -p /var/lib/prometheus
+chown -R 65534:65534 /var/lib/prometheus
 echo "${prometheusConfigB64}" | base64 -d > /etc/prometheus/prometheus.yml
 
 docker rm -f prometheus || true
 docker run -d --name prometheus --restart unless-stopped \
   --network host \
   -v /etc/prometheus:/etc/prometheus \
+  -v /var/lib/prometheus:/prometheus \
   prom/prometheus:latest \
   --config.file=/etc/prometheus/prometheus.yml \
   --storage.tsdb.path=/prometheus
@@ -547,6 +550,7 @@ docker run -d --name prometheus --restart unless-stopped \
 mkdir -p /etc/grafana/provisioning/datasources
 mkdir -p /etc/grafana/provisioning/dashboards
 mkdir -p /etc/grafana/dashboards
+mkdir -p /var/lib/grafana
 
 echo "${grafanaDatasourceB64}" | base64 -d > /etc/grafana/provisioning/datasources/datasource.yml
 echo "${grafanaDashboardConfigB64}" | base64 -d > /etc/grafana/provisioning/dashboards/dashboard.yml
@@ -561,6 +565,7 @@ docker run -d --name grafana --restart unless-stopped \
   --cap-add=NET_BIND_SERVICE \
   -v /etc/grafana/provisioning:/etc/grafana/provisioning \
   -v /etc/grafana/dashboards:/etc/grafana/dashboards \
+  -v /var/lib/grafana:/var/lib/grafana \
   -e GF_SERVER_HTTP_PORT=80 \
   -e GF_SECURITY_ADMIN_USER=admin \
   -e GF_SECURITY_ADMIN_PASSWORD=grafana \
