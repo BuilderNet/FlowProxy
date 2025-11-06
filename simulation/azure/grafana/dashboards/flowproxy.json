@@ -1347,19 +1347,6 @@
             "type": "timeseries"
         },
         {
-            "collapsed": false,
-            "gridPos": {
-                "h": 1,
-                "w": 24,
-                "x": 0,
-                "y": 67
-            },
-            "id": 7,
-            "panels": [],
-            "title": "System",
-            "type": "row"
-        },
-        {
             "datasource": {
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
@@ -1489,6 +1476,19 @@
             "type": "stat"
         },
         {
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 67
+            },
+            "id": 7,
+            "panels": [],
+            "title": "System",
+            "type": "row"
+        },
+        {
             "datasource": {
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
@@ -1600,6 +1600,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
+            "description": "The CPU usage of this process (not system-wide!)",
             "fieldConfig": {
                 "defaults": {
                     "color": {
@@ -1758,6 +1759,71 @@
             ],
             "title": "Memory usage",
             "type": "timeseries"
+        },
+        {
+            "datasource": {
+                "type": "prometheus",
+                "uid": "PBFA97CFB590B2093"
+            },
+            "fieldConfig": {
+                "defaults": {
+                    "color": {
+                        "mode": "thresholds"
+                    },
+                    "mappings": [],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": 0
+                            },
+                            {
+                                "color": "red",
+                                "value": 8000000000
+                            }
+                        ]
+                    },
+                    "unit": "bytes"
+                },
+                "overrides": []
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 76
+            },
+            "id": 25,
+            "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "auto",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": "",
+                    "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+            },
+            "pluginVersion": "12.2.1",
+            "targets": [
+                {
+                    "editorMode": "builder",
+                    "expr": "flowproxy_process_disk_written_bytes_total{instance=\"$Instance\"}",
+                    "legendFormat": "__auto",
+                    "range": true,
+                    "refId": "A"
+                }
+            ],
+            "title": "Disk bytes written",
+            "type": "stat"
         }
     ],
     "preload": false,
@@ -1769,12 +1835,8 @@
             {
                 "allowCustomValue": false,
                 "current": {
-                    "text": [
-                        "flowproxy-westeurope"
-                    ],
-                    "value": [
-                        "flowproxy-westeurope"
-                    ]
+                    "text": "flowproxy-westeurope",
+                    "value": "flowproxy-westeurope"
                 },
                 "definition": "label_values({order=\"bundle\"},instance)",
                 "name": "Instance",

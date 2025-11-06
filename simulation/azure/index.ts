@@ -410,11 +410,24 @@ echo "${flowproxySvcB64}" | base64 -d > /etc/systemd/system/flowproxy@.service
 echo "${flowproxyEnvB64}" | base64 -d > /etc/flowproxy/flowproxy.env
 systemctl daemon-reload
 
-# Install Foundry (for cast) to manage ECDSA keys
-curl -L https://foundry.paradigm.xyz | bash
+# This bashrc contains the foundry bin path
 source /.bashrc
+# Install Foundry (for cast) to manage ECDSA keys
+if ! command -v cast &> /dev/null; then
+    curl -L https://foundry.paradigm.xyz | bash
+    source /.bashrc
 
-foundryup
+    foundryup
+fi
+
+# Install Samply for profiling
+if ! command -v samply &> /dev/null; then
+    export HOME=/root
+    curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-installer.sh | sh
+    source /.bashrc
+    source $HOME/.bashrc
+    echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
+fi
 
 # Persist ECDSA key across extension updates
 KEY_FILE="/etc/flowproxy/ecdsa_private_key"
