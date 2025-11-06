@@ -14,6 +14,14 @@ WITH
     toUnixTimestamp('2025-06-14 10:39:35') AS base_offset,
     (x -> mod((toUnixTimestamp(x) - toUnixTimestamp(base_offset)), slot_time)) as to_time_bucket,
 
+    -- Region patterns to make analysis only on specific regions easier.
+    '(?i)europe|mkosi_test_1' AS europe_pattern,
+    'eastus' AS us_pattern,
+    '.*' AS all_regions_pattern,
+    -- Choose here the pattern to match against builder names.
+    -- This closure is used in `bundles` and `bundle_receipts` to filter all input data by region.
+    (x -> match(x, all_regions_pattern)) AS is_region_match,
+
 -- ===================================
 -- Common reusable subqueries
 -- ===================================
@@ -28,7 +36,8 @@ WITH
             replaceAll(builder_name, '-', '_') AS builder_name,
             received_at
         FROM buildernet.bundles_v2_double_hash
-        WHERE received_at >= t_since AND received_at <= t_until
+        WHERE received_at >= t_since AND received_at <= t_until AND
+            is_region_match(builder_name)
     ),
 
     -- Count total number of unique bundles (scalar).
@@ -50,7 +59,8 @@ WITH
             priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM buildernet.bundle_receipts_wo_bundle_hash
-        WHERE sent_at >= t_since AND sent_at <= t_until
+        WHERE sent_at >= t_since AND sent_at <= t_until AND
+            is_region_match(src_builder_name) AND is_region_match(dst_builder_name)
     ),
 
     -- Join bundle receipts with signer addresses from bundles table.
