@@ -1,6 +1,6 @@
 use super::Priority;
 use std::sync::Arc;
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::Semaphore;
 
 const DEFAULT_HIGH_QUEUE_SIZE: usize = Semaphore::MAX_PERMITS;
 const DEFAULT_MEDIUM_QUEUE_SIZE: usize = 50_000;
@@ -9,7 +9,7 @@ const DEFAULT_LOW_QUEUE_SIZE: usize = 5_000;
 /// Priority level permits for processing and validating user requests.
 /// See [`Priority`] for details.
 #[derive(Debug)]
-pub struct PriorityQueues {
+pub struct PriorityWorkers {
     /// Permits for [`Priority::High`].
     high: Arc<Semaphore>,
     high_size: usize,
@@ -22,7 +22,7 @@ pub struct PriorityQueues {
 }
 
 /// Opinionated priority queues defaults.
-impl Default for PriorityQueues {
+impl Default for PriorityWorkers {
     fn default() -> Self {
         Self {
             high: Arc::new(Semaphore::new(DEFAULT_HIGH_QUEUE_SIZE)),
@@ -35,7 +35,7 @@ impl Default for PriorityQueues {
     }
 }
 
-impl PriorityQueues {
+impl PriorityWorkers {
     /// Create new priority queues with configured sizes.
     pub fn new(high: usize, medium: usize, low: usize) -> Self {
         Self {
@@ -76,7 +76,8 @@ impl PriorityQueues {
         self.total_permits_for(priority) - self.available_permits_for(priority)
     }
 
-    /// Spawn the task with given priority.
+    /// Spawn the task with given priority. These tasks are reserved for blocking operations, and
+    /// will be executed on a blocking thread with [`tokio::task::spawn_blocking`].
     pub async fn spawn_with_priority<R, F>(&self, priority: Priority, f: F) -> R
     where
         R: Send + 'static,
@@ -84,10 +85,8 @@ impl PriorityQueues {
     {
         let semaphore = self.semaphore_for(priority);
         let _permit = semaphore.acquire().await;
-        let (tx, rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let _ = tx.send(f());
-        });
-        rx.await.unwrap()
+
+        // Spawn the task on a blocking thread.
+        tokio::task::spawn_blocking(move || f()).await.unwrap()
     }
 }
