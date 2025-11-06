@@ -70,23 +70,8 @@ WITH
         LEFT JOIN bundles AS b USING (double_bundle_hash)
     ),
 
-    -- Combine real receipts with synthetic self-receipts for all bundles.
-    -- This is useful to determine lost bundles, as every bundle should at least have a self-receipt.
-    bundle_receipts_with_self AS (
-        SELECT
-            double_bundle_hash,
-            sent_at,
-            received_at,
-            dst_builder_name,
-            src_builder_name,
-            payload_size,
-            priority,
-            sent_at_second_in_slot,
-            signer_hash
-        FROM bundle_receipts_with_signer
-
-        UNION ALL
-
+    -- Create synthetic self-receipts for each bundle.
+    bundle_receipts_self AS (
         SELECT
             double_bundle_hash,
             received_at AS sent_at, -- self-sent at received_at time
@@ -98,6 +83,16 @@ WITH
             to_time_bucket(received_at) AS sent_at_second_in_slot,
             signer_hash
         FROM bundles b
+    ),
+
+    -- Combine real receipts with synthetic self-receipts for all bundles.
+    -- This is useful to determine lost bundles, as every bundle should at least have a self-receipt.
+    bundle_receipts_with_self AS (
+        SELECT * FROM bundle_receipts_with_signer
+
+        UNION ALL
+
+        SELECT * FROM bundle_receipts_self
     ),
 
     -- Count total number of bundle receipts (scalar).
