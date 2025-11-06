@@ -38,7 +38,7 @@ WITH
             replaceAll(builder_name, '-', '_') AS builder_name,
             received_at
         FROM buildernet.bundles_v2_double_hash_from_date(query_time=t_since_str)
-        WHERE received_at <= t_until AND
+        WHERE t_since <= received_at AND received_at <= t_until AND
             is_region_match(builder_name)
     ),
 
@@ -61,7 +61,7 @@ WITH
             priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM buildernet.bundle_receipts_wo_bundle_hash_from_date(query_time=t_since_str)
-        WHERE received_at <= t_until AND
+        WHERE t_since <= received_at AND received_at <= t_until AND
             is_region_match(src_builder_name) AND is_region_match(dst_builder_name)
     ),
 
