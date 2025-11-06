@@ -134,6 +134,8 @@ WITH
         ORDER BY total_unique_bundles_sent DESC, b.signer_hash, unique_bundles_sent_to_builder DESC
     ),
 
+    -- TODO: make a separate view without distinct double bundle hash so we identify potential spammers.
+
     ------------ BUNDLE VISIBILITY ------------
 
     -- For each bundle, get the list of builders that have seen it, along with their sources.
@@ -188,6 +190,13 @@ WITH
     ),
 
     ------------ LOST BUNDLES QUERIES ---------
+    
+    -- WARN: lost bundles queries within a single region may report incorrect results, due to
+    -- searchers sending to multiple builders in different regions at the same time but being
+    -- colocated with only one of them.
+    -- Example: suppose a searcher in US sends bundle to both a builder in EU and US. Then it might happen
+    -- that a another peer in EU receives the bundle from a US peer first. In that case, we would be counting
+    -- incorrectly a lost receipt.
 
     -- Bundle hashes that have been missed by at least one builder.
     lost_bundles AS (
@@ -233,6 +242,7 @@ WITH
 
     -- Detailed view of lost bundles with metadata from bundle_receipts.
     -- This represents _every_ attempt to send a certain lost bundle from a source to a missing destination.
+    -- TODO: review this since I don't trust INNER JOINs anymore due to cartesian explosion.
     lost_bundles_detailed AS (
         -- 1️⃣ First, gather per-(bundle, source) metadata from bundle_receipts
         WITH bundle_meta AS (
@@ -269,7 +279,7 @@ WITH
                 src_builder_name,
                 dst_builder_name,
                 count() AS missed_bundle_count
-            FROM lost_bundles_detailed
+            FROM lost_bundles_links_flattened
             GROUP BY src_builder_name, dst_builder_name
         )
         SELECT
