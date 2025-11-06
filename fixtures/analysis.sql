@@ -6,8 +6,10 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-11-06 00:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-11-06 00:10:00', 6, 'UTC') AS t_until,
+    '2025-11-02 23:39:00' AS t_since_str,
+    '2025-11-02 23:45:00' AS t_until_str,
+    toDateTime64(t_since_str, 6, 'UTC') AS t_since,
+    toDateTime64(t_until_str, 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -35,8 +37,8 @@ WITH
             hex0x(signer_address) AS signer_hash,
             replaceAll(builder_name, '-', '_') AS builder_name,
             received_at
-        FROM buildernet.bundles_v2_double_hash
-        WHERE received_at >= t_since AND received_at <= t_until AND
+        FROM buildernet.bundles_v2_double_hash_from_date(query_time=t_since_str)
+        WHERE received_at <= t_until AND
             is_region_match(builder_name)
     ),
 
@@ -58,8 +60,8 @@ WITH
             payload_size,
             priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
-        FROM buildernet.bundle_receipts_wo_bundle_hash
-        WHERE sent_at >= t_since AND sent_at <= t_until AND
+        FROM buildernet.bundle_receipts_wo_bundle_hash_from_date(query_time=t_since_str)
+        WHERE received_at <= t_until AND
             is_region_match(src_builder_name) AND is_region_match(dst_builder_name)
     ),
 
