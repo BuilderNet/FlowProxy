@@ -86,7 +86,7 @@ impl PriorityWorkers {
         let _permit = semaphore.acquire().await;
 
         // Spawn the task on a blocking thread.
-        let result = tokio::task::spawn_blocking(move || f()).await.unwrap();
+        let result = tokio::task::spawn_blocking(f).await.unwrap();
         let elapsed = start.elapsed();
         self.metrics.task_durations(priority.as_str()).observe(elapsed.as_secs_f64());
 
