@@ -65,23 +65,6 @@ WITH
             is_region_match(src_builder_name) AND is_region_match(dst_builder_name)
     ),
 
-    -- Join bundle receipts with signer addresses from bundles table.
-    -- TODO: actually use the signer hash field
-    bundle_receipts_with_signer AS (
-        SELECT
-            br.double_bundle_hash,
-            br.sent_at,
-            br.received_at,
-            br.dst_builder_name,
-            br.src_builder_name,
-            br.payload_size,
-            br.priority,
-            br.sent_at_second_in_slot,
-            b.signer_hash
-        FROM bundle_receipts AS br
-        LEFT JOIN bundles AS b USING (double_bundle_hash)
-    ),
-
     -- Create synthetic self-receipts for each bundle.
     bundle_receipts_self AS (
         SELECT
@@ -92,15 +75,14 @@ WITH
             builder_name AS src_builder_name,
             NULL AS payload_size,
             NULL AS priority,
-            to_time_bucket(received_at) AS sent_at_second_in_slot,
-            signer_hash
+            to_time_bucket(received_at) AS sent_at_second_in_slot
         FROM bundles b
     ),
 
     -- Combine real receipts with synthetic self-receipts for all bundles.
     -- This is useful to determine lost bundles, as every bundle should at least have a self-receipt.
     bundle_receipts_with_self AS (
-        SELECT * FROM bundle_receipts_with_signer
+        SELECT * FROM bundle_receipts
 
         UNION ALL
 
