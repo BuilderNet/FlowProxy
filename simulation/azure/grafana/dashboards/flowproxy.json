@@ -18,7 +18,7 @@
     "editable": true,
     "fiscalYearStartMonth": 0,
     "graphTooltip": 1,
-    "id": 1,
+    "id": 0,
     "links": [],
     "panels": [
         {
@@ -101,7 +101,7 @@
                 "type": "prometheus",
                 "uid": "PBFA97CFB590B2093"
             },
-            "description": "Requests per second on the user endpoint, grouped by method type.",
+            "description": "Requests per second on all endpoints, grouped by method type.",
             "fieldConfig": {
                 "defaults": {
                     "color": {
@@ -164,7 +164,7 @@
                             "options": {
                                 "mode": "exclude",
                                 "names": [
-                                    "eth_sendBundle"
+                                    "user eth_sendBundle"
                                 ],
                                 "prefix": "All except:",
                                 "readOnly": true
@@ -208,9 +208,21 @@
                 {
                     "editorMode": "code",
                     "expr": "sum by(method) (rate(flowproxy_ingress_rpc_request_duration_count{instance=\"$Instance\", handler=\"user\"}[$__rate_interval]))",
-                    "legendFormat": "__auto",
+                    "legendFormat": "user {{method}}",
                     "range": true,
                     "refId": "A"
+                },
+                {
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "PBFA97CFB590B2093"
+                    },
+                    "editorMode": "code",
+                    "expr": "sum by(method) (rate(flowproxy_ingress_rpc_request_duration_count{instance=\"$Instance\", handler=\"system\"}[$__rate_interval]))",
+                    "hide": false,
+                    "legendFormat": "system {{method}}",
+                    "range": true,
+                    "refId": "B"
                 }
             ],
             "title": "User RPS",
@@ -1604,7 +1616,41 @@
             "fieldConfig": {
                 "defaults": {
                     "color": {
-                        "mode": "thresholds"
+                        "mode": "palette-classic"
+                    },
+                    "custom": {
+                        "axisBorderShow": false,
+                        "axisCenteredZero": false,
+                        "axisColorMode": "text",
+                        "axisLabel": "",
+                        "axisPlacement": "auto",
+                        "barAlignment": 0,
+                        "barWidthFactor": 0.6,
+                        "drawStyle": "line",
+                        "fillOpacity": 19,
+                        "gradientMode": "hue",
+                        "hideFrom": {
+                            "legend": false,
+                            "tooltip": false,
+                            "viz": false
+                        },
+                        "insertNulls": false,
+                        "lineInterpolation": "smooth",
+                        "lineWidth": 1,
+                        "pointSize": 5,
+                        "scaleDistribution": {
+                            "type": "linear"
+                        },
+                        "showPoints": "auto",
+                        "showValues": false,
+                        "spanNulls": false,
+                        "stacking": {
+                            "group": "A",
+                            "mode": "none"
+                        },
+                        "thresholdsStyle": {
+                            "mode": "off"
+                        }
                     },
                     "mappings": [],
                     "thresholds": {
@@ -1632,34 +1678,30 @@
             },
             "id": 24,
             "options": {
-                "colorMode": "value",
-                "graphMode": "area",
-                "justifyMode": "auto",
-                "orientation": "auto",
-                "percentChangeColorMode": "standard",
-                "reduceOptions": {
-                    "calcs": [
-                        "lastNotNull"
-                    ],
-                    "fields": "",
-                    "values": false
+                "legend": {
+                    "calcs": [],
+                    "displayMode": "list",
+                    "placement": "bottom",
+                    "showLegend": true
                 },
-                "showPercentChange": false,
-                "textMode": "auto",
-                "wideLayout": true
+                "tooltip": {
+                    "hideZeros": false,
+                    "mode": "single",
+                    "sort": "none"
+                }
             },
             "pluginVersion": "12.2.1",
             "targets": [
                 {
                     "editorMode": "builder",
                     "expr": "flowproxy_process_cpu_usage{instance=\"$Instance\"}",
-                    "legendFormat": "__auto",
+                    "legendFormat": "cpu",
                     "range": true,
                     "refId": "A"
                 }
             ],
             "title": "CPU usage",
-            "type": "stat"
+            "type": "timeseries"
         },
         {
             "datasource": {
@@ -1838,12 +1880,12 @@
                     "text": "flowproxy-westeurope",
                     "value": "flowproxy-westeurope"
                 },
-                "definition": "label_values({order=\"bundle\"},instance)",
+                "definition": "label_values({method=\"eth_sendBundle\"},instance)",
                 "name": "Instance",
                 "options": [],
                 "query": {
                     "qryType": 1,
-                    "query": "label_values({order=\"bundle\"},instance)",
+                    "query": "label_values({method=\"eth_sendBundle\"},instance)",
                     "refId": "PrometheusVariableQueryEditor-VariableQuery"
                 },
                 "refresh": 1,
@@ -1858,7 +1900,7 @@
     },
     "timepicker": {},
     "timezone": "browser",
-    "title": "FlowProxy",
-    "uid": "adz8rd4",
-    "version": 1
+    "title": "FlowProxy Copy",
+    "uid": "adfhhdm",
+    "version": 5
 }
