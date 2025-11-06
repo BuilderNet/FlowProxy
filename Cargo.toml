@@ -128,6 +128,8 @@ harness = false
 default = ["jemalloc"]
 # Enable jemalloc as the global allocator
 jemalloc = ["dep:tikv-jemallocator"]
+# Enable jemalloc with unprefixed malloc (recommended for reproducible builds)
+jemalloc-unprefixed = ["jemalloc", "tikv-jemallocator/unprefixed_malloc_on_supported_platforms"]
 
 # Speed up compilation time for dev builds by reducing emitted debug info.
 # NOTE: Debuggers may provide less useful information with this setting.

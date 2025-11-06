@@ -8,26 +8,77 @@ on:
 jobs:
   build:
     name: build reproducible binaries
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            machine: machine-1
+          - runner: ubuntu-22.04
+            machine: machine-2
     steps:
       - uses: actions/checkout@v5
-      - uses: rui314/setup-mold@v1
-      - uses: extractions/setup-just@v3
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build reproducible binary with Docker
+        run: |
+          docker build -f Dockerfile.reproducible -t flowproxy:reproducible .
+      - name: Extract binary from Docker image
+        run: |
+          # Create a temporary container and copy the binary
+          docker create --name temp-container flowproxy:reproducible
+          docker cp temp-container:/flowproxy ./flowproxy
+          docker rm temp-container
+      - name: Calculate SHA256
+        id: sha256
+        run: |
+          sha256sum flowproxy > flowproxy.sha256
+          echo "hash=$(cat flowproxy.sha256 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "Binary SHA256 on ${{ matrix.machine }}: $(cat flowproxy.sha256)"
+      - name: Upload the hash
+        uses: actions/upload-artifact@v4
         with:
-          target: x86_64-unknown-linux-gnu
-      - name: Install cargo-cache
+          name: flowproxy-${{ matrix.machine }}
+          path: |
+            flowproxy.sha256
+          retention-days: 1
+
+  compare:
+    name: compare reproducible binaries
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts from machine-1
+        uses: actions/download-artifact@v4
+        with:
+          name: flowproxy-machine-1
+          path: machine-1/
+      - name: Download artifacts from machine-2
+        uses: actions/download-artifact@v4
+        with:
+          name: flowproxy-machine-2
+          path: machine-2/
+      - name: Compare SHA256 hashes
         run: |
-          cargo install cargo-cache
-      - name: Build reproducible binary
-        run: |
-          just build-reproducible
-          mv target/x86_64-unknown-linux-gnu/reproducible/flowproxy flowproxy-1
-      - name: Clean cache
-        run: cargo clean && cargo cache -a
-      - name: Build reproducible binary again
-        run: |
-          just build-reproducible
-          mv target/x86_64-unknown-linux-gnu/reproducible/flowproxy flowproxy-2
-      - name: Compare binaries
-        run: cmp flowproxy-1 flowproxy-2
+          echo "=== SHA256 Comparison ==="
+          echo "Machine 1 hash:"
+          cat machine-1/flowproxy.sha256
+          echo "Machine 2 hash:"
+          cat machine-2/flowproxy.sha256
+
+          HASH1=$(cat machine-1/flowproxy.sha256 | cut -d' ' -f1)
+          HASH2=$(cat machine-2/flowproxy.sha256 | cut -d' ' -f1)
+
+          echo "Extracted hashes:"
+          echo "Machine 1: $HASH1"
+          echo "Machine 2: $HASH2"
+
+          if [ "$HASH1" = "$HASH2" ]; then
+            echo "✅ SUCCESS: Binaries are identical (reproducible build verified)"
+            echo "SHA256: $HASH1"
+          else
+            echo "❌ FAILURE: Binaries differ (reproducible build failed)"
+            echo "Machine 1 SHA256: $HASH1"
+            echo "Machine 2 SHA256: $HASH2"
+            exit 1
+          fi
