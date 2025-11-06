@@ -198,9 +198,7 @@ pub mod limit {
                 );
             }
 
-            HTTP_METRICS
-                .open_http_connections(self.id.clone())
-                .set(self.current_connections() as i64);
+            HTTP_METRICS.open_http_connections(self.id.clone()).set(self.current_connections());
 
             // Once we've acquired a permit (or if we already had one), poll the
             // inner service.

@@ -56,12 +56,12 @@ impl rbuilder_utils::clickhouse::backup::metrics::Metrics for MetricsWrapper {
     }
 
     fn set_queue_size(size: usize, order: &'static str) {
-        CLICKHOUSE_METRICS.queue_len(order).set(size as i64);
+        CLICKHOUSE_METRICS.queue_len(order).set(size);
     }
 
     fn set_disk_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        CLICKHOUSE_METRICS.backup_size_bytes(order, "disk").set(size_bytes as i64);
-        CLICKHOUSE_METRICS.backup_size_batches(order, "disk").set(batches as i64);
+        CLICKHOUSE_METRICS.backup_size_bytes(order, "disk").set(size_bytes);
+        CLICKHOUSE_METRICS.backup_size_batches(order, "disk").set(batches);
     }
 
     fn increment_backup_disk_errors(order: &'static str, error: &str) {
@@ -69,8 +69,8 @@ impl rbuilder_utils::clickhouse::backup::metrics::Metrics for MetricsWrapper {
     }
 
     fn set_memory_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
-        CLICKHOUSE_METRICS.backup_size_bytes(order, "memory").set(size_bytes as i64);
-        CLICKHOUSE_METRICS.backup_size_batches(order, "memory").set(batches as i64);
+        CLICKHOUSE_METRICS.backup_size_bytes(order, "memory").set(size_bytes);
+        CLICKHOUSE_METRICS.backup_size_batches(order, "memory").set(batches);
     }
 
     fn process_backup_data_lost_quantities(quantities: &Quantities) {

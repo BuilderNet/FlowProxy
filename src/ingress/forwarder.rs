@@ -537,7 +537,7 @@ impl Future for HttpForwarder {
                 let fut = this.send_http_request(request);
                 this.pending.push(fut);
 
-                this.metrics.inflight_requests().set(this.pending.len() as i64);
+                this.metrics.inflight_requests().set(this.pending.len());
                 continue;
             }
 
