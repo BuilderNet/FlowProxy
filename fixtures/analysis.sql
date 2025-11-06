@@ -6,8 +6,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    toDateTime64('2025-11-04 12:00:00', 6, 'UTC') AS t_since,
-    toDateTime64('2025-11-04 12:10:00', 6, 'UTC') AS t_until,
+    toDateTime64('2025-11-06 00:00:00', 6, 'UTC') AS t_since,
+    toDateTime64('2025-11-06 00:10:00', 6, 'UTC') AS t_until,
 
     -- Slot time for reference. `base_offset` is just an old slot to compute offsets from.
     12 as slot_time,
@@ -30,6 +30,13 @@ WITH
         FROM buildernet.bundles_v2_double_hash
         WHERE received_at >= t_since AND received_at <= t_until
     ),
+
+    -- Count total number of unique bundles (scalar).
+    bundles_unique_count AS (
+        SELECT count(DISTINCT double_bundle_hash) AS count FROM bundles
+    ),
+
+    ------------ BUNDLE RECEIPTS QUERIES ------------
 
     -- Get bundle receipts within the specified time window.
     bundle_receipts AS (
@@ -109,6 +116,33 @@ WITH
     -- Count total number of unique builders (scalar).
     builders_count AS (
         SELECT length(dsts) AS total_builders FROM builders
+    ),
+
+    ------------ SIGNER QUERIES ----------------
+    
+    -- Rank signers by the number of unique bundles they have signed.
+    signer_rank AS (
+        SELECT
+            signer_hash,
+            countDistinct(double_bundle_hash) AS unique_bundles,
+            concat(toString(round(100 * unique_bundles / (SELECT count FROM bundles_unique_count), 2)), '%') AS percent_of_total_unique_bundles
+        FROM bundles
+        GROUP BY signer_hash
+        ORDER BY unique_bundles DESC
+    ),
+
+    -- Rank signers unique bundles they have signed, and show distribution across builders.
+    signer_distribution AS (
+        SELECT
+            signer_hash,
+            b.builder_name as builder_name,
+            countDistinct(b.double_bundle_hash) AS unique_bundles_sent_to_builder,
+            sr.unique_bundles AS total_unique_bundles_sent,
+            concat(toString(round(100 * unique_bundles_sent_to_builder / total_unique_bundles_sent, 2)), '%') AS percent_of_unique_bundles_sent_to_builder
+        FROM bundles AS b
+        INNER JOIN signer_rank AS sr USING (signer_hash)
+        GROUP BY signer_hash, builder_name, total_unique_bundles_sent
+        ORDER BY total_unique_bundles_sent DESC, b.signer_hash, unique_bundles_sent_to_builder DESC
     ),
 
     ------------ BUNDLE VISIBILITY ------------
