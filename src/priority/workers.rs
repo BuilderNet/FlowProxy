@@ -1,5 +1,7 @@
+use crate::metrics::WorkerMetrics;
+
 use super::Priority;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tokio::sync::Semaphore;
 
 const DEFAULT_HIGH_QUEUE_SIZE: usize = Semaphore::MAX_PERMITS;
@@ -19,19 +21,14 @@ pub struct PriorityWorkers {
     /// Permits for [`Priority::Low`].
     low: Arc<Semaphore>,
     low_size: usize,
+    /// Metrics for the priority workers.
+    metrics: WorkerMetrics,
 }
 
 /// Opinionated priority queues defaults.
 impl Default for PriorityWorkers {
     fn default() -> Self {
-        Self {
-            high: Arc::new(Semaphore::new(DEFAULT_HIGH_QUEUE_SIZE)),
-            high_size: DEFAULT_HIGH_QUEUE_SIZE,
-            medium: Arc::new(Semaphore::new(DEFAULT_MEDIUM_QUEUE_SIZE)),
-            medium_size: DEFAULT_MEDIUM_QUEUE_SIZE,
-            low: Arc::new(Semaphore::new(DEFAULT_LOW_QUEUE_SIZE)),
-            low_size: DEFAULT_LOW_QUEUE_SIZE,
-        }
+        Self::new(DEFAULT_HIGH_QUEUE_SIZE, DEFAULT_MEDIUM_QUEUE_SIZE, DEFAULT_LOW_QUEUE_SIZE)
     }
 }
 
@@ -45,6 +42,7 @@ impl PriorityWorkers {
             medium_size: medium,
             low: Arc::new(Semaphore::new(low)),
             low_size: low,
+            metrics: WorkerMetrics::default(),
         }
     }
 
@@ -83,10 +81,15 @@ impl PriorityWorkers {
         R: Send + 'static,
         F: FnOnce() -> R + Send + 'static,
     {
+        let start = Instant::now();
         let semaphore = self.semaphore_for(priority);
         let _permit = semaphore.acquire().await;
 
         // Spawn the task on a blocking thread.
-        tokio::task::spawn_blocking(move || f()).await.unwrap()
+        let result = tokio::task::spawn_blocking(move || f()).await.unwrap();
+        let elapsed = start.elapsed();
+        self.metrics.task_durations(priority.as_str()).observe(elapsed.as_secs_f64());
+
+        result
     }
 }

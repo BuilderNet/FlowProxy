@@ -16,7 +16,7 @@ use crate::{
         EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleDecoder,
         SystemBundleMetadata, SystemMevShareBundle, SystemTransaction, UtcInstant,
     },
-    priority::{pqueue::PriorityWorkers, Priority},
+    priority::{workers::PriorityWorkers, Priority},
     rate_limit::CounterOverTime,
     utils::{short_uuid_v4, UtcDateTimeHeader as _},
     validation::validate_transaction,

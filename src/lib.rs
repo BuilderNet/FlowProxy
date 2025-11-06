@@ -162,7 +162,7 @@ pub async fn run_with_listeners(
         IngressForwarders::new(local_sender, peers, orderflow_signer)
     } else {
         // No builder URL provided, so mock local forwarder.
-        let (local_sender, _) = priority::pchannel::unbounded_channel();
+        let (local_sender, _) = priority::channel::unbounded_channel();
         IngressForwarders::new(local_sender, peers, orderflow_signer)
     };
 

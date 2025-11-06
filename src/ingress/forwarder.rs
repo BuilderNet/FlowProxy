@@ -10,7 +10,7 @@ use crate::{
         EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithEncoding,
     },
-    priority::{pchannel, Priority},
+    priority::{channel, Priority},
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::{Address, B256};
@@ -41,7 +41,7 @@ pub struct IngressForwarders {
     /// The orderflow signer.
     signer: PrivateKeySigner,
     /// The sender to the local builder forwarder.
-    local: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
+    local: channel::UnboundedSender<Arc<ForwardingRequest>>,
     /// The senders to peer ingresses. Continuously updated from builderhub configuration.
     peers: Arc<DashMap<String, PeerHandle>>,
 }
@@ -49,7 +49,7 @@ pub struct IngressForwarders {
 impl IngressForwarders {
     /// Create new ingress forwards.
     pub fn new(
-        local: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
+        local: channel::UnboundedSender<Arc<ForwardingRequest>>,
         peers: Arc<DashMap<String, PeerHandle>>,
         signer: PrivateKeySigner,
     ) -> Self {
@@ -174,7 +174,7 @@ pub struct PeerHandle {
     /// Peer info.
     pub info: builderhub::Peer,
     /// Sender to the peer forwarder.
-    pub sender: pchannel::UnboundedSender<Arc<ForwardingRequest>>,
+    pub sender: channel::UnboundedSender<Arc<ForwardingRequest>>,
 }
 
 pub fn spawn_forwarder(
@@ -182,8 +182,8 @@ pub fn spawn_forwarder(
     url: String,
     client: reqwest::Client, // request client to be reused for http senders
     task_executor: &TaskExecutor,
-) -> eyre::Result<pchannel::UnboundedSender<Arc<ForwardingRequest>>> {
-    let (request_tx, request_rx) = pchannel::unbounded_channel();
+) -> eyre::Result<channel::UnboundedSender<Arc<ForwardingRequest>>> {
+    let (request_tx, request_rx) = channel::unbounded_channel();
     match Url::parse(&url)?.scheme() {
         "http" | "https" => {
             info!(%name, %url, "Spawning HTTP forwarder");
@@ -358,7 +358,7 @@ struct HttpForwarder {
     /// The URL of the peer.
     peer_url: String,
     /// The receiver of forwarding requests.
-    request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
+    request_rx: channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The sender to decode [`reqwest::Response`] errors.
     error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
     /// The pending responses that need to be processed.
@@ -372,7 +372,7 @@ impl HttpForwarder {
         client: reqwest::Client,
         name: String,
         url: String,
-        request_rx: pchannel::UnboundedReceiver<Arc<ForwardingRequest>>,
+        request_rx: channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> (Self, ResponseErrorDecoder) {
         let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
         let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
