@@ -174,7 +174,7 @@ WITH
             srd.total_bundles_sent AS total_bundles_sent,
             srd.percent_duplicates_sent AS percent_duplicates_sent
         FROM signer_rank AS sr
-        LEFT SEMI JOIN signer_rank_duplicates AS srd USING (signer_hash)
+        INNER JOIN signer_rank_duplicates AS srd USING (signer_hash)
         ORDER BY sr.unique_bundles DESC
     ),
 
@@ -198,7 +198,7 @@ WITH
             sr.unique_bundles AS total_unique_bundles_sent,
             concat(toString(round(100 * sdr.unique_bundles_sent_to_builder / sr.unique_bundles, 2)), '%') AS percent_of_unique_bundles_sent_to_builder
         FROM signer_distribution_raw AS sdr
-        LEFT SEMI JOIN signer_rank AS sr USING (signer_hash)
+        INNER JOIN signer_rank AS sr USING (signer_hash)
         ORDER BY sr.unique_bundles DESC, sdr.signer_hash, sdr.unique_bundles_sent_to_builder DESC
     ),
 
@@ -319,7 +319,16 @@ WITH
             brsa.priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM lost_bundles_links_flattened AS lbd
-        LEFT SEMI JOIN bundle_receipts_send_attempts brsa USING (double_bundle_hash, src_builder_name)
+        LEFT JOIN bundle_receipts_send_attempts brsa USING (double_bundle_hash, src_builder_name)
+    ),
+
+    -- Aggregate lost bundles over slot seconds.
+    lost_bundles_over_slot AS (
+        SELECT
+            sent_at_second_in_slot,
+            count() AS lost_bundles
+        FROM lost_bundles_detailed
+        GROUP BY sent_at_second_in_slot
     ),
 
     -- Count lost bundles between each source-destination builder pair.
@@ -337,11 +346,12 @@ WITH
         SELECT
             l.src_builder_name AS src_builder_name,
             l.dst_builder_name AS dst_builder_name,
-            missed_bundle_count,
+            l.missed_bundle_count AS missed_bundle_count,
             (bobl.occurrences + missed_bundle_count) AS expected_bundles_sent_between_link,
             concat(toString(round(100 * missed_bundle_count / expected_bundles_sent_between_link, 2)), '%') AS percent_of_total_bundles
         FROM lost_bundles_between_link_count AS l
-        LEFT SEMI JOIN bundle_occurrences_by_link bobl USING (src_builder_name, dst_builder_name)
+        -- LEFT JOIN because we want to include links that have only lost bundles and no successful receipts.
+        LEFT JOIN bundle_occurrences_by_link bobl USING (src_builder_name, dst_builder_name)
         ORDER BY missed_bundle_count DESC
     ),
 
@@ -386,15 +396,6 @@ WITH
         GROUP BY sent_at_second_in_slot
     ),
 
-    -- Aggregate lost bundles over slot seconds.
-    lost_bundles_over_slot AS (
-        SELECT
-            sent_at_second_in_slot,
-            count() AS lost_bundles
-        FROM lost_bundles_detailed
-        GROUP BY sent_at_second_in_slot
-    ),
-
     -- Combine lost bundles with total receipts to get percentage lost over slot seconds.
     lost_bundles_over_slot_percentage AS (
         SELECT
@@ -403,7 +404,7 @@ WITH
             breos.total_receipts,
             concat(toString(round(100 * lbsos.lost_bundles / breos.total_receipts, 2)), '%') AS percent_lost_bundles
         FROM lost_bundles_over_slot AS lbsos
-        INNER JOIN bundle_receipts_extended_over_slot AS breos
+        LEFT JOIN bundle_receipts_extended_over_slot AS breos
             USING (sent_at_second_in_slot)
     ),
 
@@ -411,7 +412,6 @@ WITH
 
     -- Should match
     lost_bundles_detailed_count AS (SELECT count() FROM lost_bundles_detailed),
-    -- lost_bundles_by_builder_count_summary_count AS (SELECT sum(observations * missed_builders) FROM lost_bundles_by_builder_count_summary),
     lost_bundles_by_link_count AS (SELECT sum(missed_bundle_count) FROM lost_bundles_by_link),
     lost_bundles_over_slot_count AS (SELECT sum(lost_bundles) FROM lost_bundles_over_slot),
 
