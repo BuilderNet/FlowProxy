@@ -158,26 +158,33 @@ WITH
             srd.total_bundles_sent AS total_bundles_sent,
             srd.percent_duplicates_sent AS percent_duplicates_sent
         FROM signer_rank AS sr
-        LEFT JOIN signer_rank_duplicates AS srd USING (signer_hash)
+        LEFT SEMI JOIN signer_rank_duplicates AS srd USING (signer_hash)
         ORDER BY sr.unique_bundles DESC
     ),
-
-    -- Rank signers unique bundles they have signed, and show distribution across builders.
-    signer_distribution AS (
+    
+    -- For each signer, get the distribution of unique bundles sent to each builder.
+    signer_distribution_raw AS (
         SELECT
             signer_hash,
-            b.builder_name as builder_name,
-            countDistinct(b.double_bundle_hash) AS unique_bundles_sent_to_builder,
-            sr.unique_bundles AS total_unique_bundles_sent,
-            concat(toString(round(100 * unique_bundles_sent_to_builder / total_unique_bundles_sent, 2)), '%') AS percent_of_unique_bundles_sent_to_builder
-        FROM bundles AS b
-        -- NOTE: this join is safe from cartesian explosion since signer_rank has one row per signer_hash.
-        INNER JOIN signer_rank AS sr USING (signer_hash)
-        GROUP BY signer_hash, builder_name, total_unique_bundles_sent
-        ORDER BY total_unique_bundles_sent DESC, b.signer_hash, unique_bundles_sent_to_builder DESC
+            builder_name,
+            countDistinct(double_bundle_hash) AS unique_bundles_sent_to_builder
+        FROM bundles
+        GROUP BY signer_hash, builder_name
     ),
 
-    -- TODO: make a separate view without distinct double bundle hash so we identify potential spammers.
+    -- Rank signer by unique bundles they have signed, and show distribution across builders.
+    -- Useful to understand signer preferences of builders.
+    signer_distribution AS (
+        SELECT
+            sdr.signer_hash,
+            sdr.builder_name,
+            sdr.unique_bundles_sent_to_builder,
+            sr.unique_bundles AS total_unique_bundles_sent,
+            concat(toString(round(100 * sdr.unique_bundles_sent_to_builder / sr.unique_bundles, 2)), '%') AS percent_of_unique_bundles_sent_to_builder
+        FROM signer_distribution_raw AS sdr
+        LEFT SEMI JOIN signer_rank AS sr USING (signer_hash)
+        ORDER BY sr.unique_bundles DESC, sdr.signer_hash, sdr.unique_bundles_sent_to_builder DESC
+    ),
 
     ------------ BUNDLE VISIBILITY ------------
 
@@ -285,7 +292,6 @@ WITH
 
     -- Detailed view of lost bundles with metadata from bundle_receipts.
     -- This represents _every_ attempt to send a certain lost bundle from a source to a missing destination.
-    -- TODO: review this since I don't trust INNER JOINs anymore due to cartesian explosion.
     lost_bundles_detailed AS (
         -- 1️⃣ First, gather per-(bundle, source) metadata from bundle_receipts
         WITH bundle_meta AS (
