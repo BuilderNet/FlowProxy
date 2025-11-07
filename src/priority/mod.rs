@@ -1,7 +1,7 @@
 use strum_macros::{Display, EnumString};
 
-pub mod pchannel;
-pub mod pqueue;
+pub mod channel;
+pub mod workers;
 
 /// Bundle processing priority.
 #[derive(PartialEq, Eq, Clone, Copy, Default, Debug, Display, EnumString)]

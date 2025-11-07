@@ -1,7 +1,21 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      draft-release:
+        default: false
+        description: "Draft Release"
+        required: false
+        type: boolean
+      build-binary:
+        default: true
+        description: "Build Binary"
+        required: false
+        type: boolean
 
 jobs:
   extract-version:
@@ -34,17 +48,74 @@ jobs:
   build:
     name: Build binary
     needs: extract-version
+    if: ${{ github.event.inputs.build-binary == 'true' || github.event_name == 'push'}} # when manually triggered or version tagged
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: rui314/setup-mold@v1
-      - uses: extractions/setup-just@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build reproducible binary
-        run: just build-reproducible
+      - name: Build reproducible binary with Docker
+        run: |
+          docker build -f Dockerfile.reproducible -t flowproxy:release .
+
+      - name: Extract binary from Docker image
+        run: |
+          # Create a temporary container and copy the binary
+          docker create --name temp-container flowproxy:release
+          docker cp temp-container:/flowproxy ./flowproxy
+          docker rm temp-container
+
+      - name: Calculate SHA256
+        id: sha256
+        run: |
+          sha256sum flowproxy > flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256
+          echo "hash=$(cat flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "Binary SHA256: $(cat flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256)"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: flowproxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
-          path: target/x86_64-unknown-linux-gnu/reproducible/flowproxy
+          path: |
+            flowproxy
+            flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256
+
+  draft-release:
+    name: Draft release
+    if: ${{ github.event.inputs.draft-release == 'true' || github.event_name == 'push'}} # when manually triggered or version tagged
+    needs: [extract-version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.extract-version.outputs.VERSION }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+      - name: Record artifacts checksums
+        working-directory: artifacts
+        run: |
+          find ./ || true
+          for file in *; do sha256sum "$file" >> sha256sums.txt; done;
+          cat sha256sums.txt
+      - name: Create release draft
+        uses: softprops/action-gh-release@v2.0.5
+        id: create-release-draft
+        with:
+          draft: true
+          files: artifacts/*
+          generate_release_notes: true
+          name: ${{ env.VERSION }}
+          tag_name: ${{ env.VERSION }}
+      - name: Release URL
+        run: |
+          echo "### Release created: ${{ steps.create-release-draft.outputs.url }}" >> $GITHUB_STEP_SUMMARY
