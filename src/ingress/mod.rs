@@ -156,7 +156,14 @@ impl OrderflowIngress {
         };
 
         // NOTE: Signature is mandatory
-        let Some(signer) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) else {
+        let body_clone = body.clone();
+        let Some(signer) = ingress
+            .pqueues
+            .spawn_with_priority(Priority::Medium, move || {
+                maybe_verify_signature(&headers, &body_clone, USE_LEGACY_SIGNATURE)
+            })
+            .await
+        else {
             tracing::trace!("failed to verify signature");
             return JsonRpcResponse::error(Value::Null, JsonRpcError::InvalidSignature);
         };
@@ -339,7 +346,15 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
+            let body_clone = body.clone();
+            let headers_clone = headers.clone();
+            if let Some(address) = ingress
+                .pqueues
+                .spawn_with_priority(Priority::Medium, move || {
+                    maybe_verify_signature(&headers_clone, &body_clone, USE_LEGACY_SIGNATURE)
+                })
+                .await
+            {
                 if ingress.flashbots_signer.is_some_and(|addr| addr == address) {
                     break 'peer "flashbots".to_string();
                 }
@@ -880,15 +895,15 @@ pub fn maybe_decompress(
     gzip_enabled: bool,
     headers: &HeaderMap,
     body: axum::body::Bytes,
-) -> Result<Vec<u8>, JsonRpcError> {
+) -> Result<Bytes, JsonRpcError> {
     if gzip_enabled && headers.get(header::CONTENT_ENCODING).is_some_and(|enc| enc == "gzip") {
         let mut decompressed = Vec::new();
         GzDecoder::new(&body[..])
             .read_to_end(&mut decompressed)
             .map_err(|_| JsonRpcError::ParseError)?;
-        Ok(decompressed)
+        Ok(decompressed.into())
     } else {
-        Ok(body.to_vec())
+        Ok(body.into())
     }
 }
 
