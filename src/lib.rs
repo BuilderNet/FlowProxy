@@ -6,6 +6,7 @@ use crate::{
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
+    priority::workers::PriorityWorkers,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
 };
@@ -182,7 +183,8 @@ pub async fn run_with_listeners(
         system_bundle_decoder: SystemBundleDecoder { max_txs_per_bundle: args.max_txs_per_bundle },
         spam_thresholds: SpamThresholds::default(),
         flashbots_signer: args.flashbots_signer,
-        pqueues: Default::default(),
+        // TODO: Configurable amount of threads.
+        pqueues: PriorityWorkers::default(),
         entities: DashMap::default(),
         order_cache,
         signer_cache,

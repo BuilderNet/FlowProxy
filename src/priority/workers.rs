@@ -1,8 +1,9 @@
 use crate::metrics::WorkerMetrics;
 
 use super::Priority;
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::{sync::Arc, time::Instant};
-use tokio::sync::Semaphore;
+use tokio::sync::{oneshot, Semaphore};
 
 const DEFAULT_HIGH_QUEUE_SIZE: usize = Semaphore::MAX_PERMITS;
 const DEFAULT_MEDIUM_QUEUE_SIZE: usize = 50_000;
@@ -23,18 +24,35 @@ pub struct PriorityWorkers {
     low_size: usize,
     /// Metrics for the priority workers.
     metrics: WorkerMetrics,
+    /// Thread pool for the worker tasks.
+    pool: Arc<ThreadPool>,
 }
 
 /// Opinionated priority queues defaults.
 impl Default for PriorityWorkers {
     fn default() -> Self {
-        Self::new(DEFAULT_HIGH_QUEUE_SIZE, DEFAULT_MEDIUM_QUEUE_SIZE, DEFAULT_LOW_QUEUE_SIZE)
+        Self::new(
+            DEFAULT_HIGH_QUEUE_SIZE,
+            DEFAULT_MEDIUM_QUEUE_SIZE,
+            DEFAULT_LOW_QUEUE_SIZE,
+            // NOTE: This is the default used by Rayon too (unless changed by `RAYON_` environment
+            // variables)
+            std::thread::available_parallelism().unwrap().get(),
+        )
     }
 }
 
 impl PriorityWorkers {
     /// Create new priority queues with configured sizes.
-    pub fn new(high: usize, medium: usize, low: usize) -> Self {
+    pub fn new(high: usize, medium: usize, low: usize, worker_threads: usize) -> Self {
+        let pool = ThreadPoolBuilder::new()
+            .num_threads(worker_threads)
+            .thread_name(|index| format!("priority-worker-{}", index))
+            .build()
+            .expect("failed to create Rayon thread pool");
+
+        tracing::info!(threads = worker_threads, "created Rayon thread pool");
+
         Self {
             high: Arc::new(Semaphore::new(high)),
             high_size: high,
@@ -43,7 +61,17 @@ impl PriorityWorkers {
             low: Arc::new(Semaphore::new(low)),
             low_size: low,
             metrics: WorkerMetrics::default(),
+            pool: Arc::new(pool),
         }
+    }
+
+    pub fn new_with_threads(worker_threads: usize) -> Self {
+        Self::new(
+            DEFAULT_HIGH_QUEUE_SIZE,
+            DEFAULT_MEDIUM_QUEUE_SIZE,
+            DEFAULT_LOW_QUEUE_SIZE,
+            worker_threads,
+        )
     }
 
     /// Return priority queue for the given priority.
@@ -83,10 +111,17 @@ impl PriorityWorkers {
     {
         let start = Instant::now();
         let semaphore = self.semaphore_for(priority);
+        let (tx, rx) = oneshot::channel();
         let _permit = semaphore.acquire().await;
 
-        // Spawn the task on a blocking thread.
-        let result = tokio::task::spawn_blocking(f).await.unwrap();
+        // Spawn the task on a Rayon thread.
+        self.pool.spawn(|| {
+            let result = f();
+            let _ = tx.send(result);
+        });
+
+        let result = rx.await.expect("failed to receive result from worker task");
+
         let elapsed = start.elapsed();
         self.metrics.task_durations(priority.as_str()).observe(elapsed.as_secs_f64());
 
