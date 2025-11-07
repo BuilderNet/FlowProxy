@@ -96,8 +96,8 @@ WITH
             double_bundle_hash,
             src_builder_name,
             -- Every sent_at time for this (bundle, source) pair represents an attempt.
-            groupUniqArray(sent_at) AS sent_ats,       
-            -- In case of self-receipts, these two fields will be NULL, but we assume they are consistent across other receipts, 
+            groupUniqArray(sent_at) AS sent_ats,
+            -- In case of self-receipts, these two fields will be NULL, but we assume they are consistent across other receipts,
             -- when available.
             anyIf(payload_size, payload_size IS NOT NULL) AS payload_size,
             anyIf(priority, priority IS NOT NULL) AS priority
@@ -124,7 +124,7 @@ WITH
     ),
 
     ------------ SIGNER QUERIES ----------------
-    
+
     -- Rank signers by the number of unique bundles they have signed.
     signer_rank AS (
         SELECT
@@ -177,7 +177,7 @@ WITH
         LEFT SEMI JOIN signer_rank_duplicates AS srd USING (signer_hash)
         ORDER BY sr.unique_bundles DESC
     ),
-    
+
     -- For each signer, get the distribution of unique bundles sent to each builder.
     signer_distribution_raw AS (
         SELECT
@@ -256,7 +256,7 @@ WITH
     ),
 
     ------------ LOST BUNDLES QUERIES ---------
-    
+
     -- WARN: lost bundles queries within a single region may report incorrect results, due to
     -- searchers sending to multiple builders in different regions at the same time but being
     -- colocated with only one of them.
@@ -376,7 +376,7 @@ WITH
             1 AS is_lost
         FROM lost_bundles_detailed
     ),
-    
+
     -- Aggregate extended receipts over slot seconds.
     bundle_receipts_extended_over_slot AS (
         SELECT
