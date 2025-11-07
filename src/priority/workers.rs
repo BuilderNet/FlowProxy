@@ -11,7 +11,7 @@ const DEFAULT_LOW_QUEUE_SIZE: usize = 5_000;
 
 /// Priority level permits for processing and validating user requests.
 /// See [`Priority`] for details.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PriorityWorkers {
     /// Permits for [`Priority::High`].
     high: Arc<Semaphore>,

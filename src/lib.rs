@@ -150,6 +150,9 @@ pub async fn run_with_listeners(
         ctx.task_executor.spawn_critical("local_update_peers", peer_updater.run());
     }
 
+    // TODO: Make this configurable.
+    let workers = PriorityWorkers::new_with_threads(2);
+
     // Spawn forwarders
     let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
     let forwarders = if let Some(ref builder_url) = builder_url {
@@ -160,11 +163,11 @@ pub async fn run_with_listeners(
             &ctx.task_executor,
         )?;
 
-        IngressForwarders::new(local_sender, peers, orderflow_signer)
+        IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
     } else {
         // No builder URL provided, so mock local forwarder.
         let (local_sender, _) = priority::channel::unbounded_channel();
-        IngressForwarders::new(local_sender, peers, orderflow_signer)
+        IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
     };
 
     let builder_ready_endpoint =
@@ -183,8 +186,7 @@ pub async fn run_with_listeners(
         system_bundle_decoder: SystemBundleDecoder { max_txs_per_bundle: args.max_txs_per_bundle },
         spam_thresholds: SpamThresholds::default(),
         flashbots_signer: args.flashbots_signer,
-        // TODO: Configurable amount of threads.
-        pqueues: PriorityWorkers::new_with_threads(2),
+        pqueues: workers,
         entities: DashMap::default(),
         order_cache,
         signer_cache,

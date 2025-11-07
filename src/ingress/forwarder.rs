@@ -10,7 +10,7 @@ use crate::{
         EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithEncoding,
     },
-    priority::{channel, Priority},
+    priority::{channel, workers::PriorityWorkers, Priority},
     utils::UtcDateTimeHeader as _,
 };
 use alloy_primitives::{Address, B256};
@@ -44,6 +44,8 @@ pub struct IngressForwarders {
     local: channel::UnboundedSender<Arc<ForwardingRequest>>,
     /// The senders to peer ingresses. Continuously updated from builderhub configuration.
     peers: Arc<DashMap<String, PeerHandle>>,
+    /// The priority workers for signing requests.
+    workers: PriorityWorkers,
 }
 
 impl IngressForwarders {
@@ -52,8 +54,9 @@ impl IngressForwarders {
         local: channel::UnboundedSender<Arc<ForwardingRequest>>,
         peers: Arc<DashMap<String, PeerHandle>>,
         signer: PrivateKeySigner,
+        workers: PriorityWorkers,
     ) -> Self {
-        Self { local, peers, signer }
+        Self { local, peers, signer, workers }
     }
 
     /// Find peer name by address.
@@ -65,14 +68,22 @@ impl IngressForwarders {
     }
 
     /// Broadcast bundle to all forwarders.
-    pub(crate) fn broadcast_bundle(&self, bundle: SystemBundle) {
+    pub(crate) async fn broadcast_bundle(&self, bundle: SystemBundle) {
+        let priority = bundle.metadata.priority;
         let encoded_bundle = bundle.encode();
 
         // Create local request first
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
-        let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
+        let signer = self.signer.clone();
+        let encoding = encoded_bundle.encoding.clone();
+        let signature_header = self
+            .workers
+            .spawn_with_priority(priority, move || {
+                build_signature_header(&signer, encoding.as_ref())
+            })
+            .await;
 
         // Difference: we add the signature header.
         let forward = Arc::new(ForwardingRequest::user_to_system(
@@ -86,13 +97,24 @@ impl IngressForwarders {
     }
 
     /// Broadcast MEV share bundle to all forwarders.
-    pub fn broadcast_mev_share_bundle(&self, priority: Priority, bundle: SystemMevShareBundle) {
+    pub(crate) async fn broadcast_mev_share_bundle(
+        &self,
+        priority: Priority,
+        bundle: SystemMevShareBundle,
+    ) {
         let encoded_bundle = bundle.encode();
         // Create local request first
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
         let _ = self.local.send(priority, local);
 
-        let signature_header = self.build_signature_header(encoded_bundle.encoding.as_ref());
+        let signer = self.signer.clone();
+        let encoding = encoded_bundle.encoding.clone();
+        let signature_header = self
+            .workers
+            .spawn_with_priority(priority, move || {
+                build_signature_header(&signer, encoding.as_ref())
+            })
+            .await;
 
         // Difference: we add the signature header.
         let forward = Arc::new(ForwardingRequest::user_to_system(
@@ -106,13 +128,21 @@ impl IngressForwarders {
     }
 
     /// Broadcast transaction to all forwarders.
-    pub fn broadcast_transaction(&self, transaction: SystemTransaction) {
+    pub(crate) async fn broadcast_transaction(&self, transaction: SystemTransaction) {
+        let priority = transaction.priority;
         let encoded_transaction = transaction.encode();
 
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_transaction.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
-        let signature_header = self.build_signature_header(encoded_transaction.encoding.as_ref());
+        let signer = self.signer.clone();
+        let encoding = encoded_transaction.encoding.clone();
+        let signature_header = self
+            .workers
+            .spawn_with_priority(priority, move || {
+                build_signature_header(&signer, encoding.as_ref())
+            })
+            .await;
 
         // Difference: we add the signature header.
         let forward = Arc::new(ForwardingRequest::user_to_system(
@@ -123,13 +153,6 @@ impl IngressForwarders {
 
         debug!(peers = %self.peers.len(), "sending transaction to peers");
         self.broadcast(forward);
-    }
-
-    /// Sign and build the signature header in the form of `signer_address:signature`.
-    fn build_signature_header(&self, body: &[u8]) -> String {
-        let body_hash = keccak256(body);
-        let signature = self.signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
-        format!("{:?}:{}", self.signer.address(), signature)
     }
 
     /// Broadcast request to all peers.
@@ -199,6 +222,13 @@ pub fn spawn_forwarder(
         }
     }
     Ok(request_tx)
+}
+
+/// Sign and build the signature header in the form of `signer_address:signature`.
+fn build_signature_header(signer: &PrivateKeySigner, body: &[u8]) -> String {
+    let body_hash = keccak256(body);
+    let signature = signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
+    format!("{:?}:{}", signer.address(), signature)
 }
 
 /// The direction of the forwarding request.

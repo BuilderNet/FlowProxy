@@ -198,7 +198,7 @@ pub(crate) struct SystemMetrics {
     queue_capacity_almost_hits: Counter,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[metrics(scope = "worker")]
 pub(crate) struct WorkerMetrics {
     /// The duration of worker tasks in seconds, per priority. Includes the time spent waiting for
