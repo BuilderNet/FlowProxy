@@ -6,6 +6,7 @@ use crate::{
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
+    priority::workers::PriorityWorkers,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
 };
@@ -149,6 +150,9 @@ pub async fn run_with_listeners(
         ctx.task_executor.spawn_critical("local_update_peers", peer_updater.run());
     }
 
+    // Configure the priority worker pool.
+    let workers = PriorityWorkers::new_with_threads(args.compute_threads);
+
     // Spawn forwarders
     let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
     let forwarders = if let Some(ref builder_url) = builder_url {
@@ -159,11 +163,11 @@ pub async fn run_with_listeners(
             &ctx.task_executor,
         )?;
 
-        IngressForwarders::new(local_sender, peers, orderflow_signer)
+        IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
     } else {
         // No builder URL provided, so mock local forwarder.
-        let (local_sender, _) = priority::pchannel::unbounded_channel();
-        IngressForwarders::new(local_sender, peers, orderflow_signer)
+        let (local_sender, _) = priority::channel::unbounded_channel();
+        IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
     };
 
     let builder_ready_endpoint =
@@ -182,7 +186,7 @@ pub async fn run_with_listeners(
         system_bundle_decoder: SystemBundleDecoder { max_txs_per_bundle: args.max_txs_per_bundle },
         spam_thresholds: SpamThresholds::default(),
         flashbots_signer: args.flashbots_signer,
-        pqueues: Default::default(),
+        pqueues: workers,
         entities: DashMap::default(),
         order_cache,
         signer_cache,

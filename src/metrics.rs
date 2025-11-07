@@ -198,6 +198,15 @@ pub(crate) struct SystemMetrics {
     queue_capacity_almost_hits: Counter,
 }
 
+#[derive(Debug, Clone)]
+#[metrics(scope = "worker")]
+pub(crate) struct WorkerMetrics {
+    /// The duration of worker tasks in seconds, per priority. Includes the time spent waiting for
+    /// the permit.
+    #[metric(rename = "task_duration_seconds", labels = ["priority"], buckets = [0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.010, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    task_durations: Histogram,
+}
+
 pub(crate) async fn spawn_process_collector() -> eyre::Result<()> {
     let mut process_metrics = ProcessCollector::new(prometheus::default_registry());
 

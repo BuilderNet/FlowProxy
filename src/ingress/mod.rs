@@ -16,7 +16,7 @@ use crate::{
         EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleDecoder,
         SystemBundleMetadata, SystemMevShareBundle, SystemTransaction, UtcInstant,
     },
-    priority::{pqueue::PriorityQueues, Priority},
+    priority::{workers::PriorityWorkers, Priority},
     rate_limit::CounterOverTime,
     utils::{short_uuid_v4, UtcDateTimeHeader as _},
     validation::validate_transaction,
@@ -60,7 +60,7 @@ pub struct OrderflowIngress {
     pub score_bucket_s: u64,
     pub system_bundle_decoder: SystemBundleDecoder,
     pub spam_thresholds: SpamThresholds,
-    pub pqueues: PriorityQueues,
+    pub pqueues: PriorityWorkers,
     pub entities: DashMap<Entity, EntityData>,
     pub order_cache: OrderCache,
     pub signer_cache: SignerCache,
@@ -156,7 +156,14 @@ impl OrderflowIngress {
         };
 
         // NOTE: Signature is mandatory
-        let Some(signer) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) else {
+        let body_clone = body.clone();
+        let Some(signer) = ingress
+            .pqueues
+            .spawn_with_priority(Priority::Medium, move || {
+                maybe_verify_signature(&headers, &body_clone, USE_LEGACY_SIGNATURE)
+            })
+            .await
+        else {
             tracing::trace!("failed to verify signature");
             return JsonRpcResponse::error(Value::Null, JsonRpcError::InvalidSignature);
         };
@@ -339,7 +346,15 @@ impl OrderflowIngress {
         };
 
         let peer = 'peer: {
-            if let Some(address) = maybe_verify_signature(&headers, &body, USE_LEGACY_SIGNATURE) {
+            let body_clone = body.clone();
+            let headers_clone = headers.clone();
+            if let Some(address) = ingress
+                .pqueues
+                .spawn_with_priority(Priority::Medium, move || {
+                    maybe_verify_signature(&headers_clone, &body_clone, USE_LEGACY_SIGNATURE)
+                })
+                .await
+            {
                 if ingress.flashbots_signer.is_some_and(|addr| addr == address) {
                     break 'peer "flashbots".to_string();
                 }
@@ -818,7 +833,7 @@ impl OrderflowIngress {
             })?;
 
         // Send request to all forwarders.
-        self.forwarders.broadcast_transaction(system_transaction);
+        self.forwarders.broadcast_transaction(system_transaction).await;
 
         let elapsed = start.elapsed();
         tracing::debug!(elapsed = ?elapsed, "processed raw transaction");
@@ -836,7 +851,7 @@ impl OrderflowIngress {
         let received_at = bundle.metadata.received_at;
 
         // Send request to all forwarders.
-        self.forwarders.broadcast_bundle(bundle);
+        self.forwarders.broadcast_bundle(bundle).await;
 
         self.user_metrics
             .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
@@ -852,7 +867,7 @@ impl OrderflowIngress {
         let bundle_hash = bundle.bundle_hash();
         let received_at = bundle.received_at;
 
-        self.forwarders.broadcast_mev_share_bundle(priority, bundle);
+        self.forwarders.broadcast_mev_share_bundle(priority, bundle).await;
 
         self.user_metrics
             .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
@@ -880,15 +895,15 @@ pub fn maybe_decompress(
     gzip_enabled: bool,
     headers: &HeaderMap,
     body: axum::body::Bytes,
-) -> Result<Vec<u8>, JsonRpcError> {
+) -> Result<Bytes, JsonRpcError> {
     if gzip_enabled && headers.get(header::CONTENT_ENCODING).is_some_and(|enc| enc == "gzip") {
         let mut decompressed = Vec::new();
         GzDecoder::new(&body[..])
             .read_to_end(&mut decompressed)
             .map_err(|_| JsonRpcError::ParseError)?;
-        Ok(decompressed)
+        Ok(decompressed.into())
     } else {
-        Ok(body.to_vec())
+        Ok(body.into())
     }
 }
 

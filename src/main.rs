@@ -26,7 +26,10 @@ fn main() {
     let args = OrderflowIngressArgs::parse();
     init_tracing(args.log_json);
 
+    // Configure the Tokio runtime.
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        // Defaults to the number of CPU cores on the machine.
+        .worker_threads(args.io_threads)
         .enable_all()
         .build()
         .expect("failed to create runtime");
