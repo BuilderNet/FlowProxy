@@ -28,20 +28,6 @@ pub struct PriorityWorkers {
     pool: Arc<ThreadPool>,
 }
 
-/// Opinionated priority queues defaults.
-impl Default for PriorityWorkers {
-    fn default() -> Self {
-        Self::new(
-            DEFAULT_HIGH_QUEUE_SIZE,
-            DEFAULT_MEDIUM_QUEUE_SIZE,
-            DEFAULT_LOW_QUEUE_SIZE,
-            // NOTE: This is the default used by Rayon too (unless changed by `RAYON_` environment
-            // variables)
-            std::thread::available_parallelism().unwrap().get(),
-        )
-    }
-}
-
 impl PriorityWorkers {
     /// Create new priority queues with configured sizes.
     pub fn new(high: usize, medium: usize, low: usize, worker_threads: usize) -> Self {
