@@ -19,10 +19,10 @@ WITH
     -- Region patterns to make analysis only on specific regions easier.
     '(?i)europe|mkosi_test_1' AS europe_pattern,
     'eastus' AS us_pattern,
-    '.*' AS all_regions_pattern,
+    '.*' AS all_pattern,
     -- Choose here the pattern to match against builder names.
     -- This closure is used in `bundles` and `bundle_receipts` to filter all input data by region.
-    (x -> match(x, all_regions_pattern)) AS is_region_match,
+    (x -> match(x, all_pattern)) AS is_region_match,
 
 -- ===================================
 -- Common reusable subqueries
@@ -209,7 +209,7 @@ WITH
     bundle_seen_by AS (
         SELECT
             double_bundle_hash,
-            -- We may more than one source builder for a given bundle.
+            -- We may have more than one source builder for a given bundle.
             groupUniqArray(src_builder_name) AS src_builders,
             groupUniqArray(dst_builder_name) AS seen_dsts
         FROM bundle_receipts_with_self
@@ -264,23 +264,6 @@ WITH
     -- that a another peer in EU receives the bundle from a US peer first. In that case, we would be counting
     -- incorrectly a lost receipt.
 
-    -- Bundle hashes that have been missed by at least one builder.
-    lost_bundles AS (
-        WITH grouped AS (
-          SELECT
-              double_bundle_hash,
-              count() AS occurrences
-          FROM bundle_receipts_with_self
-          GROUP BY double_bundle_hash
-        ) SELECT
-            double_bundle_hash,
-            occurrences,
-            (SELECT total_builders FROM builders_count) AS total_builders,
-            total_builders - occurrences AS missed_builders
-        FROM grouped
-        WHERE missed_builders > 0
-    ),
-
     -- For each bundle hash, determine which builders have not seen it, along with their sources.
     lost_bundles_srcs_dsts AS (
         SELECT
@@ -304,6 +287,9 @@ WITH
             arrayJoin(src_builders) AS src_builder_name,
             arrayJoin(missing_dsts) AS dst_builder_name
         FROM lost_bundles_srcs_dsts
+        -- This condition seems useless, but it might be that on time-interval boundaries
+        -- we might miss some self-receipts, causing src_builder_name == dst_builder_name.
+        WHERE src_builder_name != dst_builder_name
     ),
 
     -- Detailed view of lost bundles with metadata from bundle_receipts.
@@ -319,7 +305,7 @@ WITH
             brsa.priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM lost_bundles_links_flattened AS lbd
-        LEFT JOIN bundle_receipts_send_attempts brsa USING (double_bundle_hash, src_builder_name)
+        INNER JOIN bundle_receipts_send_attempts brsa USING (double_bundle_hash, src_builder_name)
     ),
 
     -- Aggregate lost bundles over slot seconds.
