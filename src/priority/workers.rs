@@ -114,8 +114,10 @@ impl PriorityWorkers {
         let (tx, rx) = oneshot::channel();
         let _permit = semaphore.acquire().await;
 
-        // Spawn the task on a Rayon thread.
-        self.pool.spawn(|| {
+        // NOTE: Normal `[ThreadPool::spawn]` executes tasks in a LIFO manner, potentially starving
+        // earlier tasks. They claim this is for better cache locality, but this is less
+        // important here, so we use `spawn_fifo` instead to ensure fairness.
+        self.pool.spawn_fifo(|| {
             let result = f();
             let _ = tx.send(result);
         });
