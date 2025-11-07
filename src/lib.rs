@@ -4,6 +4,7 @@ use crate::{
     builderhub::PeersUpdater,
     cache::SignerCache,
     consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
+    forwarder::client::default_http_builder,
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
@@ -107,14 +108,9 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     tracing::info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            "local-builder".to_string(),
-        ))
-        .build()?;
+    let client = default_http_builder("local-builder".to_string())
+        .build()
+        .expect("to create local-builder client");
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
 

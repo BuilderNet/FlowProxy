@@ -22,13 +22,13 @@ const HTTP2_INITIAL_STREAM_WINDOW_SIZE: u32 = 256 * 1024 * 1024; // 256 KB
 const HTTP2_INITIAL_CONNECTION_WINDOW_SIZE: u64 = EXPECTED_BDP * 3 / 2; // 1.5x BDP
 
 /// Create a default reqwest client builder for forwarders with optimized settings.
-pub fn default_http_builder() -> reqwest::ClientBuilder {
+pub fn default_http_builder(peer_name: String) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
         .connector_layer(utils::limit::ConnectionLimiterLayer::new(
             DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            "local-builder".to_string(),
+            peer_name,
         ));
     // HTTP/1.x configuration
     builder = builder

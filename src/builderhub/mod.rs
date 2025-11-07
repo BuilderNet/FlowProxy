@@ -236,7 +236,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         // Self-filter any new peers before connecting to them.
         if new_peer && peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer {
             // Create a new client for each peer.
-            let mut client_builder = forwarder::client::default_http_builder();
+            let mut client_builder = forwarder::client::default_http_builder(peer.name.clone());
 
             // If the TLS certificate is present, use HTTPS and configure the client to use it.
             if let Some(ref tls_cert) = peer.tls_certificate() {
