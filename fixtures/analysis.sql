@@ -9,7 +9,7 @@ WITH
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
     '2025-11-06 00:00:00' AS t_since_str,
-    '2025-11-06 11:59:59' AS t_until_str,
+    '2025-11-06 23:59:59' AS t_until_str,
     toDateTime64(t_since_str, 6, 'UTC') AS t_since,
     toDateTime64(t_until_str, 6, 'UTC') AS t_until,
 
@@ -190,6 +190,28 @@ WITH
         GROUP BY signer_hash, builder_name
     ),
 
+    -- Filter signers that have only sent to US builders.
+    signers_us_only AS (
+        SELECT
+            signer_hash
+        FROM signer_distribution_raw
+        GROUP BY signer_hash
+        HAVING
+            -- keep only signers where *all* builder names match the US pattern
+            min(match(builder_name, us_pattern)) = 1
+    ),
+
+    -- Filter signers that have only sent to Europe builders.
+    signers_eu_only AS (
+        SELECT
+            signer_hash
+        FROM signer_distribution_raw
+        GROUP BY signer_hash
+        HAVING
+            -- keep only signers where *all* builder names match the Europe pattern
+            min(match(builder_name, europe_pattern)) = 1
+    ),
+
     -- Rank signer by unique bundles they have signed, and show distribution across builders.
     -- Useful to understand signer preferences of builders.
     signer_distribution AS (
@@ -202,6 +224,20 @@ WITH
         FROM signer_distribution_raw AS sdr
         INNER JOIN signer_rank AS sr USING (signer_hash)
         ORDER BY sr.unique_bundles DESC, sdr.signer_hash, sdr.unique_bundles_sent_to_builder DESC
+    ),
+
+    -- Filter signer distribution to only US-only signers.
+    signer_distribution_us_only AS (
+        SELECT *
+        FROM signer_distribution
+        WHERE signer_hash IN (SELECT signer_hash FROM signers_us_only)
+    ),
+
+    -- Filter signer distribution to only Europe-only signers.
+    signer_distribution_eu_only AS (
+        SELECT *
+        FROM signer_distribution
+        WHERE signer_hash IN (SELECT signer_hash FROM signers_eu_only)
     ),
 
     ------------ BUNDLE VISIBILITY ------------
