@@ -184,7 +184,7 @@ pub async fn run_with_listeners(
         spam_thresholds: SpamThresholds::default(),
         flashbots_signer: args.flashbots_signer,
         // TODO: Configurable amount of threads.
-        pqueues: PriorityWorkers::default(),
+        pqueues: PriorityWorkers::new_with_threads(2),
         entities: DashMap::default(),
         order_cache,
         signer_cache,
