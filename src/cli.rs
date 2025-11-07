@@ -278,7 +278,7 @@ impl Default for OrderflowIngressArgs {
             log_json: false,
             gzip_enabled: false,
             io_threads: 4,
-            compute_threads: 2,
+            compute_threads: 4,
             cache: CacheArgs {
                 order_cache_ttl: 12,
                 order_cache_size: 4096,

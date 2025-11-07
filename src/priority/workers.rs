@@ -88,8 +88,8 @@ impl PriorityWorkers {
         self.total_permits_for(priority) - self.available_permits_for(priority)
     }
 
-    /// Spawn the task with given priority. These tasks are reserved for blocking operations, and
-    /// will be executed on a blocking thread with [`tokio::task::spawn_blocking`].
+    /// Spawn the task with given priority. These tasks are reserved for computationally expensive
+    /// operations, and will be executed on a thread from the Rayon thread pool.
     pub async fn spawn_with_priority<R, F>(&self, priority: Priority, f: F) -> R
     where
         R: Send + 'static,
