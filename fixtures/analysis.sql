@@ -1,3 +1,5 @@
+SET join_algorithm = 'partial_merge';
+
 WITH
 -- ===================================
 -- Constants / utility functions
@@ -6,8 +8,8 @@ WITH
     -- Utility: convert bytes to 0x-prefixed lowercase hex.
     (x -> concat('0x', lower(hex(x)))) AS hex0x,
     -- Time window for analysis
-    '2025-11-02 23:39:00' AS t_since_str,
-    '2025-11-02 23:45:00' AS t_until_str,
+    '2025-11-06 00:00:00' AS t_since_str,
+    '2025-11-06 11:59:59' AS t_until_str,
     toDateTime64(t_since_str, 6, 'UTC') AS t_since,
     toDateTime64(t_until_str, 6, 'UTC') AS t_until,
 
@@ -408,10 +410,10 @@ WITH
         SELECT
             src_builder_name,
             dst_builder_name,
-            quantileExact(0.5)(received_at - sent_at) AS p50_latency_sec,
-            quantileExact(0.9)(received_at - sent_at) AS p90_latency_sec,
-            quantileExact(0.99)(received_at - sent_at) AS p99_latency_sec,
-            quantileExact(0.999)(received_at - sent_at) AS p999_latency_sec,
+            quantileTDigest(0.5)(toFloat64(received_at - sent_at)) AS p50_latency_sec,
+            quantileTDigest(0.9)(toFloat64(received_at - sent_at)) AS p90_latency_sec,
+            quantileTDigest(0.99)(toFloat64(received_at - sent_at)) AS p99_latency_sec,
+            quantileTDigest(0.999)(toFloat64(received_at - sent_at)) AS p999_latency_sec,
             round(corr(toFloat64(payload_size), toFloat64(received_at - sent_at)), 2) AS corr_payload_size,
             count() AS observations
         FROM bundle_receipts
@@ -433,10 +435,10 @@ WITH
         )
         SELECT
             sent_at_second_in_slot,
-            quantileExact(0.5)(latency) AS p50_latency_sec,
-            quantileExact(0.9)(latency) AS p90_latency_sec,
-            quantileExact(0.99)(latency) AS p99_latency_sec,
-            quantileExact(0.999)(latency) AS p999_latency_sec,
+            quantileTDigest(0.5)(toFloat64(latency)) AS p50_latency_sec,
+            quantileTDigest(0.9)(toFloat64(latency)) AS p90_latency_sec,
+            quantileTDigest(0.99)(toFloat64(latency)) AS p99_latency_sec,
+            quantileTDigest(0.999)(toFloat64(latency)) AS p999_latency_sec,
             round(corr(toFloat64(payload_size), toFloat64(latency)), 2) AS corr_payload_latency,
             count() AS observations,
             (SELECT total from total_receipts) AS total_receipts,
