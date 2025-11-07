@@ -26,14 +26,10 @@ fn main() {
     let args = OrderflowIngressArgs::parse();
     init_tracing(args.log_json);
 
-    // TODO: Configure based on the number of CPU cores on the machine, CLI overrides.
+    // Configure the Tokio runtime.
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
-        // Limit to 4 I/O worker threads. Defaults to the number of CPU cores on the machine.
-        .worker_threads(4)
-        // Limit to 128 blocking threads. Defaults to 512, which seems high?
-        // When blocking operations are requested, Tokio will spawn up to this many threads to
-        // execute them.
-        .max_blocking_threads(128)
+        // Defaults to the number of CPU cores on the machine.
+        .worker_threads(args.io_threads)
         .enable_all()
         .build()
         .expect("failed to create runtime");

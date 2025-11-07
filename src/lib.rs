@@ -150,8 +150,8 @@ pub async fn run_with_listeners(
         ctx.task_executor.spawn_critical("local_update_peers", peer_updater.run());
     }
 
-    // TODO: Make this configurable.
-    let workers = PriorityWorkers::new_with_threads(2);
+    // Configure the priority worker pool.
+    let workers = PriorityWorkers::new_with_threads(args.compute_threads);
 
     // Spawn forwarders
     let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
