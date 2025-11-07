@@ -244,7 +244,7 @@ pub struct OrderflowIngressArgs {
     pub io_threads: usize,
 
     /// The number of threads in the compute threadpool.
-    #[clap(long, default_value_t = 2, env = "COMPUTE_THREADS", id = "COMPUTE_THREADS")]
+    #[clap(long, default_value_t = 4, env = "COMPUTE_THREADS", id = "COMPUTE_THREADS")]
     pub compute_threads: usize,
 
     #[command(flatten)]
