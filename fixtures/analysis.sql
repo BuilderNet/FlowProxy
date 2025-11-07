@@ -89,6 +89,22 @@ WITH
         SELECT * FROM bundle_receipts_self
     ),
 
+
+    -- Group per-(bundle, source) data from bundle_receipts_with_self
+    bundle_receipts_send_attempts AS (
+        SELECT
+            double_bundle_hash,
+            src_builder_name,
+            -- Every sent_at time for this (bundle, source) pair represents an attempt.
+            groupUniqArray(sent_at) AS sent_ats,       
+            -- In case of self-receipts, these two fields will be NULL, but we assume they are consistent across other receipts, 
+            -- when available.
+            anyIf(payload_size, payload_size IS NOT NULL) AS payload_size,
+            anyIf(priority, priority IS NOT NULL) AS priority
+        FROM bundle_receipts_with_self
+        GROUP BY double_bundle_hash, src_builder_name
+    ),
+
     -- Count total number of bundle receipts (scalar).
     bundle_receipts_count AS (
         SELECT count() AS total_receipts FROM bundle_receipts
@@ -293,54 +309,39 @@ WITH
     -- Detailed view of lost bundles with metadata from bundle_receipts.
     -- This represents _every_ attempt to send a certain lost bundle from a source to a missing destination.
     lost_bundles_detailed AS (
-        -- 1️⃣ First, gather per-(bundle, source) metadata from bundle_receipts
-        WITH bundle_meta AS (
-            SELECT
-                double_bundle_hash,
-                src_builder_name,
-                -- Gather every sent_at time for this (bundle, source) pair
-                groupUniqArray(sent_at) AS sent_ats,       
-                -- We assume these fields are consistent across sends, when available.
-                anyIf(payload_size, payload_size IS NOT NULL) AS payload_size,
-                anyIf(priority, priority IS NOT NULL) AS priority
-            FROM bundle_receipts_with_self
-            GROUP BY double_bundle_hash, src_builder_name
-        )
-        -- 2️⃣ Now, join lost bundles with that metadata
         SELECT
             lbd.double_bundle_hash,
             lbd.src_builder_name,
             lbd.dst_builder_name,
             -- Explode multiple sent_ats, since we want to count multiple attempts.
-            arrayJoin(bm.sent_ats) AS sent_at,
-            bm.payload_size,
-            bm.priority,
+            arrayJoin(brsa.sent_ats) AS sent_at,
+            brsa.payload_size,
+            brsa.priority,
             to_time_bucket(sent_at) AS sent_at_second_in_slot
         FROM lost_bundles_links_flattened AS lbd
-        INNER JOIN bundle_meta bm USING (double_bundle_hash, src_builder_name)
+        LEFT SEMI JOIN bundle_receipts_send_attempts brsa USING (double_bundle_hash, src_builder_name)
+    ),
+
+    -- Count lost bundles between each source-destination builder pair.
+    lost_bundles_between_link_count AS (
+        SELECT
+            src_builder_name,
+            dst_builder_name,
+            count() AS missed_bundle_count
+        FROM lost_bundles_detailed
+        GROUP BY src_builder_name, dst_builder_name
     ),
 
     -- Rank links by the number of bundles they missed.
     lost_bundles_by_link AS (
-        WITH loss_events_by_link AS (
-            -- Aggregate loss events by source-destination builder pairs.
-            SELECT
-                src_builder_name,
-                dst_builder_name,
-                count() AS missed_bundle_count
-            FROM lost_bundles_links_flattened
-            GROUP BY src_builder_name, dst_builder_name
-        )
         SELECT
             l.src_builder_name AS src_builder_name,
             l.dst_builder_name AS dst_builder_name,
             missed_bundle_count,
             (bobl.occurrences + missed_bundle_count) AS expected_bundles_sent_between_link,
             concat(toString(round(100 * missed_bundle_count / expected_bundles_sent_between_link, 2)), '%') AS percent_of_total_bundles
-        FROM loss_events_by_link AS l
-        JOIN bundle_occurrences_by_link bobl
-             ON l.src_builder_name = bobl.src_builder_name
-            AND l.dst_builder_name = bobl.dst_builder_name
+        FROM lost_bundles_between_link_count AS l
+        LEFT SEMI JOIN bundle_occurrences_by_link bobl USING (src_builder_name, dst_builder_name)
         ORDER BY missed_bundle_count DESC
     ),
 
