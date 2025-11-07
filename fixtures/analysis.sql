@@ -120,6 +120,48 @@ WITH
         ORDER BY unique_bundles DESC
     ),
 
+    -- Calculate the number of duplicates sent by signers. A duplicate is
+    -- defined as a bundle that has been sent more than once by a certain signer
+    -- to the same builder. If we do otherwise, we would be counting legitimate
+    -- multiple sends to different builders as duplicates, which is a common
+    -- searcher strategy.
+    signer_rank_duplicates_detailed AS (
+        SELECT
+            signer_hash,
+            double_bundle_hash,
+            count(double_bundle_hash) AS bundles_sent,
+            -- The first occurrence is not a duplicate, so we subtract 1.
+            bundles_sent - 1 AS duplicates
+        FROM bundles
+        GROUP BY signer_hash, builder_name, double_bundle_hash
+    ),
+
+    -- Rank signers by the amount of duplicates sent. See definition of duplicates above for details.
+    signer_rank_duplicates AS (
+        SELECT
+            signer_hash,
+            sum(duplicates) AS total_duplicates_sent,
+            sum(bundles_sent) AS total_bundles_sent,
+            concat(toString(round(100 * total_duplicates_sent / total_bundles_sent, 2)), '%') AS percent_duplicates_sent
+        FROM signer_rank_duplicates_detailed
+        GROUP BY signer_hash
+        ORDER BY total_duplicates_sent DESC
+    ),
+
+    -- Combine signer rank with duplicates info.
+    signer_rank_combined AS (
+        SELECT
+            sr.signer_hash,
+            sr.unique_bundles,
+            sr.percent_of_total_unique_bundles,
+            srd.total_duplicates_sent AS duplicates_sent,
+            srd.total_bundles_sent AS total_bundles_sent,
+            srd.percent_duplicates_sent AS percent_duplicates_sent
+        FROM signer_rank AS sr
+        LEFT JOIN signer_rank_duplicates AS srd USING (signer_hash)
+        ORDER BY sr.unique_bundles DESC
+    ),
+
     -- Rank signers unique bundles they have signed, and show distribution across builders.
     signer_distribution AS (
         SELECT
@@ -129,6 +171,7 @@ WITH
             sr.unique_bundles AS total_unique_bundles_sent,
             concat(toString(round(100 * unique_bundles_sent_to_builder / total_unique_bundles_sent, 2)), '%') AS percent_of_unique_bundles_sent_to_builder
         FROM bundles AS b
+        -- NOTE: this join is safe from cartesian explosion since signer_rank has one row per signer_hash.
         INNER JOIN signer_rank AS sr USING (signer_hash)
         GROUP BY signer_hash, builder_name, total_unique_bundles_sent
         ORDER BY total_unique_bundles_sent DESC, b.signer_hash, unique_bundles_sent_to_builder DESC
