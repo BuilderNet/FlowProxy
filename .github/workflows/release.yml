@@ -106,8 +106,7 @@ jobs:
       - name: Record artifacts checksums
         working-directory: artifacts
         run: |
-          find ./ || true
-          for file in *; do sha256sum "$file" >> sha256sums.txt; done;
+          find ./ -type f -exec sha256sum {} \; >> sha256sums.txt
           cat sha256sums.txt
       - name: Create release draft
         uses: softprops/action-gh-release@v2.0.5
