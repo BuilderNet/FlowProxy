@@ -74,7 +74,8 @@ jobs:
       - name: Calculate SHA256
         id: sha256
         run: |
-          sha256sum ./target/flowproxy > flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256
+          mv ./target/flowproxy flowproxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
+          sha256sum flowproxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu > flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256
           echo "hash=$(cat flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
           echo "Binary SHA256: $(cat flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256)"
 
@@ -83,7 +84,7 @@ jobs:
         with:
           name: flowproxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
           path: |
-            ./target/flowproxy
+            flowproxy-${{ needs.extract-version.outputs.VERSION }}-x86_64-unknown-linux-gnu
             flowproxy-${{ needs.extract-version.outputs.VERSION }}.sha256
 
   draft-release:
