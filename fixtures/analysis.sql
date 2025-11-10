@@ -480,9 +480,8 @@ WITH
             (SELECT total from total_receipts) AS total_receipts,
             concat(toString(round(100 * observations / total_receipts, 2)), '%') AS percent_of_total_receipts
         FROM latency_events
-        INNER JOIN lost_bundles_over_slot_percentage lbosp USING (sent_at_second_in_slot)
         GROUP BY sent_at_second_in_slot
-        ORDER BY p99_latency_sec DESC
+        ORDER BY sent_at_second_in_slot ASC
     ),
 
     -- Calculate latency quantiles and bundles lost distributed over slot seconds.
