@@ -97,19 +97,42 @@ pub struct ClientPool {
     num_clients: usize,
     /// The index of the last used client. Used for round-robin load balancing.
     last_used: Arc<AtomicU8>,
+
+    /// A client to use for requests with large payloads.
+    big_requests_client: reqwest::Client,
 }
 
 impl ClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
     pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
         let clients = (0..num_clients.get()).map(|_| make_client()).collect();
-        Self { clients, num_clients: num_clients.get(), last_used: Arc::new(AtomicU8::new(0)) }
+        let big_requests_client = make_client();
+        Self {
+            clients,
+            num_clients: num_clients.get(),
+            last_used: Arc::new(AtomicU8::new(0)),
+            big_requests_client,
+        }
     }
 
     /// Get a client from the pool.
-    pub fn client(&self) -> &reqwest::Client {
+    pub fn pool_client(&self) -> &reqwest::Client {
         // NOTE: This will automatically wrap.
         let index = self.last_used.fetch_add(1, Ordering::Relaxed);
         &self.clients[(index as usize) % self.num_clients]
+    }
+
+    /// Get the client for big requests.
+    pub fn big_requests_client(&self) -> &reqwest::Client {
+        &self.big_requests_client
+    }
+
+    /// Get a client from the pool or the big requests client based on the `big_request` flag.
+    pub fn client(&self, big_request: bool) -> &reqwest::Client {
+        if big_request {
+            self.big_requests_client()
+        } else {
+            self.pool_client()
+        }
     }
 }

@@ -436,7 +436,7 @@ impl HttpForwarder {
         &self,
         request: Arc<ForwardingRequest>,
     ) -> RequestFut<reqwest::Response, reqwest::Error> {
-        let client = self.client.clone();
+        let client_pool = self.client.clone();
         let peer_url = self.peer_url.clone();
 
         let request_span = request.span.clone();
@@ -457,8 +457,8 @@ impl HttpForwarder {
 
             let order_type = order.order_type();
             let start_time = Instant::now();
-            let response = client
-                .client()
+            let response = client_pool
+                .client(is_big)
                 .post(peer_url)
                 .body(order.encoding().to_vec())
                 .headers(headers)
