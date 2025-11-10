@@ -30,14 +30,14 @@ pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 1024;
 // const HTTP2_INITIAL_CONNECTION_WINDOW_SIZE: u64 = EXPECTED_BDP * 3 / 2; // 1.5x BDP
 
 /// Create a default reqwest client builder for forwarders with optimized settings.
-pub fn default_http_builder(peer_name: String) -> reqwest::ClientBuilder {
+pub fn default_http_builder(id: String) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
         .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
         // Per-client connection limit (TCP connections if HTTP/1.1, streams if HTTP/2).
         .connector_layer(utils::limit::ConnectionLimiterLayer::new(
             DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            peer_name,
+            id,
         ));
 
     // HTTP/1.x configuration
@@ -98,20 +98,26 @@ pub struct ClientPool {
     /// The index of the last used client. Used for round-robin load balancing.
     last_used: Arc<AtomicU8>,
 
-    /// A client to use for requests with large payloads.
-    big_requests_client: reqwest::Client,
+    /// The client for big requests.
+    clients_big: Arc<[reqwest::Client]>,
+    /// The number of clients for big requests.
+    num_clients_big: usize,
+    /// The index of the last used client for big requests.
+    last_used_big: Arc<AtomicU8>,
 }
 
 impl ClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
-    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
-        let clients = (0..num_clients.get()).map(|_| make_client()).collect();
-        let big_requests_client = make_client();
+    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn(bool) -> reqwest::Client) -> Self {
+        let clients = (0..num_clients.get()).map(|_| make_client(false)).collect();
+        let clients_big = (0..num_clients.get()).map(|_| make_client(true)).collect();
         Self {
             clients,
             num_clients: num_clients.get(),
             last_used: Arc::new(AtomicU8::new(0)),
-            big_requests_client,
+            clients_big,
+            num_clients_big: num_clients.get(),
+            last_used_big: Arc::new(AtomicU8::new(0)),
         }
     }
 
@@ -122,15 +128,17 @@ impl ClientPool {
         &self.clients[(index as usize) % self.num_clients]
     }
 
-    /// Get the client for big requests.
-    pub fn big_requests_client(&self) -> &reqwest::Client {
-        &self.big_requests_client
+    /// Get a client from the big requests pool.
+    pub fn pool_client_big(&self) -> &reqwest::Client {
+        // NOTE: This will automatically wrap.
+        let index = self.last_used_big.fetch_add(1, Ordering::Relaxed);
+        &self.clients_big[(index as usize) % self.num_clients_big]
     }
 
     /// Get a client from the pool or the big requests client based on the `big_request` flag.
     pub fn client(&self, big_request: bool) -> &reqwest::Client {
         if big_request {
-            self.big_requests_client()
+            self.pool_client_big()
         } else {
             self.pool_client()
         }
