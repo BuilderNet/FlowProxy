@@ -8,14 +8,7 @@ on:
 jobs:
   build:
     name: build reproducible binaries
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            machine: machine-1
-          - runner: ubuntu-22.04
-            machine: machine-2
+    runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@v5
       - name: Set up Docker Buildx
