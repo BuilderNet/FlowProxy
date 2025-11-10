@@ -20,14 +20,14 @@ pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
 /// concurrent streams if applied.
 pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 1024;
 
-const GIGABIT: u64 = 1024 * 1024 * 1024;
+// const GIGABIT: u64 = 1024 * 1024 * 1024;
 
-// Should be customized per peer RTT
-const EXPECTED_RTT_MS: u64 = 80;
-const EXPECTED_BDP: u64 = (GIGABIT / 8 * EXPECTED_RTT_MS) / 1000; // in bytes
+// // Should be customized per peer RTT
+// const EXPECTED_RTT_MS: u64 = 80;
+// const EXPECTED_BDP: u64 = (GIGABIT / 8 * EXPECTED_RTT_MS) / 1000; // in bytes
 
-const HTTP2_INITIAL_STREAM_WINDOW_SIZE: u32 = 256 * 1024 * 1024; // 256 KB
-const HTTP2_INITIAL_CONNECTION_WINDOW_SIZE: u64 = EXPECTED_BDP * 3 / 2; // 1.5x BDP
+// const HTTP2_INITIAL_STREAM_WINDOW_SIZE: u32 = 256 * 1024 * 1024; // 256 KB
+// const HTTP2_INITIAL_CONNECTION_WINDOW_SIZE: u64 = EXPECTED_BDP * 3 / 2; // 1.5x BDP
 
 /// Create a default reqwest client builder for forwarders with optimized settings.
 pub fn default_http_builder(peer_name: String) -> reqwest::ClientBuilder {
@@ -58,18 +58,18 @@ pub fn default_http_builder(peer_name: String) -> reqwest::ClientBuilder {
         //increases the TCP send socket buffer usage of a given stream (remember there is a single
         //connection behind it). However, there are many “big requests” to forward in the proxy
         //above 50KiB, so to be safe we could set it to a value like 128KiB or 256KiB.
-        .http2_initial_stream_window_size(HTTP2_INITIAL_STREAM_WINDOW_SIZE)
+        // .http2_initial_stream_window_size(HTTP2_INITIAL_STREAM_WINDOW_SIZE)
         // Defines the total number of bytes that can be outstanding (sent but unacknowledged)
         // across all streams in a single HTTP/2 connection. By default (as of RFC 7540),
         // default size is 64KiB. This is too low for any use-case like ours, so we should
         // definitely bump it probably to be a bit higher (1.5x/2x) than BDP for that peer.
         // Given that we don’t discriminate by expected RTT, we have to find a common value
         // for all of them as of now.
-        .http2_initial_connection_window_size(HTTP2_INITIAL_CONNECTION_WINDOW_SIZE as u32)
+        // .http2_initial_connection_window_size(HTTP2_INITIAL_CONNECTION_WINDOW_SIZE as u32)
         // Adaptively adjust stream window size based on responses received, to be closer to BDP. I
         // don’t know if we need it, we should look at the reqwest implementation what it
         // does exactly to avoid weird surprises.
-        .http2_adaptive_window(false)
+        .http2_adaptive_window(true)
         // Sets the maximum number of bytes allowed in the payload of a frame. Defaults to 16,384
         // bytes, HAProxy doesn’t recommend to change it and probably we should not do it even here.
         .http2_max_frame_size(16_384)
