@@ -250,13 +250,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
 
             // Create a client pool.
-            let client = ClientPool::new(self.client_pool_size, |big_request: bool| {
-                let id = if big_request {
-                    format!("{}-big", peer.name.clone())
-                } else {
-                    peer.name.clone()
-                };
-                let client_builder = default_http_builder(id);
+            let client = ClientPool::new(self.client_pool_size, || {
+                let client_builder = default_http_builder(peer.name.clone());
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
                 if let Some(ref tls_cert) = peer.tls_certificate() {

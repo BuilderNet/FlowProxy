@@ -97,50 +97,19 @@ pub struct ClientPool {
     num_clients: usize,
     /// The index of the last used client. Used for round-robin load balancing.
     last_used: Arc<AtomicU8>,
-
-    /// The client for big requests.
-    clients_big: Arc<[reqwest::Client]>,
-    /// The number of clients for big requests.
-    num_clients_big: usize,
-    /// The index of the last used client for big requests.
-    last_used_big: Arc<AtomicU8>,
 }
 
 impl ClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
-    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn(bool) -> reqwest::Client) -> Self {
-        let clients = (0..num_clients.get()).map(|_| make_client(false)).collect();
-        let clients_big = (0..num_clients.get()).map(|_| make_client(true)).collect();
-        Self {
-            clients,
-            num_clients: num_clients.get(),
-            last_used: Arc::new(AtomicU8::new(0)),
-            clients_big,
-            num_clients_big: num_clients.get(),
-            last_used_big: Arc::new(AtomicU8::new(0)),
-        }
+    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
+        let clients = (0..num_clients.get()).map(|_| make_client()).collect();
+        Self { clients, num_clients: num_clients.get(), last_used: Arc::new(AtomicU8::new(0)) }
     }
 
     /// Get a client from the pool.
-    pub fn pool_client(&self) -> &reqwest::Client {
+    pub fn client(&self) -> &reqwest::Client {
         // NOTE: This will automatically wrap.
         let index = self.last_used.fetch_add(1, Ordering::Relaxed);
         &self.clients[(index as usize) % self.num_clients]
-    }
-
-    /// Get a client from the big requests pool.
-    pub fn pool_client_big(&self) -> &reqwest::Client {
-        // NOTE: This will automatically wrap.
-        let index = self.last_used_big.fetch_add(1, Ordering::Relaxed);
-        &self.clients_big[(index as usize) % self.num_clients_big]
-    }
-
-    /// Get a client from the pool or the big requests client based on the `big_request` flag.
-    pub fn client(&self, big_request: bool) -> &reqwest::Client {
-        if big_request {
-            self.pool_client_big()
-        } else {
-            self.pool_client()
-        }
     }
 }

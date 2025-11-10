@@ -458,7 +458,7 @@ impl HttpForwarder {
             let order_type = order.order_type();
             let start_time = Instant::now();
             let response = client_pool
-                .client(is_big)
+                .client()
                 .post(peer_url)
                 .body(order.encoding().to_vec())
                 .headers(headers)
