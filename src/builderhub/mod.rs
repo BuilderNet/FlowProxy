@@ -174,7 +174,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         peer_store: P,
         peers: Arc<DashMap<String, PeerHandle>>,
         disable_forwarding: bool,
-        client_pool_size: usize,
+        client_pool_size: NonZero<usize>,
         task_executor: TaskExecutor,
     ) -> Self {
         Self {
@@ -182,7 +182,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             peer_store,
             peers,
             disable_forwarding,
-            client_pool_size: NonZero::new(client_pool_size).unwrap(),
+            client_pool_size,
             task_executor,
             metrics: Arc::new(BuilderHubMetrics::default()),
         }
