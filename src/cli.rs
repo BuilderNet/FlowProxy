@@ -169,7 +169,8 @@ pub struct OrderflowIngressArgs {
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_READY_ENDPOINT", id = "BUILDER_READY_ENDPOINT", default_value = "http://127.0.0.1:6070")]
     pub builder_ready_endpoint: Option<String>,
 
-    /// The name of the local builder. For consistency with BuilderHub data, dashes will be replaced with underscores.
+    /// The name of the local builder. For consistency with BuilderHub data, dashes will be
+    /// replaced with underscores.
     #[clap(long, env = "BUILDERNET_NODE_NAME", id = "BUILDERNET_NODE_NAME", value_parser = replace_dashes_with_underscores)]
     pub builder_name: String,
 
