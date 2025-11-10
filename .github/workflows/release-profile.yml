@@ -6,7 +6,7 @@ on:
 jobs:
   extract-version:
     name: Extract version
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-8x
     outputs:
       VERSION: ${{ steps.extract_version.outputs.VERSION }}
     steps:
@@ -34,7 +34,7 @@ jobs:
   build:
     name: Build profiling binary
     needs: extract-version
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-8x
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
