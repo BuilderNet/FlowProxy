@@ -1,5 +1,14 @@
 //! Configuration for HTTP clients used to spawn forwarders.
-use std::time::Duration;
+use std::{
+    num::NonZero,
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
+use crate::utils;
 
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
@@ -9,7 +18,7 @@ pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 800;
 pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
 /// The default HTTP connection limit per host. NOTE: For HTTP/2, this is the maximum number of
 /// concurrent streams if applied.
-pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 512;
+pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 1024;
 
 const GIGABIT: u64 = 1024 * 1024 * 1024;
 
@@ -21,10 +30,15 @@ const HTTP2_INITIAL_STREAM_WINDOW_SIZE: u32 = 256 * 1024 * 1024; // 256 KB
 const HTTP2_INITIAL_CONNECTION_WINDOW_SIZE: u64 = EXPECTED_BDP * 3 / 2; // 1.5x BDP
 
 /// Create a default reqwest client builder for forwarders with optimized settings.
-pub fn default_http_builder(_peer_name: String) -> reqwest::ClientBuilder {
+pub fn default_http_builder(peer_name: String) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS));
+        .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
+        // Per-client connection limit (TCP connections if HTTP/1.1, streams if HTTP/2).
+        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
+            DEFAULT_CONNECTION_LIMIT_PER_HOST,
+            peer_name,
+        ));
 
     // HTTP/1.x configuration
     builder = builder
@@ -73,4 +87,29 @@ pub fn default_http_builder(_peer_name: String) -> reqwest::ClientBuilder {
         // enable it, but the connection should never become idle with HTTP/2.
         .http2_keep_alive_while_idle(true);
     builder
+}
+
+#[derive(Debug, Clone)]
+pub struct ClientPool {
+    /// The clients in the pool.
+    clients: Arc<[reqwest::Client]>,
+    /// The number of clients in the pool.
+    num_clients: usize,
+    /// The index of the last used client. Used for round-robin load balancing.
+    last_used: Arc<AtomicU8>,
+}
+
+impl ClientPool {
+    /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
+    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
+        let clients = (0..num_clients.get()).map(|_| make_client()).collect();
+        Self { clients, num_clients: num_clients.get(), last_used: Arc::new(AtomicU8::new(0)) }
+    }
+
+    /// Get a client from the pool.
+    pub fn client(&self) -> &reqwest::Client {
+        // NOTE: This will automatically wrap.
+        let index = self.last_used.fetch_add(1, Ordering::Relaxed);
+        &self.clients[(index as usize) % self.num_clients]
+    }
 }

@@ -239,6 +239,15 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
+    /// The number of clients in the client pool.
+    #[clap(
+        long = "http.client-pool-size",
+        default_value_t = 8,
+        env = "CLIENT_POOL_SIZE",
+        id = "CLIENT_POOL_SIZE"
+    )]
+    pub client_pool_size: usize,
+
     /// The number of IO worker threads used in Tokio.
     #[clap(long, default_value_t = 4, env = "IO_THREADS", id = "IO_THREADS")]
     pub io_threads: usize,
@@ -277,6 +286,7 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
+            client_pool_size: 8,
             io_threads: 4,
             compute_threads: 4,
             cache: CacheArgs {

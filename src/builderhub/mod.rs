@@ -1,11 +1,16 @@
 use crate::{
-    forwarder::{self, spawn_forwarder, PeerHandle},
+    forwarder::{
+        client::{default_http_builder, ClientPool},
+        spawn_forwarder, PeerHandle,
+    },
     metrics::BuilderHubMetrics,
     DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
-use std::{convert::Infallible, fmt::Debug, future::Future, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc, time::Duration,
+};
 
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Certificate;
@@ -158,6 +163,8 @@ pub struct PeersUpdater<P: PeerStore> {
     disable_forwarding: bool,
     /// The metrics for the peer updater.
     metrics: Arc<BuilderHubMetrics>,
+    /// The size of the client pool.
+    client_pool_size: NonZero<usize>,
 }
 
 impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
@@ -167,6 +174,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         peer_store: P,
         peers: Arc<DashMap<String, PeerHandle>>,
         disable_forwarding: bool,
+        client_pool_size: usize,
         task_executor: TaskExecutor,
     ) -> Self {
         Self {
@@ -174,6 +182,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             peer_store,
             peers,
             disable_forwarding,
+            client_pool_size: NonZero::new(client_pool_size).unwrap(),
             task_executor,
             metrics: Arc::new(BuilderHubMetrics::default()),
         }
@@ -235,21 +244,26 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
         // Self-filter any new peers before connecting to them.
         if new_peer && peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer {
-            // Create a new client for each peer.
-            let mut client_builder = forwarder::client::default_http_builder(peer.name.clone());
-
-            // If the TLS certificate is present, use HTTPS and configure the client to use it.
-            if let Some(ref tls_cert) = peer.tls_certificate() {
-                client_builder =
-                    client_builder.https_only(true).add_root_certificate(tls_cert.clone())
-            }
-
             if self.disable_forwarding {
                 tracing::warn!("skipped spawning forwarder (disabled forwarding)");
                 return;
             }
 
-            let client = client_builder.build().expect("failed to build client");
+            // Create a client pool.
+            let client = ClientPool::new(self.client_pool_size, || {
+                let client_builder = default_http_builder(peer.name.clone());
+
+                // If the TLS certificate is present, use HTTPS and configure the client to use it.
+                if let Some(ref tls_cert) = peer.tls_certificate() {
+                    client_builder
+                        .https_only(true)
+                        .add_root_certificate(tls_cert.clone())
+                        .build()
+                        .expect("failed to build client")
+                } else {
+                    client_builder.build().expect("failed to build client")
+                }
+            });
 
             let sender = spawn_forwarder(
                 peer.name.clone(),

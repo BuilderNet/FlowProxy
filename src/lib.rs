@@ -1,9 +1,14 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
-    builderhub::PeersUpdater, cache::SignerCache, forwarder::client::default_http_builder,
-    metrics::IngressMetrics, primitives::SystemBundleDecoder, priority::workers::PriorityWorkers,
-    runner::CliContext, statics::LOCAL_PEER_STORE,
+    builderhub::PeersUpdater,
+    cache::SignerCache,
+    forwarder::client::{default_http_builder, ClientPool},
+    metrics::IngressMetrics,
+    primitives::SystemBundleDecoder,
+    priority::workers::PriorityWorkers,
+    runner::CliContext,
+    statics::LOCAL_PEER_STORE,
 };
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
@@ -19,6 +24,7 @@ use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
+    num::NonZero,
     str::FromStr as _,
     sync::Arc,
     time::{Duration, Instant},
@@ -118,6 +124,7 @@ pub async fn run_with_listeners(
             builder_hub,
             peers.clone(),
             args.disable_forwarding,
+            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
@@ -135,6 +142,7 @@ pub async fn run_with_listeners(
             peer_store,
             peers.clone(),
             args.disable_forwarding,
+            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
@@ -150,7 +158,8 @@ pub async fn run_with_listeners(
         let local_sender = spawn_forwarder(
             String::from("local-builder"),
             builder_url.to_string(),
-            client.clone(),
+            // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.
+            ClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
             &ctx.task_executor,
         )?;
 

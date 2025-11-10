@@ -38,6 +38,8 @@ use tracing::*;
 
 pub mod client;
 
+use client::ClientPool;
+
 #[derive(Debug)]
 pub struct IngressForwarders {
     /// The orderflow signer.
@@ -205,7 +207,7 @@ pub struct PeerHandle {
 pub fn spawn_forwarder(
     name: String,
     url: String,
-    client: reqwest::Client, // request client to be reused for http senders
+    client: ClientPool, // request client to be reused for http senders
     task_executor: &TaskExecutor,
 ) -> eyre::Result<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
@@ -384,7 +386,7 @@ type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err
 
 /// An HTTP forwarder that forwards requests to a peer.
 struct HttpForwarder {
-    client: reqwest::Client,
+    client: ClientPool,
     /// The name of the builder we're forwarding to.
     peer_name: String,
     /// The URL of the peer.
@@ -401,7 +403,7 @@ struct HttpForwarder {
 
 impl HttpForwarder {
     fn new(
-        client: reqwest::Client,
+        client: ClientPool,
         name: String,
         url: String,
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
@@ -455,8 +457,13 @@ impl HttpForwarder {
 
             let order_type = order.order_type();
             let start_time = Instant::now();
-            let response =
-                client.post(peer_url).body(order.encoding().to_vec()).headers(headers).send().await;
+            let response = client
+                .client()
+                .post(peer_url)
+                .body(order.encoding().to_vec())
+                .headers(headers)
+                .send()
+                .await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
             ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
