@@ -101,8 +101,11 @@ pub struct ClientPool {
 
 impl ClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
-    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
-        let clients = (0..num_clients.get()).map(|_| make_client()).collect();
+    pub fn new(
+        num_clients: NonZero<usize>,
+        make_client: impl Fn(usize) -> reqwest::Client,
+    ) -> Self {
+        let clients = (0..num_clients.get()).map(|i| make_client(i)).collect();
         Self { clients, num_clients: num_clients.get(), last_used: Arc::new(AtomicU8::new(0)) }
     }
 
