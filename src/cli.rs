@@ -240,10 +240,10 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
-    /// The number of clients in the client pool.
+    /// For each peer, the size of the HTTP client pool used to forward requests.
     #[clap(
         long = "http.client-pool-size",
-        default_value_t = NonZero::new(8).unwrap(),
+        default_value_t = NonZero::new(8).expect("non-zero"),
         env = "CLIENT_POOL_SIZE",
         id = "CLIENT_POOL_SIZE"
     )]

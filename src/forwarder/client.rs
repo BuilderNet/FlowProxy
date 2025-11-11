@@ -16,20 +16,16 @@ pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 800;
 /// The default pool idle timeout in seconds.
 pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
-/// The default HTTP connection limit per host. NOTE: For HTTP/2, this is the maximum number of
-/// concurrent streams if applied.
+/// The default HTTP connection limit per host.
+/// NOTE: For HTTP/2, this is the maximum number of concurrent streams if applied.
 pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 1024;
 
-// const GIGABIT: u64 = 1024 * 1024 * 1024;
-
-// // Should be customized per peer RTT
-// const EXPECTED_RTT_MS: u64 = 80;
-// const EXPECTED_BDP: u64 = (GIGABIT / 8 * EXPECTED_RTT_MS) / 1000; // in bytes
-
-// const HTTP2_INITIAL_STREAM_WINDOW_SIZE: u32 = 256 * 1024 * 1024; // 256 KB
-// const HTTP2_INITIAL_CONNECTION_WINDOW_SIZE: u64 = EXPECTED_BDP * 3 / 2; // 1.5x BDP
-
 /// Create a default reqwest client builder for forwarders with optimized settings.
+///
+/// ### Params:
+///   * `peer_name`: The name of the peer, used for connection limiting metrics.
+///   * `id`: An idenfitier or index that makes the pair (peer_name, id) unique, used for connection
+///     limiting metrics.
 pub fn default_http_builder(peer_name: String, id: u64) -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
@@ -54,11 +50,13 @@ pub fn default_http_builder(peer_name: String, id: u64) -> reqwest::ClientBuilde
         // deployments
         // .http2_prior_knowledge()
         // ---------------------------
-        //The initial size of a single stream, which corresponds to a single request. It defaults
-        //to 64KiB. Bumping it increases memory usage (not a problem), but most importantly it
-        //increases the TCP send socket buffer usage of a given stream (remember there is a single
-        //connection behind it). However, there are many “big requests” to forward in the proxy
-        //above 50KiB, so to be safe we could set it to a value like 128KiB or 256KiB.
+        // The initial size of a single stream, which corresponds to a single request. It defaults
+        // to 64KiB. Bumping it increases memory usage (not a problem), but most importantly it
+        // increases the TCP send socket buffer usage of a given stream (remember there is a single
+        // connection behind it). However, there are many "big requests" to forward in the proxy
+        // above 50KiB, so to be safe we could set it to a value like 128KiB or 256KiB.
+        // Note well: this configures window size for HAProxy responses, not requests. So if you
+        // want to optimize for requests, you need to configure the peer server (HAProxy).
         // .http2_initial_stream_window_size(HTTP2_INITIAL_STREAM_WINDOW_SIZE)
         // Defines the total number of bytes that can be outstanding (sent but unacknowledged)
         // across all streams in a single HTTP/2 connection. By default (as of RFC 7540),
@@ -66,10 +64,12 @@ pub fn default_http_builder(peer_name: String, id: u64) -> reqwest::ClientBuilde
         // definitely bump it probably to be a bit higher (1.5x/2x) than BDP for that peer.
         // Given that we don’t discriminate by expected RTT, we have to find a common value
         // for all of them as of now.
+        // Note well: this configures window size for HAProxy responses, not requests. So if you
+        // want to optimize for requests, you need to configure the peer server (HAProxy).
         // .http2_initial_connection_window_size(HTTP2_INITIAL_CONNECTION_WINDOW_SIZE as u32)
-        // Adaptively adjust stream window size based on responses received, to be closer to BDP. I
-        // don’t know if we need it, we should look at the reqwest implementation what it
-        // does exactly to avoid weird surprises.
+        // Adaptively adjust stream window size based on responses received, to be closer to BDP.
+        // It's okay to use it, although with our use-case it won't make a big difference given
+        // responses are always small, either small hashes or error messages.
         .http2_adaptive_window(true)
         // Sets the maximum number of bytes allowed in the payload of a frame. Defaults to 16,384
         // bytes, HAProxy doesn’t recommend to change it and probably we should not do it even here.
@@ -90,11 +90,12 @@ pub fn default_http_builder(peer_name: String, id: u64) -> reqwest::ClientBuilde
     builder
 }
 
+/// A pool of HTTP clients for load balancing. Works with round-robin selection.
 #[derive(Debug, Clone)]
 pub struct ClientPool {
     /// The clients in the pool.
     clients: Arc<[reqwest::Client]>,
-    /// The number of clients in the pool.
+    /// The number of clients in the pool, so you don't have to deference the arc every time.
     num_clients: usize,
     /// The index of the last used client. Used for round-robin load balancing.
     last_used: Arc<AtomicU8>,

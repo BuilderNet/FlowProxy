@@ -105,7 +105,9 @@ pub mod limit {
     #[derive(Debug, Clone)]
     pub struct ConnectionLimiterLayer {
         max: usize,
+        /// A string identifying the peer this limiter is for.
         peer: String,
+        /// An identifier for the connection which makes the pair (peer, id) unique.
         id: u64,
     }
 
@@ -139,7 +141,7 @@ pub mod limit {
         max: usize,
         /// A string identifying the peer this limiter is for.
         peer: String,
-        /// An unique identifier for metrics.
+        /// An identifier for the connection which makes the pair (peer, id) unique.
         id: u64,
     }
 

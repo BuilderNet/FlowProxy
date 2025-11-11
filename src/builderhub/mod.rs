@@ -163,7 +163,7 @@ pub struct PeersUpdater<P: PeerStore> {
     disable_forwarding: bool,
     /// The metrics for the peer updater.
     metrics: Arc<BuilderHubMetrics>,
-    /// The size of the client pool.
+    /// For each peer indicates the size of the HTTP client pool used to connect to it.
     client_pool_size: NonZero<usize>,
 }
 
@@ -250,7 +250,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
 
             // Create a client pool.
-            let client = ClientPool::new(self.client_pool_size, |index| {
+            let client_pool = ClientPool::new(self.client_pool_size, |index| {
                 let client_builder = default_http_builder(peer.name.clone(), index as u64);
 
                 // If the TLS certificate is present, use HTTPS and configure the client to use it.
@@ -268,7 +268,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             let sender = spawn_forwarder(
                 peer.name.clone(),
                 peer.system_api(),
-                client.clone(),
+                client_pool.clone(),
                 &self.task_executor,
             )
             .expect("malformed url");
