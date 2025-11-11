@@ -108,7 +108,7 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     tracing::info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = default_http_builder("local-builder".to_string())
+    let client = default_http_builder("local-builder".to_string(), 0)
         .build()
         .expect("to create local-builder client");
 

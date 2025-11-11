@@ -105,13 +105,14 @@ pub mod limit {
     #[derive(Debug, Clone)]
     pub struct ConnectionLimiterLayer {
         max: usize,
-        id: String,
+        peer: String,
+        id: u64,
     }
 
     impl ConnectionLimiterLayer {
         /// Create a new concurrency limit layer.
-        pub const fn new(max: usize, id: String) -> Self {
-            ConnectionLimiterLayer { max, id }
+        pub const fn new(max: usize, peer: String, id: u64) -> Self {
+            ConnectionLimiterLayer { max, peer, id }
         }
     }
 
@@ -119,7 +120,7 @@ pub mod limit {
         type Service = ConnectionLimiter<S>;
 
         fn layer(&self, service: S) -> Self::Service {
-            ConnectionLimiter::new(service, self.max, self.id.clone())
+            ConnectionLimiter::new(service, self.max, self.peer.clone(), self.id)
         }
     }
 
@@ -136,24 +137,27 @@ pub mod limit {
         /// a new request.
         permit: Option<OwnedSemaphorePermit>,
         max: usize,
-        /// The ID of the connection limiter to identify the host.
-        id: String,
+        /// A string identifying the peer this limiter is for.
+        peer: String,
+        /// An unique identifier for metrics.
+        id: u64,
     }
 
     impl<T> ConnectionLimiter<T> {
         /// Create a new concurrency limiter.
-        pub fn new(inner: T, max: usize, id: String) -> Self {
-            Self::with_semaphore(inner, Arc::new(Semaphore::new(max)), id)
+        pub fn new(inner: T, max: usize, peer: String, id: u64) -> Self {
+            Self::with_semaphore(inner, Arc::new(Semaphore::new(max)), peer, id)
         }
 
         /// Create a new concurrency limiter with a provided shared semaphore
-        pub fn with_semaphore(inner: T, semaphore: Arc<Semaphore>, id: String) -> Self {
+        pub fn with_semaphore(inner: T, semaphore: Arc<Semaphore>, peer: String, id: u64) -> Self {
             let max = semaphore.available_permits();
             ConnectionLimiter {
                 inner,
                 semaphore: PollSemaphore::new(semaphore),
                 permit: None,
                 max,
+                peer,
                 id,
             }
         }
@@ -198,7 +202,9 @@ pub mod limit {
                 );
             }
 
-            HTTP_METRICS.open_http_connections(self.id.clone()).set(self.current_connections());
+            HTTP_METRICS
+                .open_http_connections(self.peer.clone(), self.id.to_string())
+                .set(self.current_connections());
 
             // Once we've acquired a permit (or if we already had one), poll the
             // inner service.
@@ -229,7 +235,8 @@ pub mod limit {
                 semaphore: self.semaphore.clone(),
                 permit: None,
                 max: self.max,
-                id: self.id.clone(),
+                peer: self.peer.clone(),
+                id: self.id,
             }
         }
     }

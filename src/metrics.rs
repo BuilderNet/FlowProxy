@@ -29,7 +29,7 @@ pub(crate) struct BuilderHubMetrics {
 #[metrics(scope = "forwarder")]
 pub(crate) struct HttpMetrics {
     /// The current number of open HTTP connections.
-    #[metric(labels = ["peer_name"])]
+    #[metric(labels = ["peer_name", "id"])]
     open_http_connections: Gauge,
 }
 
