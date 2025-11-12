@@ -15,8 +15,7 @@ pub const DEFAULT_CONNECT_TIMEOUT_MS: u64 = 800;
 /// The default pool idle timeout in seconds.
 pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
 /// The default HTTP connection limit per host.
-/// NOTE: For HTTP/2, this is the maximum number of concurrent streams if applied.
-pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 1024;
+pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 64;
 
 /// Create a default reqwest client builder for forwarders with optimized settings.
 ///
