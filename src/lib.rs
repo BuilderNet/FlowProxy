@@ -108,9 +108,7 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     tracing::info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = default_http_builder("local-builder".to_string(), 0)
-        .build()
-        .expect("to create local-builder client");
+    let client = default_http_builder().build().expect("to create local-builder client");
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
 
@@ -159,7 +157,7 @@ pub async fn run_with_listeners(
             String::from("local-builder"),
             builder_url.to_string(),
             // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.
-            ClientPool::new(NonZero::new(1).unwrap(), |_idx| client.clone()),
+            ClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
             &ctx.task_executor,
         )?;
 

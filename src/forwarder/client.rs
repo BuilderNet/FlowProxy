@@ -8,8 +8,6 @@ use std::{
     time::Duration,
 };
 
-use crate::utils;
-
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
 /// The default connect timeout in milliseconds.
@@ -26,16 +24,10 @@ pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 1024;
 ///   * `peer_name`: The name of the peer, used for connection limiting metrics.
 ///   * `id`: An idenfitier or index that makes the pair (peer_name, id) unique, used for connection
 ///     limiting metrics.
-pub fn default_http_builder(peer_name: String, id: u64) -> reqwest::ClientBuilder {
+pub fn default_http_builder() -> reqwest::ClientBuilder {
     let mut builder = reqwest::Client::builder()
         .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
-        // Per-client connection limit (TCP connections if HTTP/1.1, streams if HTTP/2).
-        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            peer_name,
-            id,
-        ));
+        .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS));
 
     // HTTP/1.x configuration
     builder = builder
@@ -103,11 +95,8 @@ pub struct ClientPool {
 
 impl ClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
-    pub fn new(
-        num_clients: NonZero<usize>,
-        make_client: impl Fn(usize) -> reqwest::Client,
-    ) -> Self {
-        let clients = (0..num_clients.get()).map(make_client).collect();
+    pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
+        let clients = (0..num_clients.get()).map(|_| make_client()).collect();
         Self { clients, num_clients: num_clients.get(), last_used: Arc::new(AtomicU8::new(0)) }
     }
 
