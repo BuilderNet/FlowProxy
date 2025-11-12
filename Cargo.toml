@@ -1,6 +1,6 @@
 [package]
 name = "flowproxy"
-version = "1.1.2"
+version = "1.2.0"
 edition = "2021"
 publish = false
 build = "build.rs"
