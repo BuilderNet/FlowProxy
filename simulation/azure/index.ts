@@ -27,16 +27,16 @@ const grafanaDashboardConfig = fs.readFileSync("grafana/provisioning/dashboards/
 const prometheusConfigB64 = Buffer.from(prometheusConfig).toString("base64");
 const grafanaDatasourceB64 = Buffer.from(grafanaDatasource).toString("base64");
 const grafanaDashboardConfigB64 = Buffer.from(grafanaDashboardConfig).toString("base64");
-// Read all dashboard JSON files from grafana/dashboards/
+// Create a compressed tarball of dashboard files (much smaller than individual base64 encoding)
 const dashboardFiles = fs.readdirSync("grafana/dashboards").filter(f => f.endsWith(".json"));
-const dashboardsB64 = dashboardFiles.map(filename => ({
-    filename,
-    content: Buffer.from(fs.readFileSync(`grafana/dashboards/${filename}`, "utf8")).toString("base64")
-}));
+const { execSync } = require("child_process");
+// Create tarball in memory
+execSync("tar -czf /tmp/dashboards.tar.gz -C grafana/dashboards " + dashboardFiles.join(" "));
+const dashboardsTarballB64 = fs.readFileSync("/tmp/dashboards.tar.gz").toString("base64");
 
 const builderhubExtTag = crypto
     .createHash("sha256")
-    .update(prometheusConfig + grafanaDatasource + grafanaDashboardConfig + dashboardsB64.map(d => d.content).join(""))
+    .update(prometheusConfig + grafanaDatasource + grafanaDashboardConfig + dashboardsTarballB64)
     .digest("hex")
     .slice(0, 32);
 
@@ -555,8 +555,8 @@ mkdir -p /var/lib/grafana
 echo "${grafanaDatasourceB64}" | base64 -d > /etc/grafana/provisioning/datasources/datasource.yml
 echo "${grafanaDashboardConfigB64}" | base64 -d > /etc/grafana/provisioning/dashboards/dashboard.yml
 
-# Copy dashboard JSON files
-${dashboardsB64.map(d => `echo "${d.content}" | base64 -d > /etc/grafana/dashboards/${d.filename}`).join("\n")}
+# Extract dashboard files from compressed tarball
+echo "${dashboardsTarballB64}" | base64 -d | tar -xzf - -C /etc/grafana/dashboards/
 
 docker rm -f grafana || true
 docker run -d --name grafana --restart unless-stopped \
@@ -881,8 +881,6 @@ export const westPublicIp = pipWest.ipAddress;
 export const eastPrivateIp = nicEast.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
 export const westPrivateIp = nicWest.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
 export const builderhubPrivateIp = nicBuilderhub.ipConfigurations.apply(cfg => cfg?.[0]?.privateIPAddress);
-export const eastNicPrivateFqdn = nicEast.dnsSettings.apply(ds => ds?.internalFqdn);
-export const westNicPrivateFqdn = nicWest.dnsSettings.apply(ds => ds?.internalFqdn);
 export const builderhubNicPrivateFqdn = nicBuilderhub.dnsSettings.apply(ds => ds?.internalFqdn);
 export const eastPrivateFqdn = pulumi.interpolate`vm-eastus.${privateZoneName}`;
 export const westPrivateFqdn = pulumi.interpolate`vm-westeurope.${privateZoneName}`;
