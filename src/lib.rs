@@ -3,7 +3,7 @@
 use crate::{
     builderhub::PeersUpdater,
     cache::SignerCache,
-    consts::{DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_HTTP_TIMEOUT_SECS},
+    forwarder::client::{default_http_builder, ClientPool},
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
@@ -20,10 +20,11 @@ use axum::{
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
-use ingress::forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
+    num::NonZero,
     str::FromStr as _,
     sync::Arc,
     time::{Duration, Instant},
@@ -44,6 +45,7 @@ pub mod builderhub;
 mod cache;
 pub mod consts;
 pub mod entity;
+pub mod forwarder;
 pub mod indexer;
 pub mod jsonrpc;
 pub mod metrics;
@@ -106,14 +108,7 @@ pub async fn run_with_listeners(
     let local_signer = orderflow_signer.address();
     tracing::info!(address = %local_signer, "Orderflow signer configured");
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-        .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-        .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-            DEFAULT_CONNECTION_LIMIT_PER_HOST,
-            "local-builder".to_string(),
-        ))
-        .build()?;
+    let client = default_http_builder().build().expect("to create local-builder client");
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
 
@@ -127,6 +122,7 @@ pub async fn run_with_listeners(
             builder_hub,
             peers.clone(),
             args.disable_forwarding,
+            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
@@ -144,6 +140,7 @@ pub async fn run_with_listeners(
             peer_store,
             peers.clone(),
             args.disable_forwarding,
+            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
@@ -159,7 +156,8 @@ pub async fn run_with_listeners(
         let local_sender = spawn_forwarder(
             String::from("local-builder"),
             builder_url.to_string(),
-            client.clone(),
+            // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.
+            ClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
             &ctx.task_executor,
         )?;
 

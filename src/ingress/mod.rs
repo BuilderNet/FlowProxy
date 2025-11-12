@@ -7,8 +7,8 @@ use crate::{
         UNKNOWN, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
+    forwarder::IngressForwarders,
     indexer::{IndexerHandle, OrderIndexer as _},
-    ingress::forwarder::IngressForwarders,
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
@@ -47,7 +47,6 @@ use time::UtcDateTime;
 use tracing::*;
 
 pub mod error;
-pub mod forwarder;
 use error::IngressError;
 
 #[derive(Debug)]

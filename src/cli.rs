@@ -1,4 +1,4 @@
-use std::{convert::Infallible, path::PathBuf};
+use std::{convert::Infallible, num::NonZero, path::PathBuf};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -240,6 +240,15 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
+    /// For each peer, the size of the HTTP client pool used to forward requests.
+    #[clap(
+        long = "http.client-pool-size",
+        default_value_t = NonZero::new(8).expect("non-zero"),
+        env = "CLIENT_POOL_SIZE",
+        id = "CLIENT_POOL_SIZE"
+    )]
+    pub client_pool_size: NonZero<usize>,
+
     /// The number of IO worker threads used in Tokio.
     #[clap(long, default_value_t = 4, env = "IO_THREADS", id = "IO_THREADS")]
     pub io_threads: usize,
@@ -278,6 +287,7 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
+            client_pool_size: NonZero::new(8).unwrap(),
             io_threads: 4,
             compute_threads: 4,
             cache: CacheArgs {

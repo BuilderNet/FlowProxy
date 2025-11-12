@@ -8,9 +8,6 @@ use prometric_derive::metrics;
 /// initialized only once.
 pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> = LazyLock::new(SystemMetrics::default);
 
-/// Global HTTP metrics.
-pub(crate) static HTTP_METRICS: LazyLock<HttpMetrics> = LazyLock::new(HttpMetrics::default);
-
 /// Global Clickhouse metrics.
 pub(crate) static CLICKHOUSE_METRICS: LazyLock<ClickhouseMetrics> =
     LazyLock::new(ClickhouseMetrics::default);
@@ -24,13 +21,6 @@ pub(crate) struct BuilderHubMetrics {
     /// The total number of peer request failures.
     #[metric(labels = ["error"])]
     peer_request_failures: Counter,
-}
-
-#[metrics(scope = "forwarder")]
-pub(crate) struct HttpMetrics {
-    /// The current number of open HTTP connections.
-    #[metric(labels = ["peer_name"])]
-    open_http_connections: Gauge,
 }
 
 /// Forwarder metrics.

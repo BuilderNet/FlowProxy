@@ -1,15 +1,16 @@
 use crate::{
-    consts::{
-        DEFAULT_CONNECTION_LIMIT_PER_HOST, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_HTTP_TIMEOUT_SECS,
-        DEFAULT_POOL_IDLE_TIMEOUT_SECS,
+    forwarder::{
+        client::{default_http_builder, ClientPool},
+        spawn_forwarder, PeerHandle,
     },
-    ingress::forwarder::{spawn_forwarder, PeerHandle},
     metrics::BuilderHubMetrics,
-    utils, DEFAULT_SYSTEM_PORT,
+    DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
-use std::{convert::Infallible, fmt::Debug, future::Future, sync::Arc, time::Duration};
+use std::{
+    convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc, time::Duration,
+};
 
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Certificate;
@@ -162,6 +163,8 @@ pub struct PeersUpdater<P: PeerStore> {
     disable_forwarding: bool,
     /// The metrics for the peer updater.
     metrics: Arc<BuilderHubMetrics>,
+    /// For each peer indicates the size of the HTTP client pool used to connect to it.
+    client_pool_size: NonZero<usize>,
 }
 
 impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
@@ -171,6 +174,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         peer_store: P,
         peers: Arc<DashMap<String, PeerHandle>>,
         disable_forwarding: bool,
+        client_pool_size: NonZero<usize>,
         task_executor: TaskExecutor,
     ) -> Self {
         Self {
@@ -178,6 +182,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             peer_store,
             peers,
             disable_forwarding,
+            client_pool_size,
             task_executor,
             metrics: Arc::new(BuilderHubMetrics::default()),
         }
@@ -239,33 +244,31 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
         // Self-filter any new peers before connecting to them.
         if new_peer && peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer {
-            // Create a new client for each peer.
-            let mut client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
-                .connect_timeout(Duration::from_millis(DEFAULT_CONNECT_TIMEOUT_MS))
-                .pool_idle_timeout(Duration::from_secs(DEFAULT_POOL_IDLE_TIMEOUT_SECS))
-                .pool_max_idle_per_host(DEFAULT_CONNECTION_LIMIT_PER_HOST)
-                .connector_layer(utils::limit::ConnectionLimiterLayer::new(
-                    DEFAULT_CONNECTION_LIMIT_PER_HOST,
-                    peer.name.clone(),
-                ));
-
-            // If the TLS certificate is present, use HTTPS and configure the client to use it.
-            if let Some(ref tls_cert) = peer.tls_certificate() {
-                client = client.https_only(true).add_root_certificate(tls_cert.clone())
-            }
-
             if self.disable_forwarding {
                 tracing::warn!("skipped spawning forwarder (disabled forwarding)");
                 return;
             }
 
-            let client = client.build().expect("Failed to build client");
+            // Create a client pool.
+            let client_pool = ClientPool::new(self.client_pool_size, || {
+                let client_builder = default_http_builder();
+
+                // If the TLS certificate is present, use HTTPS and configure the client to use it.
+                if let Some(ref tls_cert) = peer.tls_certificate() {
+                    client_builder
+                        .https_only(true)
+                        .add_root_certificate(tls_cert.clone())
+                        .build()
+                        .expect("failed to build client")
+                } else {
+                    client_builder.build().expect("failed to build client")
+                }
+            });
 
             let sender = spawn_forwarder(
                 peer.name.clone(),
                 peer.system_api(),
-                client.clone(),
+                client_pool.clone(),
                 &self.task_executor,
             )
             .expect("malformed url");
