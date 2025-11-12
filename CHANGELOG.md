@@ -12,3 +12,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Percentages are now integers from 0 to 100, instead of floats from 0.0 to 1.0.
 - Increase default order cache capacity to 1,048,576 entries (32 MiB).
 - Add `--io-threads` (`IO_THREADS`) and `--compute-threads` (`COMPUTE_THREADS`) CLI flags, defaults to 4 and 2 respectively.
+- Switch to HTTP/2 for system API (incoming and outgoing connections):
+    - Add `--http.client-pool-size` (`CLIENT_POOL_SIZE`) CLI flag, defaults to 8. HTTP/2 streams will be multiplexed over these clients.
