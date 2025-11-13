@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [1.2.0] - 2025-11-12
+## [v1.2.1] - 2025-11-13
+
+### Changed
+
+- Add more buckets to histogram metrics.
+- Performance improvements for bundle processing.
+
+## [v1.2.0] - 2025-11-12
 
 ### Changed
 
