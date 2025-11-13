@@ -339,17 +339,38 @@ impl OrderflowIngress {
         let received_at = UtcInstant::now();
         let payload_size = body.len();
 
+        // Before doing anything else, verify that the signature header is present.
+        if headers
+            .get(BUILDERNET_SIGNATURE_HEADER)
+            .or_else(|| headers.get(FLASHBOTS_SIGNATURE_HEADER))
+            .is_none()
+        {
+            tracing::error!(
+                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
+                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
+                "error verifying peer signature"
+            );
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
+        }
+
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
             Ok(decompressed) => decompressed,
             Err(error) => return JsonRpcResponse::error(Value::Null, error),
         };
+
+        let mut priority = Priority::Low;
+        if let Some(priority_) = maybe_buildernet_priority(&headers) {
+            priority = priority_;
+        } else {
+            tracing::trace!("failed to retrieve priority from request, defaulting to {priority}");
+        }
 
         let peer = 'peer: {
             let body_clone = body.clone();
             let headers_clone = headers.clone();
             if let Some(address) = ingress
                 .pqueues
-                .spawn_with_priority(Priority::Medium, move || {
+                .spawn_with_priority(priority, move || {
                     maybe_verify_signature(&headers_clone, &body_clone, USE_LEGACY_SIGNATURE)
                 })
                 .await
@@ -387,14 +408,6 @@ impl OrderflowIngress {
         tracing::Span::current().record("method", tracing::field::display(&request.method));
 
         let sent_at = headers.get(BUILDERNET_SENT_AT_HEADER).and_then(UtcDateTime::parse_header);
-
-        // TODO: Change to Low once Go proxy is updated / everyone is running Rust proxy.
-        let mut priority = Priority::Medium;
-        if let Some(priority_) = maybe_buildernet_priority(&headers) {
-            priority = priority_;
-        } else {
-            tracing::trace!("failed to retrieve priority from request, defaulting to {priority}");
-        }
 
         tracing::trace!(params = ?request.params, "serving json-rpc request");
 
@@ -664,17 +677,28 @@ impl OrderflowIngress {
 
         // Decode and validate the bundle.
         let decoder = self.system_bundle_decoder;
-        let bundle = self
-            .pqueues
-            .spawn_with_priority(priority, move || {
-                let metadata = SystemBundleMetadata { signer, received_at, priority };
-                decoder.try_decode_with_lookup(bundle, metadata, lookup)
-            })
-            .await
-            .inspect_err(|e| {
+
+        // NOTE: If there are no transactions in the bundle, we can decode it directly without
+        // spawning a task. The most computationally expensive part of decoding is related
+        // to transactions.
+        let metadata = SystemBundleMetadata { signer, received_at, priority };
+        let bundle = if bundle.txs.is_empty() {
+            // Decode normally, without spawning a task or looking up signers.
+            decoder.try_decode(bundle, metadata).inspect_err(|e| {
                 tracing::error!(?e, "failed to decode bundle");
                 self.user_metrics.validation_errors(e.to_string()).inc();
-            })?;
+            })?
+        } else {
+            self.pqueues
+                .spawn_with_priority(priority, move || {
+                    decoder.try_decode_with_lookup(bundle, metadata, lookup)
+                })
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(?e, "failed to decode bundle");
+                    self.user_metrics.validation_errors(e.to_string()).inc();
+                })?
+        };
 
         let elapsed = start.elapsed();
 
@@ -746,21 +770,12 @@ impl OrderflowIngress {
         self.order_cache.insert(bundle_hash);
 
         // Decode and validate the bundle.
-        let bundle = self
-            .pqueues
-            .spawn_with_priority(priority, move || {
-                SystemMevShareBundle::try_from_bundle_and_signer(
-                    bundle,
-                    signer,
-                    received_at,
-                    priority,
-                )
-            })
-            .await
-            .inspect_err(|e| {
-                tracing::error!(?e, "error decoding bundle");
-                self.user_metrics.validation_errors(e.to_string()).inc();
-            })?;
+        let bundle = SystemMevShareBundle::try_from_bundle_and_signer(
+            bundle,
+            signer,
+            received_at,
+            priority,
+        )?;
         let elapsed = start.elapsed();
 
         match bundle.decoded.as_ref() {
