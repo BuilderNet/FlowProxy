@@ -664,17 +664,25 @@ impl OrderflowIngress {
 
         // Decode and validate the bundle.
         let decoder = self.system_bundle_decoder;
-        let bundle = self
-            .pqueues
-            .spawn_with_priority(priority, move || {
-                let metadata = SystemBundleMetadata { signer, received_at, priority };
-                decoder.try_decode_with_lookup(bundle, metadata, lookup)
-            })
-            .await
-            .inspect_err(|e| {
-                tracing::error!(?e, "failed to decode bundle");
-                self.user_metrics.validation_errors(e.to_string()).inc();
-            })?;
+
+        // NOTE: If there are no transactions in the bundle, we can decode it directly without
+        // spawning a task. The most computationally expensive part of decoding is related
+        // to transactions.
+        let metadata = SystemBundleMetadata { signer, received_at, priority };
+        let bundle = if bundle.txs.is_empty() {
+            // Decode normally, without spawning a task or looking up signers.
+            decoder.try_decode(bundle, metadata)?
+        } else {
+            self.pqueues
+                .spawn_with_priority(priority, move || {
+                    decoder.try_decode_with_lookup(bundle, metadata, lookup)
+                })
+                .await
+                .inspect_err(|e| {
+                    tracing::error!(?e, "failed to decode bundle");
+                    self.user_metrics.validation_errors(e.to_string()).inc();
+                })?
+        };
 
         let elapsed = start.elapsed();
 
@@ -746,21 +754,12 @@ impl OrderflowIngress {
         self.order_cache.insert(bundle_hash);
 
         // Decode and validate the bundle.
-        let bundle = self
-            .pqueues
-            .spawn_with_priority(priority, move || {
-                SystemMevShareBundle::try_from_bundle_and_signer(
-                    bundle,
-                    signer,
-                    received_at,
-                    priority,
-                )
-            })
-            .await
-            .inspect_err(|e| {
-                tracing::error!(?e, "error decoding bundle");
-                self.user_metrics.validation_errors(e.to_string()).inc();
-            })?;
+        let bundle = SystemMevShareBundle::try_from_bundle_and_signer(
+            bundle,
+            signer,
+            received_at,
+            priority,
+        )?;
         let elapsed = start.elapsed();
 
         match bundle.decoded.as_ref() {
