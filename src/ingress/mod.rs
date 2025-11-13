@@ -671,7 +671,10 @@ impl OrderflowIngress {
         let metadata = SystemBundleMetadata { signer, received_at, priority };
         let bundle = if bundle.txs.is_empty() {
             // Decode normally, without spawning a task or looking up signers.
-            decoder.try_decode(bundle, metadata)?
+            decoder.try_decode(bundle, metadata).inspect_err(|e| {
+                tracing::error!(?e, "failed to decode bundle");
+                self.user_metrics.validation_errors(e.to_string()).inc();
+            })?
         } else {
             self.pqueues
                 .spawn_with_priority(priority, move || {
