@@ -40,7 +40,7 @@ pub(crate) struct ForwarderMetrics {
     #[metric]
     json_rpc_decoding_failures: Counter,
     /// The duration of RPC calls in seconds.
-    #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.035, 0.05, 0.0625, 0.075, 0.0875, 0.100, 0.125, 0.150, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0])]
     rpc_call_duration: Histogram,
     /// The total number of RPC call failures.
     #[metric(labels = ["rpc_code"])]
@@ -75,7 +75,7 @@ pub(crate) struct IngressMetrics {
     #[metric(labels = ["method", "path", "status"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     http_request_duration: Histogram,
     /// The duration of RPC calls.
-    #[metric(labels = ["method", "priority"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(labels = ["method", "priority"], buckets = [0.0001, 0.00025, 0.0005, 0.00075, 0.001, 0.0025, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     rpc_request_duration: Histogram,
     /// The number of transactions per bundle.
     #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
@@ -169,16 +169,16 @@ pub(crate) struct ParquetMetrics {
 #[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
-    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
     bundle_processing_time: Histogram,
     /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
     mev_share_bundle_processing_time: Histogram,
     /// End-to-end transaction processing time in seconds.
-    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
     transaction_processing_time: Histogram,
     /// End-to-end system order processing time in seconds.
-    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = [0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0])]
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
     system_order_processing_time: Histogram,
     /// Number of times the queue capacity was hit per priority.
     #[metric(labels = ["priority"])]
@@ -193,7 +193,7 @@ pub(crate) struct SystemMetrics {
 pub(crate) struct WorkerMetrics {
     /// The duration of worker tasks in seconds, per priority. Includes the time spent waiting for
     /// the permit.
-    #[metric(rename = "task_duration_seconds", labels = ["priority"], buckets = [0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.010, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
+    #[metric(rename = "task_duration_seconds", labels = ["priority"], buckets = [0.00005, 0.0001, 0.00025, 0.0005, 0.00075, 0.001, 0.0025, 0.005, 0.010, 0.025, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
     task_durations: Histogram,
 }
 
