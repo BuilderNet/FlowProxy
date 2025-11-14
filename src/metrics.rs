@@ -168,20 +168,25 @@ pub(crate) struct ParquetMetrics {
     queue_size: Gauge,
 }
 
+const PROCESSING_TIME_BUCKETS: &[f64] = &[
+    0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5,
+    1.0, 2.0,
+];
+
 #[derive(Debug, Clone)]
 #[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
-    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
     bundle_processing_time: Histogram,
     /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
     mev_share_bundle_processing_time: Histogram,
     /// End-to-end transaction processing time in seconds.
-    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
     transaction_processing_time: Histogram,
     /// End-to-end system order processing time in seconds.
-    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5, 1.0, 2.0])]
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
     system_order_processing_time: Histogram,
     /// Number of times the queue capacity was hit per priority.
     #[metric(labels = ["priority"])]
