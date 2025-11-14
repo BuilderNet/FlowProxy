@@ -407,7 +407,14 @@ impl OrderflowIngress {
         };
         tracing::Span::current().record("method", tracing::field::display(&request.method));
 
+        // Record the one-way latency of the RPC call.
         let sent_at = headers.get(BUILDERNET_SENT_AT_HEADER).and_then(UtcDateTime::parse_header);
+        if let Some(sent_at) = sent_at {
+            ingress
+                .system_metrics
+                .rpc_latency_oneway(&peer, &request.method)
+                .observe((received_at.utc - sent_at).as_seconds_f64());
+        }
 
         tracing::trace!(params = ?request.params, "serving json-rpc request");
 
