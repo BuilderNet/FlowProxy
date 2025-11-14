@@ -98,7 +98,7 @@ pub(crate) struct IngressMetrics {
     /// The current signer cache entry count.
     #[metric]
     signer_cache_entry_count: Gauge,
-    /// The one-way latency of an RPC call (not round-trip).
+    /// The one-way latency of an inbound RPC call (not round-trip).
     #[metric(rename = "rpc_latency_oneway_seconds", labels = ["source", "method"], buckets = [0.0001, 0.00025, 0.0005, 0.00075, 0.001, 0.0025, 0.005, 0.010, 0.020, 0.035, 0.050, 0.075, 0.100, 0.150, 0.200, 0.500, 1.0])]
     rpc_latency_oneway: Histogram,
 }
