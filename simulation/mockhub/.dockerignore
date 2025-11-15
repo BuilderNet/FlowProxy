@@ -1,0 +1,11 @@
+# Ignore target directory (compiled artifacts)
+target/
+
+# Ignore Cargo lock for libraries (keep it for binaries)
+# Cargo.lock
+
+# Ignore any local config or test data
+*.log
+*.tmp
+.DS_Store
+
