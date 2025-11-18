@@ -1,49 +1,41 @@
 use crate::{
-    forwarder::{client::HttpClientPool, record_e2e_metrics, ForwardingRequest},
+    forwarder::{client::TcpTlsClientPool, record_e2e_metrics, ForwardingRequest},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     priority::{self},
 };
 use alloy_primitives::B256;
+use alloy_rlp::Bytes;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::StatusCode;
+use msg_socket::ReqError;
 use rbuilder_utils::tasks::TaskExecutor;
-use reqwest::Url;
 use std::{
     future::Future,
+    net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tokio::sync::mpsc;
 use tracing::*;
 
-pub fn spawn_http_forwarder(
+pub fn spawn_tcp_forwarder(
     name: String,
-    url: String,
-    client: HttpClientPool, // request client to be reused for http senders
+    address: SocketAddr,
+    client: TcpTlsClientPool,
     task_executor: &TaskExecutor,
-) -> eyre::Result<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
+) -> priority::channel::UnboundedSender<Arc<ForwardingRequest>> {
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
-    match Url::parse(&url)?.scheme() {
-        "http" | "https" => {
-            info!(%name, %url, "Spawning HTTP forwarder");
-            let (forwarder, decoder) =
-                HttpForwarder::new(client.clone(), name.clone(), url, request_rx);
-            task_executor.spawn(forwarder);
-            task_executor.spawn(decoder.run());
-        }
 
-        scheme => {
-            error!(scheme = %scheme, url = %url, builder = %name, "Unsupported URL scheme");
-            eyre::bail!("unsupported url scheme {scheme}. url: {url}. builder: {name}")
-        }
-    }
-    Ok(request_tx)
+    let (forwarder, decoder) = TcpForwarder::new(client.clone(), name.clone(), address, request_rx);
+    task_executor.spawn(forwarder);
+    task_executor.spawn(decoder.run());
+
+    request_tx
 }
 
-/// The response received by the [`HttpForwarder`] after sending a request.
+/// The response received by the [`TcpForwarder`] after sending a request.
 #[derive(Debug)]
 struct ForwarderResponse<Ok, Err> {
     /// Whether this was a big request.
@@ -63,35 +55,35 @@ struct ForwarderResponse<Ok, Err> {
 
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
 
-/// An HTTP forwarder that forwards requests to a peer.
-struct HttpForwarder {
-    client: HttpClientPool,
+/// An TCP forwarder that forwards requests to a peer.
+struct TcpForwarder {
+    client: TcpTlsClientPool,
     /// The name of the builder we're forwarding to.
     peer_name: String,
     /// The URL of the peer.
-    peer_url: String,
+    peer_address: SocketAddr,
     /// The receiver of forwarding requests.
     request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The sender to decode [`reqwest::Response`] errors.
     error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
     /// The pending responses that need to be processed.
-    pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
+    pending: FuturesUnordered<RequestFut<Bytes, ReqError>>,
     /// The metrics for the forwarder.
     metrics: ForwarderMetrics,
 }
 
-impl HttpForwarder {
+impl TcpForwarder {
     fn new(
-        client: HttpClientPool,
+        client: TcpTlsClientPool,
         name: String,
-        url: String,
+        address: SocketAddr,
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> (Self, ResponseErrorDecoder) {
         let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
         let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
         let decoder = ResponseErrorDecoder {
             peer_name: name.clone(),
-            peer_url: url.clone(),
+            peer_address: address,
             rx: error_decoder_rx,
             metrics: metrics.clone(),
         };
@@ -100,7 +92,7 @@ impl HttpForwarder {
             Self {
                 client,
                 peer_name: name,
-                peer_url: url,
+                peer_address: address,
                 request_rx,
                 pending: FuturesUnordered::new(),
                 error_decoder_tx,
@@ -110,16 +102,12 @@ impl HttpForwarder {
         )
     }
 
-    /// Send an HTTP request to the peer, returning a future that resolves to the response.
-    fn send_http_request(
-        &self,
-        request: Arc<ForwardingRequest>,
-    ) -> RequestFut<reqwest::Response, reqwest::Error> {
+    /// Send an TCP request to the peer, returning a future that resolves to the response.
+    fn send_tcp_request(&self, request: Arc<ForwardingRequest>) -> RequestFut<Bytes, ReqError> {
         let client_pool = self.client.clone();
-        let peer_url = self.peer_url.clone();
 
         let request_span = request.span.clone();
-        let span = tracing::info_span!(parent: request_span.clone(), "http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
+        let span = tracing::info_span!(parent: request_span.clone(), "tcp_forwarder_request", peer_url = %self.peer_address, is_big = request.is_big());
 
         let fut = async move {
             let direction = request.direction;
@@ -127,6 +115,7 @@ impl HttpForwarder {
             let hash = request.hash();
 
             // Try to avoid cloning the body and headers if there is only one reference.
+            // TODO: custom format to add headers.
             let (order, headers) = Arc::try_unwrap(request).map_or_else(
                 |req| (req.encoded_order.clone(), req.headers.clone()),
                 |inner| (inner.encoded_order, inner.headers),
@@ -136,13 +125,8 @@ impl HttpForwarder {
 
             let order_type = order.order_type();
             let start_time = Instant::now();
-            let response = client_pool
-                .client()
-                .post(peer_url)
-                .body(order.encoding().to_vec())
-                .headers(headers)
-                .send()
-                .await;
+            // TODO: custom format to add headers.
+            let response = client_pool.socket().request(order.encoding().to_vec().into()).await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
             ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
@@ -152,14 +136,14 @@ impl HttpForwarder {
         Box::pin(fut)
     }
 
-    #[tracing::instrument(skip_all, name = "http_forwarder_response"
+    #[tracing::instrument(skip_all, name = "tcp_forwarder_response"
         fields(
-            peer_url = %self.peer_url,
+            peer_url = %self.peer_address,
             is_big = response.is_big,
             elapsed = tracing::field::Empty,
             status = tracing::field::Empty,
     ))]
-    fn on_response(&mut self, response: ForwarderResponse<reqwest::Response, reqwest::Error>) {
+    fn on_response(&mut self, response: ForwarderResponse<Bytes, ReqError>) {
         let ForwarderResponse {
             start_time,
             response: response_result,
@@ -174,63 +158,52 @@ impl HttpForwarder {
 
         match response_result {
             Ok(response) => {
-                let status = response.status();
-                tracing::Span::current().record("status", tracing::field::debug(&status));
-
-                // Print warning if the RPC call took more than 1 second.
-                if elapsed > Duration::from_secs(1) {
-                    warn!("long rpc call");
-                }
-
-                if status.is_success() {
-                    trace!("received success response");
-
-                    if status != StatusCode::OK {
-                        warn!("non-ok status code");
-                    }
-
-                    // Only record success if the status is OK.
-                    self.metrics
-                        .rpc_call_duration(order_type, is_big.to_string())
-                        .observe(elapsed.as_secs_f64());
-                } else {
-                    // If we have a non-OK status code, also record it.
-                    error!("failed to forward request");
-                    let reason =
-                        status.canonical_reason().map(String::from).unwrap_or(status.to_string());
-
-                    self.metrics.http_call_failures(reason).inc();
-
-                    if let Err(e) =
-                        self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
-                    {
-                        error!(?e, "failed to send error response to decoder");
-                    }
-                }
+                // TODO: handle TCP response
+                // let status = response.status();
+                // tracing::Span::current().record("status", tracing::field::debug(&status));
+                //
+                // // Print warning if the RPC call took more than 1 second.
+                // if elapsed > Duration::from_secs(1) {
+                //     warn!("long rpc call");
+                // }
+                //
+                // if status.is_success() {
+                //     trace!("received success response");
+                //
+                //     if status != StatusCode::OK {
+                //         warn!("non-ok status code");
+                //     }
+                //
+                //     // Only record success if the status is OK.
+                //     self.metrics
+                //         .rpc_call_duration(order_type, is_big.to_string())
+                //         .observe(elapsed.as_secs_f64());
+                // } else {
+                //     // If we have a non-OK status code, also record it.
+                //     error!("failed to forward request");
+                //     let reason =
+                //         status.canonical_reason().map(String::from).unwrap_or(status.to_string());
+                //
+                //     self.metrics.tcp_call_failures(reason).inc();
+                //
+                //     if let Err(e) =
+                //         self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
+                //     {
+                //         error!(?e, "failed to send error response to decoder");
+                //     }
+                // }
             }
-            Err(error) => {
-                error!("error forwarding request");
+            Err(e) => {
+                error!(?e, "error forwarding request");
 
-                // Parse the reason, which is either the status code reason of the error message
-                // itself. If the request fails for non-network reasons, the status code may be
-                // None.
-                let reason = error
-                    .status()
-                    .and_then(|s| s.canonical_reason().map(String::from))
-                    .unwrap_or(format!("{error:?}"));
-
-                if error.is_connect() {
-                    warn!(?reason, "connection error");
-                    self.metrics.http_connect_failures(reason).inc();
-                } else {
-                    self.metrics.http_call_failures(reason).inc();
-                }
+                // TODO: better error handling?
+                self.metrics.tcp_call_failures(e.to_string()).inc();
             }
         }
     }
 }
 
-impl Future for HttpForwarder {
+impl Future for TcpForwarder {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -252,7 +225,7 @@ impl Future for HttpForwarder {
                     return Poll::Ready(());
                 };
 
-                let fut = this.send_http_request(request);
+                let fut = this.send_tcp_request(request);
                 this.pending.push(fut);
 
                 this.metrics.inflight_requests().set(this.pending.len());
@@ -289,14 +262,14 @@ impl ErrorDecoderInput {
     }
 }
 
-/// A [`reqwest::Response`] error decoder, associated to a certain [`HttpForwarder`] which traces
+/// A [`reqwest::Response`] error decoder, associated to a certain [`tcpForwarder`] which traces
 /// errors from client error responses.
 #[derive(Debug)]
 pub struct ResponseErrorDecoder {
     /// The name of the builder
     pub peer_name: String,
-    /// The url of the builder
-    pub peer_url: String,
+    /// The socket address of the peer
+    pub peer_address: SocketAddr,
     /// The receiver of the error responses.
     pub rx: mpsc::Receiver<ErrorDecoderInput>,
     /// Metrics from the associated forwarder.
@@ -326,16 +299,5 @@ impl ResponseErrorDecoder {
             let span = input.span.clone();
             self.decode(input).instrument(span).await;
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use reqwest::Url;
-
-    #[test]
-    fn parse_url_scheme() {
-        assert_eq!(Url::parse("http://127.0.0.1:8080").unwrap().scheme(), "http");
-        assert_eq!(Url::parse("https://127.0.0.1:8080").unwrap().scheme(), "https");
     }
 }

@@ -4,7 +4,7 @@ use crate::{
     builderhub::PeersUpdater,
     cache::SignerCache,
     forwarder::{
-        client::{default_http_builder, ClientPool},
+        client::{default_http_builder, HttpClientPool},
         http::spawn_http_forwarder,
     },
     metrics::IngressMetrics,
@@ -160,7 +160,7 @@ pub async fn run_with_listeners(
             String::from("local-builder"),
             builder_url.to_string(),
             // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.
-            ClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
+            HttpClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
             &ctx.task_executor,
         )?;
 

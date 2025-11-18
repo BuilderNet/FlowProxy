@@ -1,7 +1,8 @@
 use crate::{
     forwarder::{
-        client::{default_http_builder, ClientPool},
+        client::{default_http_builder, HttpClientPool, TcpTlsClientPool},
         http::spawn_http_forwarder,
+        tcp::spawn_tcp_forwarder,
         PeerHandle,
     },
     metrics::BuilderHubMetrics,
@@ -10,8 +11,12 @@ use crate::{
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
+use msg_socket::ReqSocket;
+use msg_transport::tcp_tls::{self, TcpTls};
+use openssl::ssl::{SslConnector, SslMethod};
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc, time::Duration,
+    convert::Infallible, fmt::Debug, future::Future, net::SocketAddr, num::NonZero, str::FromStr,
+    sync::Arc, time::Duration,
 };
 
 use rbuilder_utils::tasks::TaskExecutor;
@@ -292,11 +297,47 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         }
 
         if let Some(proxy_info) = self.proxy_info(&peer).await {
-            // TODO: create tcp reqrep pool
+            let mut sockets = Vec::with_capacity(self.client_pool_size.get());
+
+            let ssl_connector =
+                SslConnector::builder(SslMethod::tls()).expect("valid config").build();
+            let config = tcp_tls::config::Client::new(peer.dns_name.clone())
+                .with_ssl_connector(ssl_connector);
+            let socket_addr_str = format!("{}:{}", peer.ip.clone(), proxy_info.system_api_port);
+            let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::error!(?e, ip = %peer.ip, "failed to parse ip and port into socket address");
+                    return;
+                }
+            };
+
+            for _ in 0..self.client_pool_size.get() {
+                // TODO: add mTLS support with self certificates
+                let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
+                let mut socket = ReqSocket::new(transport);
+                if let Err(e) = socket.connect(socket_addr).await {
+                    tracing::error!(?e, ?socket_addr, "failed to initialize connection");
+                    return;
+                }
+                sockets.push(socket);
+            }
+            let client_pool = TcpTlsClientPool::new(sockets);
+
+            let sender = spawn_tcp_forwarder(
+                peer.name.clone(),
+                socket_addr,
+                client_pool,
+                &self.task_executor,
+            );
+
+            tracing::debug!("inserted configuration");
+            entry.insert(PeerHandle { info: peer, sender });
+            return;
         }
 
         // Create a client pool.
-        let client_pool = ClientPool::new(self.client_pool_size, || {
+        let client_pool = HttpClientPool::new(self.client_pool_size, || {
             let client_builder = default_http_builder();
 
             // If the TLS certificate is present, use HTTPS and configure the client to use it.

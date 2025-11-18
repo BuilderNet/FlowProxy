@@ -25,6 +25,7 @@ use tracing::*;
 
 pub mod client;
 pub mod http;
+pub mod tcp;
 
 /// Sign and build the signature header in the form of `signer_address:signature`.
 fn build_signature_header(signer: &PrivateKeySigner, body: &[u8]) -> String {
