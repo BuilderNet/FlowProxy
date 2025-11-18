@@ -2,6 +2,7 @@ use crate::{
     forwarder::{client::TcpTlsClientPool, record_e2e_metrics, ForwardingRequest},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
+    primitives::WithHeaders,
     priority::{self},
 };
 use alloy_primitives::B256;
@@ -10,12 +11,13 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use msg_socket::ReqError;
 use rbuilder_utils::tasks::TaskExecutor;
 use std::{
+    collections::HashMap,
     future::Future,
     net::SocketAddr,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
 use tracing::*;
@@ -28,9 +30,8 @@ pub fn spawn_tcp_forwarder(
 ) -> priority::channel::UnboundedSender<Arc<ForwardingRequest>> {
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
 
-    let (forwarder, decoder) = TcpForwarder::new(client.clone(), name.clone(), address, request_rx);
+    let forwarder = TcpForwarder::new(client.clone(), name.clone(), address, request_rx);
     task_executor.spawn(forwarder);
-    task_executor.spawn(decoder.run());
 
     request_tx
 }
@@ -64,8 +65,6 @@ struct TcpForwarder {
     peer_address: SocketAddr,
     /// The receiver of forwarding requests.
     request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
-    /// The sender to decode [`reqwest::Response`] errors.
-    error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<Bytes, ReqError>>,
     /// The metrics for the forwarder.
@@ -78,28 +77,16 @@ impl TcpForwarder {
         name: String,
         address: SocketAddr,
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
-    ) -> (Self, ResponseErrorDecoder) {
-        let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
+    ) -> Self {
         let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
-        let decoder = ResponseErrorDecoder {
-            peer_name: name.clone(),
+        Self {
+            client,
+            peer_name: name,
             peer_address: address,
-            rx: error_decoder_rx,
-            metrics: metrics.clone(),
-        };
-
-        (
-            Self {
-                client,
-                peer_name: name,
-                peer_address: address,
-                request_rx,
-                pending: FuturesUnordered::new(),
-                error_decoder_tx,
-                metrics,
-            },
-            decoder,
-        )
+            request_rx,
+            pending: FuturesUnordered::new(),
+            metrics,
+        }
     }
 
     /// Send an TCP request to the peer, returning a future that resolves to the response.
@@ -125,8 +112,16 @@ impl TcpForwarder {
 
             let order_type = order.order_type();
             let start_time = Instant::now();
-            // TODO: custom format to add headers.
-            let response = client_pool.socket().request(order.encoding().to_vec().into()).await;
+
+            // FIX: remove unwrap
+            let headers = headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+                .collect::<HashMap<String, String>>();
+            let payload = WithHeaders { headers, data: order.encoding().to_vec() };
+            let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
+
+            let response = client_pool.socket().request(data.into()).await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
             ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
@@ -158,40 +153,30 @@ impl TcpForwarder {
 
         match response_result {
             Ok(response) => {
-                // TODO: handle TCP response
-                // let status = response.status();
-                // tracing::Span::current().record("status", tracing::field::debug(&status));
-                //
-                // // Print warning if the RPC call took more than 1 second.
-                // if elapsed > Duration::from_secs(1) {
-                //     warn!("long rpc call");
-                // }
-                //
-                // if status.is_success() {
-                //     trace!("received success response");
-                //
-                //     if status != StatusCode::OK {
-                //         warn!("non-ok status code");
-                //     }
-                //
-                //     // Only record success if the status is OK.
-                //     self.metrics
-                //         .rpc_call_duration(order_type, is_big.to_string())
-                //         .observe(elapsed.as_secs_f64());
-                // } else {
-                //     // If we have a non-OK status code, also record it.
-                //     error!("failed to forward request");
-                //     let reason =
-                //         status.canonical_reason().map(String::from).unwrap_or(status.to_string());
-                //
-                //     self.metrics.tcp_call_failures(reason).inc();
-                //
-                //     if let Err(e) =
-                //         self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
-                //     {
-                //         error!(?e, "failed to send error response to decoder");
-                //     }
-                // }
+                // TODO: review metrics
+
+                self.metrics
+                    .rpc_call_duration(order_type, is_big.to_string())
+                    .observe(elapsed.as_secs_f64());
+
+                let response = match serde_json::from_slice::<JsonRpcResponse<serde_json::Value>>(
+                    response.as_ref(),
+                ) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::error!(?e, ?hash, "failed to deserialize response");
+                        return;
+                    }
+                };
+
+                // Print warning if the RPC call took more than 1 second.
+                if elapsed > Duration::from_secs(1) {
+                    warn!("long rpc call");
+                }
+
+                if let JsonRpcResponseTy::Error { code, message } = response.result_or_error {
+                    tracing::error!(?code, ?message, ?hash, "received error response");
+                }
             }
             Err(e) => {
                 error!(?e, "error forwarding request");
