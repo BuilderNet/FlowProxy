@@ -1,0 +1,76 @@
+name: Rust CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cargo-lint:
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: rustup toolchain install nightly-2025-09-21 --component rustfmt
+      - run: cargo +nightly-2025-09-21 fmt --all --check
+      - run: cargo +1.89.0 clippy --examples --tests --benches --all-features --locked
+        env:
+          RUSTFLAGS: -D warnings
+
+  unit-tests:
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        # Need to specify @master above to work with toolchain var
+        with:
+          toolchain: 1.89.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@nextest
+      - name: Run tests
+        run: cargo nextest run --lib --bins --no-tests=warn --retries 3
+
+  integration-test:
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.89.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@nextest
+      - name: Run integration tests
+        run: cargo nextest run --test '*' --no-tests=warn
+
+  # Find unused dependencies, this will fail if any are found.
+  cargo-shear:
+    runs-on: warp-ubuntu-latest-x64-8x
+    timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-shear
+        run: cargo binstall --no-confirm cargo-shear
+
+      - name: Run cargo shear
+        run: cargo shear
