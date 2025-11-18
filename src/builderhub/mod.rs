@@ -13,10 +13,13 @@ use alloy_primitives::Address;
 use dashmap::DashMap;
 use msg_socket::ReqSocket;
 use msg_transport::tcp_tls::{self, TcpTls};
-use openssl::ssl::{SslConnector, SslMethod};
+use openssl::{
+    ssl::{SslConnector, SslFiletype, SslMethod},
+    x509::X509,
+};
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, net::SocketAddr, num::NonZero, str::FromStr,
-    sync::Arc, time::Duration,
+    convert::Infallible, fmt::Debug, future::Future, net::SocketAddr, num::NonZero, path::PathBuf,
+    str::FromStr, sync::Arc, time::Duration,
 };
 
 use rbuilder_utils::tasks::TaskExecutor;
@@ -72,7 +75,7 @@ impl Peer {
             format!("{}:{}", self.dns_name, DEFAULT_SYSTEM_PORT)
         };
 
-        if self.tls_certificate().is_some() {
+        if self.reqwest_tls_certificate().is_some() {
             format!("https://{host}")
         } else {
             format!("http://{host}")
@@ -81,7 +84,7 @@ impl Peer {
 
     /// Get the TLS certificate from the orderflow proxy credentials.
     /// If the certificate is empty (an empty string), return `None`.
-    pub fn tls_certificate(&self) -> Option<Certificate> {
+    pub fn reqwest_tls_certificate(&self) -> Option<Certificate> {
         if self.instance.tls_cert.is_empty() {
             None
         } else {
@@ -91,6 +94,18 @@ impl Peer {
                 Certificate::from_pem(self.instance.tls_cert.as_bytes())
                     .expect("Valid certificate"),
             )
+        }
+    }
+
+    /// Get the TLS certificate from the orderflow proxy credentials.
+    /// If the certificate is empty (an empty string), return `None`.
+    pub fn openssl_tls_certificate(&self) -> Option<Result<X509, openssl::error::ErrorStack>> {
+        if self.instance.tls_cert.is_empty() {
+            None
+        } else {
+            // SAFETY: We expect the certificate to be valid. It's added as a root
+            // certificate.
+            Some(X509::from_pem(self.instance.tls_cert.as_bytes()))
         }
     }
 }
@@ -154,42 +169,48 @@ impl PeerStore for LocalPeerStore {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct PeersUpdaterConfig {
+    /// The local signer address to filter out self-connections.
+    pub local_signer: Address,
+    /// Whether to disable spawning order forwarders to peers.
+    pub disable_forwarding: bool,
+    /// For each peer indicates the size of the client pool used to connect to it.
+    pub client_pool_size: NonZero<usize>,
+    /// Private key PEM file for client authentication (mTLS)
+    pub private_key_pem_file: PathBuf,
+    /// Certificate PEM file for client authentication (mTLS)
+    pub certificate_pem_file: PathBuf,
+}
+
 /// A [`PeerUpdater`] periodically fetches the list of peers from a BuilderHub peer store,
 /// updating the local list of connected peers and spawning order forwarders.
 #[derive(Debug, Clone)]
 pub struct PeersUpdater<P: PeerStore> {
-    /// The local signer address to filter out self-connections.
-    local_signer: Address,
+    /// Configuration of the updater.
+    config: PeersUpdaterConfig,
     /// The BuilderHub peer store.
     peer_store: P,
     /// The local list of connected peers.
     peers: Arc<DashMap<String, PeerHandle>>,
     /// The task executor to spawn forwarders jobs.
     task_executor: TaskExecutor,
-    /// Whether to disable spawning order forwarders to peers.
-    disable_forwarding: bool,
     /// The metrics for the peer updater.
     metrics: Arc<BuilderHubMetrics>,
-    /// For each peer indicates the size of the HTTP client pool used to connect to it.
-    client_pool_size: NonZero<usize>,
 }
 
 impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     /// Create a new [`PeerUpdater`].
     pub fn new(
-        local_signer: Address,
+        config: PeersUpdaterConfig,
         peer_store: P,
         peers: Arc<DashMap<String, PeerHandle>>,
-        disable_forwarding: bool,
-        client_pool_size: NonZero<usize>,
         task_executor: TaskExecutor,
     ) -> Self {
         Self {
-            local_signer,
             peer_store,
             peers,
-            disable_forwarding,
-            client_pool_size,
+            config,
             task_executor,
             metrics: Arc::new(BuilderHubMetrics::default()),
         }
@@ -287,22 +308,42 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         };
 
         // Self-filter any new peers before connecting to them.
-        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer;
+        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address != self.config.local_signer;
         if !new_peer || is_self {
             return;
         }
-        if self.disable_forwarding {
+        if self.config.disable_forwarding {
             tracing::warn!("skipped spawning forwarder (disabled forwarding)");
             return;
         }
 
         if let Some(proxy_info) = self.proxy_info(&peer).await {
-            let mut sockets = Vec::with_capacity(self.client_pool_size.get());
+            let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
+            let mut config = tcp_tls::config::Client::new(peer.dns_name.clone());
 
-            let ssl_connector =
-                SslConnector::builder(SslMethod::tls()).expect("valid config").build();
-            let config = tcp_tls::config::Client::new(peer.dns_name.clone())
-                .with_ssl_connector(ssl_connector);
+            if let Some(certificate_res) = peer.openssl_tls_certificate() {
+                let certificate = match certificate_res {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(?e, "failed to parse certificate");
+                        return;
+                    }
+                };
+
+                let connector = match tls_connector(
+                    &certificate,
+                    &self.config.private_key_pem_file,
+                    &self.config.certificate_pem_file,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(?e, "failed to create tls connector");
+                        return;
+                    }
+                };
+
+                config = config.with_ssl_connector(connector);
+            }
             let socket_addr_str = format!("{}:{}", peer.ip.clone(), proxy_info.system_api_port);
             let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
                 Ok(a) => a,
@@ -312,8 +353,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
                 }
             };
 
-            for _ in 0..self.client_pool_size.get() {
-                // TODO: add mTLS support with self certificates
+            for _ in 0..self.config.client_pool_size.get() {
                 let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
                 let mut socket = ReqSocket::new(transport);
                 if let Err(e) = socket.connect(socket_addr).await {
@@ -337,11 +377,11 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         }
 
         // Create a client pool.
-        let client_pool = HttpClientPool::new(self.client_pool_size, || {
+        let client_pool = HttpClientPool::new(self.config.client_pool_size, || {
             let client_builder = default_http_builder();
 
             // If the TLS certificate is present, use HTTPS and configure the client to use it.
-            if let Some(ref tls_cert) = peer.tls_certificate() {
+            if let Some(ref tls_cert) = peer.reqwest_tls_certificate() {
                 client_builder
                     .https_only(true)
                     .add_root_certificate(tls_cert.clone())
@@ -363,4 +403,16 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         tracing::debug!("inserted configuration");
         entry.insert(PeerHandle { info: peer, sender });
     }
+}
+
+fn tls_connector(
+    ca_certificate: &X509,
+    private_key_pem_file: &PathBuf,
+    certificate_pem_file: &PathBuf,
+) -> Result<SslConnector, openssl::error::ErrorStack> {
+    let mut builder = SslConnector::builder(SslMethod::tls())?;
+    builder.set_private_key_file(private_key_pem_file, SslFiletype::PEM)?;
+    builder.set_certificate_file(certificate_pem_file, SslFiletype::PEM)?;
+    builder.add_client_ca(ca_certificate)?;
+    Ok(builder.build())
 }

@@ -1,7 +1,7 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
-    builderhub::PeersUpdater,
+    builderhub::{PeersUpdater, PeersUpdaterConfig},
     cache::SignerCache,
     forwarder::{
         client::{default_http_builder, HttpClientPool},
@@ -118,17 +118,23 @@ pub async fn run_with_listeners(
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
 
+    let peer_update_config = PeersUpdaterConfig {
+        local_signer,
+        disable_forwarding: args.disable_forwarding,
+        client_pool_size: args.client_pool_size,
+        certificate_pem_file: args.certificate_pem_file,
+        private_key_pem_file: args.private_key_pem_file,
+    };
+
     if let Some(builder_hub_url) = args.builder_hub_url {
         tracing::debug!(url = builder_hub_url, "Running with BuilderHub");
         let builder_hub = builderhub::Client::new(builder_hub_url);
         builder_hub.register(local_signer).await?;
 
         let peer_updater = PeersUpdater::new(
-            local_signer,
+            peer_update_config,
             builder_hub,
             peers.clone(),
-            args.disable_forwarding,
-            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
@@ -142,11 +148,9 @@ pub async fn run_with_listeners(
 
         let peers = peers.clone();
         let peer_updater = PeersUpdater::new(
-            local_signer,
+            peer_update_config,
             peer_store,
             peers.clone(),
-            args.disable_forwarding,
-            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 

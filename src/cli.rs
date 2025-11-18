@@ -161,6 +161,14 @@ pub struct OrderflowIngressArgs {
     #[clap(long, env = "SYSTEM_LISTEN_ADDR_TCP", id = "SYSTEM_LISTEN_ADDR_TCP")]
     pub system_listen_addr_tcp: SocketAddr,
 
+    /// Private key PEM file for client authentication (mTLS)
+    #[clap(long, env = "PRIVATE_KEY_PEM_FILE", id = "PRIVATE_KEY_PEM_FILE")]
+    pub private_key_pem_file: PathBuf,
+
+    /// Certificate PEM file for client authentication (mTLS)
+    #[clap(long, env = "CERTIFICATE_PEM_FILE", id = "CERTIFICATE_PEM_FILE")]
+    pub certificate_pem_file: PathBuf,
+
     /// Listen URL for receiving builder stats.
     #[clap(long, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
     pub builder_listen_addr: Option<SocketAddr>,
@@ -275,6 +283,8 @@ impl Default for OrderflowIngressArgs {
             system_listen_addr_http: SocketAddr::from_str("127.0.0.1:0").unwrap(),
             system_listen_addr_tcp: SocketAddr::from_str("127.0.0.1:0").unwrap(),
             builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
+            private_key_pem_file: "./".parse().unwrap(),
+            certificate_pem_file: "./".parse().unwrap(),
             builder_url: None,
             builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),
