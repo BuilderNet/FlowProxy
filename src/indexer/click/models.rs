@@ -10,7 +10,7 @@ use alloy_primitives::{Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use clickhouse::Row;
 use rbuilder_primitives::BundleVersion;
-use rbuilder_utils::clickhouse::backup::primitives::{ClickhouseIndexableOrder, ClickhouseRowExt};
+use rbuilder_utils::clickhouse::backup::primitives::{ClickhouseIndexableData, ClickhouseRowExt};
 use time::{OffsetDateTime, UtcDateTime};
 use uuid::Uuid;
 
@@ -126,9 +126,10 @@ pub struct BundleRow {
 }
 
 impl ClickhouseRowExt for BundleRow {
-    const ORDER: &'static str = "bundle";
+    type TraceId = B256;
+    const TABLE_NAME: &'static str = "bundle";
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> Self::TraceId {
         self.hash
     }
 
@@ -352,9 +353,10 @@ pub struct BundleReceiptRow {
 }
 
 impl ClickhouseRowExt for BundleReceiptRow {
-    const ORDER: &'static str = "bundle_receipt";
+    type TraceId = B256;
+    const TABLE_NAME: &'static str = "bundle_receipt";
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> Self::TraceId {
         self.bundle_hash
     }
 
@@ -394,12 +396,12 @@ impl From<(BundleReceipt, String)> for BundleReceiptRow {
     }
 }
 
-impl ClickhouseIndexableOrder for SystemBundle {
+impl ClickhouseIndexableData for SystemBundle {
     type ClickhouseRowType = BundleRow;
 
-    const ORDER: &'static str = <BundleRow as ClickhouseRowExt>::ORDER;
+    const DATA_NAME: &'static str = <BundleRow as ClickhouseRowExt>::TABLE_NAME;
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> B256 {
         self.bundle_hash()
     }
 
@@ -408,12 +410,12 @@ impl ClickhouseIndexableOrder for SystemBundle {
     }
 }
 
-impl ClickhouseIndexableOrder for BundleReceipt {
+impl ClickhouseIndexableData for BundleReceipt {
     type ClickhouseRowType = BundleReceiptRow;
 
-    const ORDER: &'static str = <BundleReceiptRow as ClickhouseRowExt>::ORDER;
+    const DATA_NAME: &'static str = <BundleReceiptRow as ClickhouseRowExt>::TABLE_NAME;
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> B256 {
         self.bundle_hash
     }
 
