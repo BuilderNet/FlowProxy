@@ -4,14 +4,10 @@ use std::{fmt::Debug, time::Duration};
 
 use rbuilder_utils::{
     clickhouse::{
-        backup::{Backup, DiskBackup, DiskBackupConfig, MemoryBackupConfig},
-        indexer::{default_inserter, ClickhouseClientConfig, ClickhouseInserter, InserterRunner},
-        Quantities,
+        indexer::ClickhouseClientConfig, spawn_clickhouse_inserter_and_backup, Quantities,
     },
-    spawn_clickhouse_backup, spawn_clickhouse_inserter,
     tasks::TaskExecutor,
 };
-use tokio::sync::mpsc;
 
 use crate::{
     cli::ClickhouseArgs,
@@ -20,6 +16,7 @@ use crate::{
         OrderReceivers, TARGET,
     },
     metrics::CLICKHOUSE_METRICS,
+    primitives::{BundleReceipt, SystemBundle},
 };
 
 mod models;
@@ -114,55 +111,28 @@ impl ClickhouseIndexer {
             (args.bundles_table_name, args.bundle_receipts_table_name);
         let memory_backup_max_size_bytes = args.backup_memory_max_size_bytes;
 
-        let OrderReceivers { bundle_rx, bundle_receipt_rx } = receivers;
-
-        let disk_backup = DiskBackup::<BundleReceiptRow>::new(
-            DiskBackupConfig::new()
-                .with_path(args.backup_disk_database_path.into())
-                .with_max_size_bytes(args.backup_disk_max_size_bytes.into()),
+        spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
+            &client,
+            receivers.bundle_rx,
             &task_executor,
-        )
-        .expect("could not create disk backup");
-
-        let (tx, rx) = mpsc::channel(128);
-        let bundle_inserter = default_inserter(&client, &bundles_table_name);
-        let bundle_inserter = ClickhouseInserter::<_, MetricsWrapper>::new(bundle_inserter, tx);
-        let mut bundle_inserter_runner =
-            InserterRunner::new(bundle_rx, bundle_inserter, builder_name.clone());
-
-        let mut bundle_backup = Backup::<BundleRow, MetricsWrapper>::new(
-            rx,
-            client
-                .inserter(&bundles_table_name)
-                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
-            disk_backup.clone_to(),
-        )
-        .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
-
-        let (tx, rx) = mpsc::channel(128);
-        let bundle_receipt_inserter = default_inserter(&client, &bundle_receipts_table_name);
-        let bundle_receipt_inserter =
-            ClickhouseInserter::<_, MetricsWrapper>::new(bundle_receipt_inserter, tx);
-        let mut bundle_receipt_inserter_runner =
-            InserterRunner::new(bundle_receipt_rx, bundle_receipt_inserter, builder_name);
-        let mut bundle_receipt_backup = Backup::<BundleReceiptRow, MetricsWrapper>::new(
-            rx,
-            client
-                .inserter(&bundle_receipts_table_name)
-                .with_timeouts(Some(Duration::from_secs(2)), Some(Duration::from_secs(4))),
-            disk_backup,
-        )
-        .with_memory_backup_config(MemoryBackupConfig::new(memory_backup_max_size_bytes));
-
-        spawn_clickhouse_inserter!(task_executor, bundle_inserter_runner, "bundles", TARGET);
-        spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles", TARGET);
-        spawn_clickhouse_inserter!(
-            task_executor,
-            bundle_receipt_inserter_runner,
-            "bundle receipts",
-            TARGET
+            bundles_table_name,
+            builder_name.clone(),
+            Some(args.backup_disk_database_path.clone()),
+            Some(args.backup_disk_max_size_bytes),
+            memory_backup_max_size_bytes,
+            TARGET,
         );
-        spawn_clickhouse_backup!(task_executor, bundle_receipt_backup, "bundle receipts", TARGET);
+        spawn_clickhouse_inserter_and_backup::<BundleReceipt, BundleReceiptRow, MetricsWrapper>(
+            &client,
+            receivers.bundle_receipt_rx,
+            &task_executor,
+            bundle_receipts_table_name,
+            builder_name,
+            Some(args.backup_disk_database_path),
+            Some(args.backup_disk_max_size_bytes),
+            memory_backup_max_size_bytes,
+            TARGET,
+        );
     }
 }
 
@@ -188,7 +158,6 @@ pub(crate) mod tests {
             indexer::default_disk_backup_database_path,
             Quantities,
         },
-        spawn_clickhouse_backup,
         tasks::TaskManager,
     };
     use testcontainers::{
@@ -526,7 +495,7 @@ pub(crate) mod tests {
             .expect("could not create disk backup");
 
             let (tx, rx) = mpsc::channel(128);
-            let mut bundle_backup = Backup::<BundleRow, NullMetrics>::new_test(
+            let bundle_backup = Backup::<BundleRow, NullMetrics>::new_test(
                 rx,
                 client
                     .inserter(BUNDLE_TABLE_NAME)
@@ -535,7 +504,7 @@ pub(crate) mod tests {
                 use_memory_only,
             );
 
-            spawn_clickhouse_backup!(task_executor, bundle_backup, "bundles", TARGET);
+            bundle_backup.spawn(&task_executor, "bundles".to_string(), TARGET);
 
             let quantities = Quantities { bytes: 512, rows: 1, transactions: 1 }; // approximated
             let bundle_row: BundleRow = (system_bundle_example(), "buildernet".to_string()).into();
