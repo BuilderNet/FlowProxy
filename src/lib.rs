@@ -7,6 +7,7 @@ use crate::{
         client::{default_http_builder, HttpClientPool},
         http::spawn_http_forwarder,
     },
+    ingress::IngressSocket,
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
@@ -24,6 +25,8 @@ use axum::{
 use dashmap::DashMap;
 use entity::SpamThresholds;
 use forwarder::{IngressForwarders, PeerHandle};
+use msg_socket::RepSocket;
+use msg_transport::tcp::Tcp;
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
@@ -210,6 +213,12 @@ pub async fn run_with_listeners(
             }
         }
     });
+
+    let mut reply_socket = RepSocket::new(Tcp::default());
+    reply_socket.bind(args.system_listen_addr_tcp).await.expect("to bind tcp socket address");
+    let ingress_socket =
+        IngressSocket::new(reply_socket, ingress.clone(), ctx.task_executor.clone());
+    ctx.task_executor.spawn(ingress_socket.listen());
 
     // Spawn user facing HTTP server for accepting bundles and raw transactions.
     let user_router = Router::new()

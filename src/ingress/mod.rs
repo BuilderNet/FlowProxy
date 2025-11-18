@@ -15,7 +15,7 @@ use crate::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
         EthResponse, EthereumTransaction, PeerProxyInfo, Samplable, SystemBundle,
         SystemBundleDecoder, SystemBundleMetadata, SystemMevShareBundle, SystemTransaction,
-        UtcInstant,
+        UtcInstant, WithHeaders,
     },
     priority::{workers::PriorityWorkers, Priority},
     rate_limit::CounterOverTime,
@@ -34,12 +34,17 @@ use axum::{
 };
 use dashmap::DashMap;
 use flate2::read::GzDecoder;
+use futures::StreamExt;
+use msg_socket::RepSocket;
+use msg_transport::tcp::Tcp;
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
+use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use serde_json::Value;
 use std::{
     collections::HashMap,
     io::Read as _,
+    net::SocketAddr,
     str::FromStr as _,
     sync::Arc,
     time::{Duration, Instant},
@@ -163,7 +168,13 @@ impl OrderflowIngress {
         let Some(signer) = ingress
             .pqueues
             .spawn_with_priority(Priority::Medium, move || {
-                maybe_verify_signature(&headers, &body_clone, USE_LEGACY_SIGNATURE)
+                let headers_clone = headers.clone();
+                let signature_header = headers_clone
+                    .get(BUILDERNET_SIGNATURE_HEADER)
+                    .or_else(|| headers_clone.get(FLASHBOTS_SIGNATURE_HEADER))?
+                    .to_str()
+                    .ok()?;
+                maybe_verify_signature(signature_header, &body_clone, USE_LEGACY_SIGNATURE)
             })
             .await
         else {
@@ -396,7 +407,12 @@ impl OrderflowIngress {
             if let Some(address) = ingress
                 .pqueues
                 .spawn_with_priority(priority, move || {
-                    maybe_verify_signature(&headers_clone, &body_clone, USE_LEGACY_SIGNATURE)
+                    let signature_header = headers_clone
+                        .get(BUILDERNET_SIGNATURE_HEADER)
+                        .or_else(|| headers_clone.get(FLASHBOTS_SIGNATURE_HEADER))?
+                        .to_str()
+                        .ok()?;
+                    maybe_verify_signature(signature_header, &body_clone, USE_LEGACY_SIGNATURE)
                 })
                 .await
             {
@@ -433,7 +449,310 @@ impl OrderflowIngress {
         tracing::Span::current().record("method", tracing::field::display(&request.method));
 
         // Record the one-way latency of the RPC call.
-        let sent_at = headers.get(BUILDERNET_SENT_AT_HEADER).and_then(UtcDateTime::parse_header);
+        let sent_at = headers
+            .get(BUILDERNET_SENT_AT_HEADER)
+            .and_then(|h| h.to_str().ok())
+            .and_then(UtcDateTime::parse_header);
+        if let Some(sent_at) = sent_at {
+            ingress
+                .system_metrics
+                .rpc_latency_oneway(&peer, &request.method)
+                .observe((received_at.utc - sent_at).as_seconds_f64());
+        }
+
+        tracing::trace!(params = ?request.params, "serving json-rpc request");
+
+        let (raw, response) = match request.method.as_str() {
+            ETH_SEND_BUNDLE_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    tracing::error!("failed to parse bundle: take single param failed");
+                    ingress.system_metrics.json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD).inc();
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                };
+
+                let bundle = match serde_json::from_value::<RawBundle>(raw.clone()) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!(
+                            ?e,
+                            body_utf8 = body_utf8(),
+                            "failed to parse raw bundle from system request"
+                        );
+                        ingress.system_metrics.json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD).inc();
+                        return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                    }
+                };
+
+                let bundle_hash = match bundle.metadata.bundle_hash {
+                    Some(bundle_hash) => bundle_hash,
+                    None => {
+                        tracing::debug!("bundle hash is not set");
+                        bundle.bundle_hash()
+                    }
+                };
+
+                // Deduplicate bundles.
+                if ingress.order_cache.contains(&bundle_hash) {
+                    tracing::trace!(bundle_hash = %bundle_hash, "bundle already processed");
+                    ingress.system_metrics.order_cache_hit("bundle").inc();
+
+                    // Sample the order cache hit ratio.
+                    if bundle_hash.sample(10) {
+                        ingress
+                            .system_metrics
+                            .order_cache_hit_ratio()
+                            .set(ingress.order_cache.hit_ratio() * 100.0);
+                        ingress
+                            .system_metrics
+                            .order_cache_entry_count()
+                            .set(ingress.order_cache.entry_count());
+                    }
+
+                    return JsonRpcResponse::result(
+                        request.id,
+                        EthResponse::BundleHash(bundle_hash),
+                    );
+                }
+
+                ingress.order_cache.insert(bundle_hash);
+
+                let receipt = BundleReceipt {
+                    bundle_hash,
+                    sent_at,
+                    received_at: received_at.utc,
+                    src_builder_name: peer,
+                    payload_size: payload_size as u32,
+                    priority,
+                };
+
+                ingress.indexer_handle.index_bundle_receipt(receipt);
+
+                ingress
+                    .system_metrics
+                    .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
+                    .observe(received_at.elapsed().as_secs_f64());
+
+                ingress.system_metrics.txs_per_bundle().observe(bundle.txs.len() as f64);
+                ingress
+                    .system_metrics
+                    .request_body_size(ETH_SEND_BUNDLE_METHOD)
+                    .observe(body.len() as f64);
+
+                (raw, EthResponse::BundleHash(bundle_hash))
+            }
+            ETH_SEND_RAW_TRANSACTION_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    ingress
+                        .system_metrics
+                        .json_rpc_parse_errors(ETH_SEND_RAW_TRANSACTION_METHOD)
+                        .inc();
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                };
+
+                let Ok(tx) =
+                    decode_transaction(&serde_json::from_value::<Bytes>(raw.clone()).unwrap())
+                else {
+                    ingress
+                        .system_metrics
+                        .json_rpc_parse_errors(ETH_SEND_RAW_TRANSACTION_METHOD)
+                        .inc();
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                };
+
+                let tx_hash = *tx.tx_hash();
+                if ingress.order_cache.contains(&tx_hash) {
+                    tracing::trace!(hash = %tx_hash, "transaction already processed");
+                    ingress.system_metrics.order_cache_hit("transaction").inc();
+
+                    // Sample the order cache hit ratio.
+                    if tx_hash.sample(10) {
+                        ingress
+                            .system_metrics
+                            .order_cache_hit_ratio()
+                            .set(ingress.order_cache.hit_ratio() * 100.0);
+                    }
+
+                    return JsonRpcResponse::result(request.id, EthResponse::TxHash(tx_hash));
+                }
+
+                ingress.order_cache.insert(tx_hash);
+
+                ingress
+                    .system_metrics
+                    .rpc_request_duration(ETH_SEND_RAW_TRANSACTION_METHOD, priority.as_str())
+                    .observe(received_at.elapsed().as_secs_f64());
+                ingress
+                    .system_metrics
+                    .request_body_size(ETH_SEND_RAW_TRANSACTION_METHOD)
+                    .observe(body.len() as f64);
+
+                (raw, EthResponse::TxHash(tx_hash))
+            }
+            MEV_SEND_BUNDLE_METHOD => {
+                let Some(raw) = request.take_single_param() else {
+                    tracing::error!("error parsing bundle: take single param failed");
+                    ingress.system_metrics.json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD).inc();
+                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                };
+
+                let bundle = match serde_json::from_value::<RawShareBundle>(raw.clone()) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!(?e, body = body_utf8(), "error parsing bundle");
+                        ingress.system_metrics.json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD).inc();
+                        return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                    }
+                };
+
+                let bundle_hash = bundle.bundle_hash();
+                if ingress.order_cache.contains(&bundle_hash) {
+                    tracing::trace!(hash = %bundle_hash, "bundle already processed");
+                    ingress.system_metrics.order_cache_hit("mev_share_bundle").inc();
+
+                    // Sample the order cache hit ratio.
+                    if bundle_hash.sample(10) {
+                        ingress
+                            .system_metrics
+                            .order_cache_hit_ratio()
+                            .set(ingress.order_cache.hit_ratio() * 100.0);
+                    }
+
+                    return JsonRpcResponse::result(
+                        request.id,
+                        EthResponse::BundleHash(bundle_hash),
+                    );
+                }
+
+                ingress.order_cache.insert(bundle_hash);
+
+                ingress.system_metrics.txs_per_mev_share_bundle().observe(bundle.body.len() as f64);
+                ingress
+                    .system_metrics
+                    .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
+                    .observe(received_at.elapsed().as_secs_f64());
+                ingress
+                    .system_metrics
+                    .request_body_size(MEV_SEND_BUNDLE_METHOD)
+                    .observe(body.len() as f64);
+
+                (raw, EthResponse::BundleHash(bundle_hash))
+            }
+            other => {
+                tracing::error!("method not supported");
+                ingress.system_metrics.json_rpc_unknown_method(other.to_owned()).inc();
+                return JsonRpcResponse::error(
+                    request.id,
+                    JsonRpcError::MethodNotFound(other.to_owned()),
+                );
+            }
+        };
+
+        // Send request only to the local builder forwarder.
+        ingress.forwarders.send_to_local(
+            priority,
+            &request.method,
+            raw,
+            response.hash(),
+            received_at,
+        );
+
+        trace!(elapsed = ?received_at.instant.elapsed(), "processed json-rpc request");
+        JsonRpcResponse::result(request.id, response)
+    }
+
+    #[tracing::instrument(skip_all, name = "ingress",
+        fields(
+            handler = "system_tcp",
+            id = %short_uuid_v4(),
+            method = tracing::field::Empty,
+            peer = tracing::field::Empty
+        ))]
+    pub async fn system_handler_tcp(
+        ingress: Arc<Self>,
+        body: alloy_rlp::Bytes,
+    ) -> JsonRpcResponse<EthResponse> {
+        let received_at = UtcInstant::now();
+        let payload_size = body.len();
+
+        let WithHeaders::<Bytes> { headers, data } = match serde_json::from_slice(body.as_ref()) {
+            Ok(json) => json,
+            Err(e) => {
+                tracing::error!(?e, "failed to convert raw bytes to string, invalid utf8");
+                return JsonRpcResponse::error(Value::Null, JsonRpcError::InvalidParams);
+            }
+        };
+
+        // Before doing anything else, verify that the signature header is present.
+        if headers
+            .get(BUILDERNET_SIGNATURE_HEADER)
+            .or_else(|| headers.get(FLASHBOTS_SIGNATURE_HEADER))
+            .is_none()
+        {
+            tracing::error!(
+                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
+                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
+                "error verifying peer signature"
+            );
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
+        }
+
+        let mut priority = Priority::Low;
+        if let Some(priority_) =
+            headers.get(BUILDERNET_PRIORITY_HEADER).and_then(|h| h.parse().ok())
+        {
+            priority = priority_;
+        } else {
+            tracing::trace!("failed to retrieve priority from request, defaulting to {priority}");
+        }
+
+        let peer = 'peer: {
+            let body_clone = body.clone();
+            let headers_clone = headers.clone();
+            if let Some(address) = ingress
+                .pqueues
+                .spawn_with_priority(priority, move || {
+                    let signature_header = headers_clone
+                        .get(BUILDERNET_SIGNATURE_HEADER)
+                        .or_else(|| headers_clone.get(FLASHBOTS_SIGNATURE_HEADER))?;
+                    maybe_verify_signature(signature_header, &body_clone, USE_LEGACY_SIGNATURE)
+                })
+                .await
+            {
+                if ingress.flashbots_signer.is_some_and(|addr| addr == address) {
+                    break 'peer "flashbots".to_string();
+                }
+
+                if let Some(peer) = ingress.forwarders.find_peer(address) {
+                    break 'peer peer;
+                }
+            }
+
+            tracing::error!(
+                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
+                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
+                "error verifying peer signature"
+            );
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
+        };
+        tracing::Span::current().record("peer", tracing::field::display(&peer));
+
+        // This gets computed only if we enter in an error branch.
+        let body_utf8 = || str::from_utf8(data.as_ref()).unwrap_or("<invalid utf8>");
+
+        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
+        {
+            Ok(request) => request,
+            Err(e) => {
+                tracing::error!(?e, body_utf8 = body_utf8(), "failed to parse json-rpc request");
+                ingress.system_metrics.json_rpc_parse_errors(UNKNOWN).inc();
+                return JsonRpcResponse::error(Value::Null, e);
+            }
+        };
+        tracing::Span::current().record("method", tracing::field::display(&request.method));
+
+        // Record the one-way latency of the RPC call.
+        let sent_at =
+            headers.get(BUILDERNET_SENT_AT_HEADER).and_then(|h| UtcDateTime::parse_header(h));
         if let Some(sent_at) = sent_at {
             ingress
                 .system_metrics
@@ -936,6 +1255,37 @@ impl OrderflowIngress {
     }
 }
 
+#[allow(missing_debug_implementations)]
+pub struct IngressSocket {
+    reply_socket: RepSocket<Tcp, SocketAddr>,
+    ingress_state: Arc<OrderflowIngress>,
+    task_executor: TaskExecutor,
+}
+
+impl IngressSocket {
+    pub fn new(
+        socket: RepSocket<Tcp, SocketAddr>,
+        ingress_state: Arc<OrderflowIngress>,
+        task_executor: TaskExecutor,
+    ) -> Self {
+        Self { reply_socket: socket, ingress_state, task_executor }
+    }
+
+    pub async fn listen(mut self) {
+        while let Some(req) = self.reply_socket.next().await {
+            let data = req.msg().clone();
+            let state = self.ingress_state.clone();
+            self.task_executor.spawn(async {
+                let response = OrderflowIngress::system_handler_tcp(state, data).await;
+                let bytes = serde_json::to_string(&response).expect("valid").as_bytes().to_vec();
+                if let Err(e) = req.respond(bytes.into()) {
+                    tracing::error!(?e, "failed to respond to request");
+                }
+            });
+        }
+    }
+}
+
 /// Attempt to decompress the header if `content-encoding` header is set to `gzip`.
 pub fn maybe_decompress(
     gzip_enabled: bool,
@@ -955,11 +1305,12 @@ pub fn maybe_decompress(
 
 /// Parse the signature from [`BUILDERNET_SIGNATURE_HEADER`] header and verify the signer of the
 /// request. [`FLASHBOTS_SIGNATURE_HEADER`] is supported for backwards compatibility.
-pub fn maybe_verify_signature(headers: &HeaderMap, body: &[u8], legacy: bool) -> Option<Address> {
-    let signature_header = headers
-        .get(BUILDERNET_SIGNATURE_HEADER)
-        .or_else(|| headers.get(FLASHBOTS_SIGNATURE_HEADER))?;
-    let (address, signature) = signature_header.to_str().ok()?.split_once(':')?;
+pub fn maybe_verify_signature(
+    signature_header: &str,
+    body: &[u8],
+    legacy: bool,
+) -> Option<Address> {
+    let (address, signature) = signature_header.split_once(':')?;
     let signature = Signature::from_str(signature).ok()?;
 
     if legacy {

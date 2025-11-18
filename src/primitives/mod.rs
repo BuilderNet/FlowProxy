@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     hash::{Hash as _, Hasher as _},
     sync::Arc,
     time::{Duration, Instant},
@@ -716,6 +717,12 @@ impl Samplable for B256 {
 pub struct PeerProxyInfo {
     /// The port where the peer receives TCP-only, system flow.
     pub system_api_port: u16,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WithHeaders<T> {
+    pub headers: HashMap<String, String>,
+    pub data: T,
 }
 
 #[cfg(test)]

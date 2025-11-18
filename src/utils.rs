@@ -43,7 +43,7 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
 /// value.
 pub trait UtcDateTimeHeader: Sized {
     fn format_header(&self) -> HeaderValue;
-    fn parse_header(value: &HeaderValue) -> Option<Self>;
+    fn parse_header(value: &str) -> Option<Self>;
 }
 
 impl UtcDateTimeHeader for UtcDateTime {
@@ -53,8 +53,8 @@ impl UtcDateTimeHeader for UtcDateTime {
     }
 
     /// Parse a [`UtcDateTime`] from a UNIX timestamp in microseconds header value.
-    fn parse_header(value: &HeaderValue) -> Option<Self> {
-        let micros: i128 = value.to_str().ok()?.parse().ok()?;
+    fn parse_header(value: &str) -> Option<Self> {
+        let micros: i128 = value.parse().ok()?;
         UtcDateTime::from_unix_timestamp_nanos(micros * 1_000).ok()
     }
 }
