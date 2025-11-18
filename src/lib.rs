@@ -3,7 +3,10 @@
 use crate::{
     builderhub::PeersUpdater,
     cache::SignerCache,
-    forwarder::client::{default_http_builder, ClientPool},
+    forwarder::{
+        client::{default_http_builder, ClientPool},
+        http::spawn_http_forwarder,
+    },
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
@@ -20,7 +23,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
-use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use forwarder::{IngressForwarders, PeerHandle};
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
@@ -153,7 +156,7 @@ pub async fn run_with_listeners(
     // Spawn forwarders
     let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
     let forwarders = if let Some(ref builder_url) = builder_url {
-        let local_sender = spawn_forwarder(
+        let local_sender = spawn_http_forwarder(
             String::from("local-builder"),
             builder_url.to_string(),
             // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.

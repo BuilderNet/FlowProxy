@@ -1,7 +1,8 @@
 use crate::{
     forwarder::{
         client::{default_http_builder, ClientPool},
-        spawn_forwarder, PeerHandle,
+        http::spawn_http_forwarder,
+        PeerHandle,
     },
     metrics::BuilderHubMetrics,
     primitives::PeerProxyInfo,
@@ -10,8 +11,7 @@ use crate::{
 use alloy_primitives::Address;
 use dashmap::DashMap;
 use std::{
-    collections::HashMap, convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc,
-    time::Duration,
+    convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc, time::Duration,
 };
 
 use rbuilder_utils::tasks::TaskExecutor;
@@ -311,7 +311,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
         });
 
-        let sender = spawn_forwarder(
+        let sender = spawn_http_forwarder(
             peer.name.clone(),
             peer.system_api(),
             client_pool.clone(),
