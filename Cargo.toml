@@ -102,6 +102,7 @@ msg-transport = { git = "https://github.com/chainbound/msg-rs", branch = "main",
   "tcp-tls"
 ] }
 msg-socket = { git = "https://github.com/chainbound/msg-rs", branch = "main" }
+openssl = { version = "0.10.75" }
 
 # Manually override cc version (conflict between alloy-consensus and rbuilder)
 cc = "=1.2.15"
