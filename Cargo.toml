@@ -97,6 +97,12 @@ derive_more = { version = "2", features = ["deref"] }
 fdlimit = "0.3.0"
 rayon = "1.11.0"
 
+# networking
+msg-transport = { git = "https://github.com/chainbound/msg-rs", branch = "main", features = [
+  "tcp-tls"
+] }
+msg-socket = { git = "https://github.com/chainbound/msg-rs", branch = "main" }
+
 # Manually override cc version (conflict between alloy-consensus and rbuilder)
 cc = "=1.2.15"
 
