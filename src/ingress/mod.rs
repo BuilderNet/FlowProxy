@@ -13,8 +13,9 @@ use crate::{
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, Samplable, SystemBundle, SystemBundleDecoder,
-        SystemBundleMetadata, SystemMevShareBundle, SystemTransaction, UtcInstant,
+        EthResponse, EthereumTransaction, PeerProxyInfo, Samplable, SystemBundle,
+        SystemBundleDecoder, SystemBundleMetadata, SystemMevShareBundle, SystemTransaction,
+        UtcInstant,
     },
     priority::{workers::PriorityWorkers, Priority},
     rate_limit::CounterOverTime,
@@ -70,6 +71,9 @@ pub struct OrderflowIngress {
     pub local_builder_url: Option<Url>,
     pub builder_ready_endpoint: Option<Url>,
     pub indexer_handle: IndexerHandle,
+
+    /// The system api port, TCP-only
+    pub system_api_port: u16,
 
     // Metrics
     pub(crate) user_metrics: IngressMetrics,
@@ -322,6 +326,27 @@ impl OrderflowIngress {
         }
 
         Response::builder().status(StatusCode::OK).body(Body::from("OK")).unwrap()
+    }
+
+    /// Handler for the `/infoz` endpoint. Used to get information about a peer's running proxy.
+    #[tracing::instrument(skip_all, name = "ingress_infoz")]
+    pub async fn info_handler(State(ingress): State<Arc<Self>>) -> Response {
+        let proxy_info = PeerProxyInfo { system_api_port: ingress.system_api_port };
+        let body = match serde_json::to_string(&proxy_info) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(?e, "failed to serialize peer info");
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("internal server error"))
+                    .expect("to create error message");
+            }
+        };
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::from(body))
+            .expect("to create ok server response")
     }
 
     #[tracing::instrument(skip_all, name = "ingress",

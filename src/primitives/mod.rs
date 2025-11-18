@@ -711,6 +711,13 @@ impl Samplable for B256 {
     }
 }
 
+/// Contains information about another proxy peer instance, as returned by the `infoz` endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PeerProxyInfo {
+    /// The port where the peer receives TCP-only, system flow.
+    pub system_api_port: u16,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

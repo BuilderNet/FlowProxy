@@ -192,6 +192,7 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        system_api_port: args.system_listen_addr_tcp.port(),
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
@@ -228,6 +229,7 @@ pub async fn run_with_listeners(
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
         .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
+        .route("/infoz", get(OrderflowIngress::info_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
         // TODO: After mTLS, we can probably take this out.
         .route_layer(axum::middleware::from_fn_with_state(
