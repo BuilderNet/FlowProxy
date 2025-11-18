@@ -4,12 +4,14 @@ use crate::{
         spawn_forwarder, PeerHandle,
     },
     metrics::BuilderHubMetrics,
+    primitives::PeerProxyInfo,
     DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc, time::Duration,
+    collections::HashMap, convert::Infallible, fmt::Debug, future::Future, num::NonZero, sync::Arc,
+    time::Duration,
 };
 
 use rbuilder_utils::tasks::TaskExecutor;
@@ -220,16 +222,53 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         });
 
         for builder in builders {
-            self.process_peer(builder);
+            self.process_peer(builder).await;
         }
 
         self.metrics.peer_count().set(self.peers.len());
     }
 
+    /// Get information about a peer's running proxy instance, calling the `/infoz` endpoint.
+    ///
+    /// On any error, returns `None`.
+    #[tracing::instrument(skip_all)]
+    async fn proxy_info(&self, peer: &Peer) -> Option<PeerProxyInfo> {
+        let http_client = match default_http_builder().build() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(?e, "critical: failed to create default http client");
+                return None;
+            }
+        };
+
+        // NOTE: HTTP System API is at root, so we can use it.
+        let info_url = format!("{}/infoz", peer.system_api());
+        let response = match http_client.get(info_url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    ?e,
+                    "failed to call infoz endpoint, falling back to http client pool"
+                );
+                return None;
+            }
+        };
+
+        let peer_info = match response.json::<PeerProxyInfo>().await {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!(?e, "failed to deserialize info");
+                return None;
+            }
+        };
+
+        Some(peer_info)
+    }
+
     /// Process a single peer, updating the local list of connected peers and spawning order
     /// forwarder.
     #[tracing::instrument(skip_all, fields(peer = ?peer))]
-    fn process_peer(&mut self, peer: Peer) {
+    async fn process_peer(&mut self, peer: Peer) {
         let entry = self.peers.entry(peer.name.clone());
         let new_peer = match &entry {
             dashmap::Entry::Occupied(entry) => {
@@ -243,38 +282,44 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         };
 
         // Self-filter any new peers before connecting to them.
-        if new_peer && peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer {
-            if self.disable_forwarding {
-                tracing::warn!("skipped spawning forwarder (disabled forwarding)");
-                return;
-            }
-
-            // Create a client pool.
-            let client_pool = ClientPool::new(self.client_pool_size, || {
-                let client_builder = default_http_builder();
-
-                // If the TLS certificate is present, use HTTPS and configure the client to use it.
-                if let Some(ref tls_cert) = peer.tls_certificate() {
-                    client_builder
-                        .https_only(true)
-                        .add_root_certificate(tls_cert.clone())
-                        .build()
-                        .expect("failed to build client")
-                } else {
-                    client_builder.build().expect("failed to build client")
-                }
-            });
-
-            let sender = spawn_forwarder(
-                peer.name.clone(),
-                peer.system_api(),
-                client_pool.clone(),
-                &self.task_executor,
-            )
-            .expect("malformed url");
-
-            tracing::debug!("inserted configuration");
-            entry.insert(PeerHandle { info: peer, sender });
+        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address != self.local_signer;
+        if !new_peer || is_self {
+            return;
         }
+        if self.disable_forwarding {
+            tracing::warn!("skipped spawning forwarder (disabled forwarding)");
+            return;
+        }
+
+        if let Some(proxy_info) = self.proxy_info(&peer).await {
+            // TODO: create tcp reqrep pool
+        }
+
+        // Create a client pool.
+        let client_pool = ClientPool::new(self.client_pool_size, || {
+            let client_builder = default_http_builder();
+
+            // If the TLS certificate is present, use HTTPS and configure the client to use it.
+            if let Some(ref tls_cert) = peer.tls_certificate() {
+                client_builder
+                    .https_only(true)
+                    .add_root_certificate(tls_cert.clone())
+                    .build()
+                    .expect("failed to build client")
+            } else {
+                client_builder.build().expect("failed to build client")
+            }
+        });
+
+        let sender = spawn_forwarder(
+            peer.name.clone(),
+            peer.system_api(),
+            client_pool.clone(),
+            &self.task_executor,
+        )
+        .expect("malformed url");
+
+        tracing::debug!("inserted configuration");
+        entry.insert(PeerHandle { info: peer, sender });
     }
 }
