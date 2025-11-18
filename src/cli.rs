@@ -1,4 +1,4 @@
-use std::{convert::Infallible, num::NonZero, path::PathBuf};
+use std::{convert::Infallible, net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -149,17 +149,21 @@ pub struct CacheArgs {
 #[derive(Parser, Debug)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 pub struct OrderflowIngressArgs {
-    /// Listen URL for receiving user flow.
-    #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
-    pub user_listen_url: String,
+    /// Listen socket address for receiving user flow.
+    #[clap(long, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
+    pub user_listen_addr: SocketAddr,
 
-    /// Listen URL for receiving system flow.
-    #[clap(long, value_hint = ValueHint::Url, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
-    pub system_listen_url: String,
+    /// Listen socket address for receiving HTTP system flow.
+    #[clap(long, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
+    pub system_listen_addr_http: SocketAddr,
+
+    /// Listen socket address for receiving TPC-only system flow.
+    #[clap(long, env = "SYSTEM_LISTEN_ADDR_TCP", id = "SYSTEM_LISTEN_ADDR_TCP")]
+    pub system_listen_addr_tcp: SocketAddr,
 
     /// Listen URL for receiving builder stats.
-    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
-    pub builder_listen_url: Option<String>,
+    #[clap(long, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
+    pub builder_listen_addr: Option<SocketAddr>,
 
     /// The URL of the local builder. This should be set in production.
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT", id = "BUILDER_ENDPOINT")]
@@ -267,9 +271,10 @@ pub struct OrderflowIngressArgs {
 impl Default for OrderflowIngressArgs {
     fn default() -> Self {
         Self {
-            user_listen_url: String::from("127.0.0.1:0"),
-            system_listen_url: String::from("127.0.0.1:0"),
-            builder_listen_url: Some(String::from("127.0.0.1:0")),
+            user_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            system_listen_addr_http: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            system_listen_addr_tcp: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
             builder_url: None,
             builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),

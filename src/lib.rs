@@ -69,9 +69,9 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
         metrics::spawn_process_collector().await?;
     }
 
-    let user_listener = TcpListener::bind(&args.user_listen_url).await?;
-    let system_listener = TcpListener::bind(&args.system_listen_url).await?;
-    let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_url {
+    let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
+    let system_listener = TcpListener::bind(&args.system_listen_addr_http).await?;
+    let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_addr {
         Some(TcpListener::bind(builder_listen_url).await?)
     } else {
         None

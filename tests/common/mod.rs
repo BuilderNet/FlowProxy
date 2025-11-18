@@ -31,8 +31,8 @@ pub(crate) struct IngressClient<S: Signer> {
 pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
     args.builder_url = builder_url;
-    let user_listener = TcpListener::bind(&args.user_listen_url).await.unwrap();
-    let system_listener = TcpListener::bind(&args.system_listen_url).await.unwrap();
+    let user_listener = TcpListener::bind(&args.user_listen_addr).await.unwrap();
+    let system_listener = TcpListener::bind(&args.system_listen_addr_http).await.unwrap();
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
