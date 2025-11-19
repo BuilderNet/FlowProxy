@@ -3,11 +3,11 @@ use crate::{
         client::{default_http_builder, HttpClientPool, TcpTlsClientPool},
         http::spawn_http_forwarder,
         tcp::spawn_tcp_forwarder,
-        PeerHandle,
+        ForwardingRequest, PeerHandle,
     },
     metrics::BuilderHubMetrics,
     primitives::PeerProxyInfo,
-    DEFAULT_SYSTEM_PORT,
+    priority, DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
@@ -317,65 +317,82 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             return;
         }
 
-        if let Some(proxy_info) = self.proxy_info(&peer).await {
-            let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
-            let mut config = tcp_tls::config::Client::new(peer.dns_name.clone());
+        let peer_sender_maybe = if let Some(proxy_info) = self.proxy_info(&peer).await {
+            self.peer_tcp_sender(&peer, &proxy_info).await
+        } else {
+            self.peer_http_sender(&peer).await
+        };
 
-            if let Some(certificate_res) = peer.openssl_tls_certificate() {
-                let certificate = match certificate_res {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::error!(?e, "failed to parse certificate");
-                        return;
-                    }
-                };
+        if let Some(sender) = peer_sender_maybe {
+            tracing::debug!("inserted configuration");
+            entry.insert(PeerHandle { info: peer, sender });
+        }
+    }
 
-                let connector = match tls_connector(
-                    &certificate,
-                    &self.config.private_key_pem_file,
-                    &self.config.certificate_pem_file,
-                ) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        tracing::error!(?e, "failed to create tls connector");
-                        return;
-                    }
-                };
+    /// Create a TCP sender for the given peer.
+    ///
+    /// On any error, returns `None`.
+    async fn peer_tcp_sender(
+        &self,
+        peer: &Peer,
+        proxy_info: &PeerProxyInfo,
+    ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
+        let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
+        let mut config = tcp_tls::config::Client::new(peer.dns_name.clone());
 
-                config = config.with_ssl_connector(connector);
-            }
-            let socket_addr_str = format!("{}:{}", peer.ip.clone(), proxy_info.system_api_port);
-            let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
-                Ok(a) => a,
+        if let Some(certificate_res) = peer.openssl_tls_certificate() {
+            let certificate = match certificate_res {
+                Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(?e, ip = %peer.ip, "failed to parse ip and port into socket address");
-                    return;
+                    tracing::error!(?e, "failed to parse certificate");
+                    return None;
                 }
             };
 
-            for _ in 0..self.config.client_pool_size.get() {
-                let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
-                let mut socket = ReqSocket::new(transport);
-                if let Err(e) = socket.connect(socket_addr).await {
-                    tracing::error!(?e, ?socket_addr, "failed to initialize connection");
-                    return;
+            let connector = match tls_connector(
+                &certificate,
+                &self.config.private_key_pem_file,
+                &self.config.certificate_pem_file,
+            ) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!(?e, "failed to create tls connector");
+                    return None;
                 }
-                sockets.push(socket);
-            }
-            let client_pool = TcpTlsClientPool::new(sockets);
+            };
 
-            let sender = spawn_tcp_forwarder(
-                peer.name.clone(),
-                socket_addr,
-                client_pool,
-                &self.task_executor,
-            );
-
-            tracing::debug!("inserted configuration");
-            entry.insert(PeerHandle { info: peer, sender });
-            return;
+            config = config.with_ssl_connector(connector);
         }
+        let socket_addr_str = format!("{}:{}", peer.ip.clone(), proxy_info.system_api_port);
+        let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::error!(?e, ip = %peer.ip, "failed to parse ip and port into socket address");
+                return None;
+            }
+        };
 
+        for _ in 0..self.config.client_pool_size.get() {
+            let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
+            let mut socket = ReqSocket::new(transport);
+            if let Err(e) = socket.connect(socket_addr).await {
+                tracing::error!(?e, ?socket_addr, "failed to initialize connection");
+                return None;
+            }
+            sockets.push(socket);
+        }
+        let client_pool = TcpTlsClientPool::new(sockets);
+
+        let sender =
+            spawn_tcp_forwarder(peer.name.clone(), socket_addr, client_pool, &self.task_executor);
+
+        Some(sender)
+    }
+
+    async fn peer_http_sender(
+        &self,
+        peer: &Peer,
+    ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
         // Create a client pool.
         let client_pool = HttpClientPool::new(self.config.client_pool_size, || {
             let client_builder = default_http_builder();
@@ -400,8 +417,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         )
         .expect("malformed url");
 
-        tracing::debug!("inserted configuration");
-        entry.insert(PeerHandle { info: peer, sender });
+        Some(sender)
     }
 }
 
