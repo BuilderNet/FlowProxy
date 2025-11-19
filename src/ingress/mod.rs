@@ -340,13 +340,11 @@ impl OrderflowIngress {
     }
 
     /// Handler for the `/infoz` endpoint. Used to get information about a peer's running proxy.
+    /// NOTE: In production, this endpoint will be served by HAProxy. This is mainly used for e2e
+    /// tests.
     #[tracing::instrument(skip_all, name = "ingress_infoz")]
     pub async fn info_handler(State(ingress): State<Arc<Self>>) -> Response {
-        // NOTE: we assume this is running with HAProxy on front and on the same box. This means
-        // the ports can't be the same, and for now the convention is that HAProxy advertises one
-        // port above what FlowProxy is using.
-        // TODO: better discovery. Maybe provide both ports in CLI args?
-        let proxy_info = PeerProxyInfo { system_api_port: ingress.system_api_port + 1 };
+        let proxy_info = PeerProxyInfo { system_api_port: ingress.system_api_port };
         let body = match serde_json::to_string(&proxy_info) {
             Ok(b) => b,
             Err(e) => {
