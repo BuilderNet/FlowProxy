@@ -308,7 +308,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         };
 
         // Self-filter any new peers before connecting to them.
-        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address != self.config.local_signer;
+        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address == self.config.local_signer;
         if !new_peer || is_self {
             return;
         }
