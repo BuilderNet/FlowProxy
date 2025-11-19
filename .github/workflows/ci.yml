@@ -15,15 +15,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
         with:
-          components: rustfmt
+          toolchain: 1.89.0
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
       - run: rustup toolchain install nightly-2025-09-21 --component rustfmt
       - run: cargo +nightly-2025-09-21 fmt --all --check
-      - run: cargo +1.89.0 clippy --examples --tests --benches --all-features --locked
+      - run: cargo clippy --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings
 
