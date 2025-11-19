@@ -355,7 +355,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             };
 
             let connector = match tls_connector(
-                &certificate,
+                certificate,
                 &self.config.private_key_pem_file,
                 &self.config.certificate_pem_file,
             ) {
@@ -428,14 +428,22 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     }
 }
 
+/// Create a TLS connector with:
+///
+/// 1. The peer root certificate, added to the certificate store. This is to establish connections
+///    with peer acting as a server.
+/// 2. Private key and certificate files for client authentication (mTLS).
 fn tls_connector(
-    ca_certificate: &X509,
+    peer_root_certificate: X509,
     private_key_pem_file: &PathBuf,
     certificate_pem_file: &PathBuf,
 ) -> Result<SslConnector, openssl::error::ErrorStack> {
     let mut builder = SslConnector::builder(SslMethod::tls())?;
     builder.set_private_key_file(private_key_pem_file, SslFiletype::PEM)?;
     builder.set_certificate_file(certificate_pem_file, SslFiletype::PEM)?;
-    builder.add_client_ca(ca_certificate)?;
+
+    let certificate_store = builder.cert_store_mut();
+    certificate_store.add_cert(peer_root_certificate)?;
+
     Ok(builder.build())
 }
