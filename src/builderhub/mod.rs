@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
-use msg_socket::ReqSocket;
+use msg_socket::{ReqOptions, ReqSocket};
 use msg_transport::tcp_tls::{self, TcpTls};
 use openssl::{
     ssl::{SslConnector, SslFiletype, SslMethod},
@@ -259,12 +259,17 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     /// On any error, returns `None`.
     #[tracing::instrument(skip_all)]
     async fn proxy_info(&self, peer: &Peer) -> Option<PeerProxyInfo> {
-        let http_client = match default_http_builder().build() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(?e, "critical: failed to create default http client");
-                return None;
-            }
+        let client_builder = default_http_builder();
+
+        // If the TLS certificate is present, use HTTPS and configure the client to use it.
+        let http_client = if let Some(ref tls_cert) = peer.reqwest_tls_certificate() {
+            client_builder
+                .https_only(true)
+                .add_root_certificate(tls_cert.clone())
+                .build()
+                .expect("failed to build client")
+        } else {
+            client_builder.build().expect("failed to build client")
         };
 
         // NOTE: HTTP System API is at root, so we can use it.
@@ -372,11 +377,13 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
         };
 
+        let req_options = ReqOptions::default().blocking_connect();
+
         for _ in 0..self.config.client_pool_size.get() {
             let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
-            let mut socket = ReqSocket::new(transport);
+            let mut socket = ReqSocket::with_options(transport, req_options.clone());
             if let Err(e) = socket.connect(socket_addr).await {
-                tracing::error!(?e, ?socket_addr, "failed to initialize connection");
+                tracing::error!(?e, ?socket_addr, "failed to connect");
                 return None;
             }
             sockets.push(socket);
