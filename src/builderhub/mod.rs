@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
-use msg_socket::{ReqOptions, ReqSocket};
+use msg_socket::ReqSocket;
 use msg_transport::tcp_tls::{self, TcpTls};
 use openssl::{
     ssl::{SslConnector, SslFiletype, SslMethod},
@@ -59,6 +59,15 @@ pub struct Peer {
     pub orderflow_proxy: PeerCredentials,
     /// Instance data
     pub instance: InstanceData,
+}
+
+/// Get the IP address without the port.
+pub fn ip_no_port(ip: &str) -> &str {
+    if let Some((ip, _)) = ip.split_once(':') {
+        ip
+    } else {
+        ip
+    }
 }
 
 impl Peer {
@@ -368,7 +377,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
             config = config.with_ssl_connector(connector);
         }
-        let socket_addr_str = format!("{}:{}", peer.ip.clone(), proxy_info.system_api_port);
+
+        let socket_addr_str = format!("{}:{}", ip_no_port(&peer.ip), proxy_info.system_api_port);
         let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
             Ok(a) => a,
             Err(e) => {
@@ -377,11 +387,10 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
         };
 
-        let req_options = ReqOptions::default().blocking_connect();
-
         for _ in 0..self.config.client_pool_size.get() {
             let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
-            let mut socket = ReqSocket::with_options(transport, req_options.clone());
+            let mut socket = ReqSocket::new(transport);
+            // TODO: maybe connect directly with DNS?
             if let Err(e) = socket.connect(socket_addr).await {
                 tracing::error!(?e, ?socket_addr, "failed to connect");
                 return None;
@@ -446,4 +455,31 @@ fn tls_connector(
     certificate_store.add_cert(peer_root_certificate)?;
 
     Ok(builder.build())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::builderhub::ip_no_port;
+
+    #[test]
+    fn ip_no_port_works() {
+        let ip_with_port = "10.0.0.2:1234";
+        let ip_no_port_expected = "10.0.0.2";
+        let ip_no_port_got = ip_no_port(ip_with_port);
+
+        assert_eq!(
+            ip_no_port_expected, ip_no_port_got,
+            "expected {ip_no_port_expected}, got {ip_no_port_got}"
+        );
+
+        // Ensure this is a no-op if no port is present.
+
+        let ip_no_port_expected = "10.0.0.2";
+        let ip_no_port_got = ip_no_port(ip_no_port_expected);
+
+        assert_eq!(
+            ip_no_port_expected, ip_no_port_got,
+            "expected {ip_no_port_expected}, got {ip_no_port_got}"
+        );
+    }
 }
