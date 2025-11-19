@@ -402,7 +402,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         }
     }
 
-    /// Inner helper to create a TCP sender for the given peer, generic over the transport (TCP or TCP+TLS).
+    /// Inner helper to create a TCP sender for the given peer, generic over the transport (TCP or
+    /// TCP+TLS).
     async fn peer_sender_inner<T: AsyncTransport, S: ToSocketAddrs + Debug>(
         &self,
         peer: &Peer,
