@@ -5,6 +5,7 @@ import * as compute from "@pulumi/azure-native/compute";
 import * as privatedns from "@pulumi/azure-native/privatedns";
 import * as fs from "fs";
 import * as crypto from "crypto";
+import { execSync } from "child_process";
 
 // Configuration
 const config = new pulumi.Config();
@@ -29,7 +30,6 @@ const grafanaDatasourceB64 = Buffer.from(grafanaDatasource).toString("base64");
 const grafanaDashboardConfigB64 = Buffer.from(grafanaDashboardConfig).toString("base64");
 // Create a compressed tarball of dashboard files (much smaller than individual base64 encoding)
 const dashboardFiles = fs.readdirSync("grafana/dashboards").filter(f => f.endsWith(".json"));
-const { execSync } = require("child_process");
 // Create tarball in memory
 execSync("tar -czf /tmp/dashboards.tar.gz -C grafana/dashboards " + dashboardFiles.join(" "));
 const dashboardsTarballB64 = fs.readFileSync("/tmp/dashboards.tar.gz").toString("base64");
@@ -128,6 +128,17 @@ function createNsg(name: string, rg: resources.ResourceGroup, location: pulumi.I
                 protocol: "Tcp",
                 sourcePortRange: "*",
                 destinationPortRange: "5544",
+                sourceAddressPrefix: "*",
+                destinationAddressPrefix: "*",
+            },
+            {
+                name: "Allow-HAProxy-5554",
+                priority: 1040,
+                direction: "Inbound",
+                access: "Allow",
+                protocol: "Tcp",
+                sourcePortRange: "*",
+                destinationPortRange: "5554",
                 sourceAddressPrefix: "*",
                 destinationAddressPrefix: "*",
             },
@@ -375,6 +386,23 @@ EOF
   rm /tmp/openssl.cnf
 fi
 
+CLIENT_CERT_DIR=/usr/local/etc/flowproxy
+CLIENT_KEY="\${CLIENT_CERT_DIR}/client.key"
+CLIENT_CERT="\${CLIENT_CERT_DIR}/client.crt"
+mkdir -p "\${CLIENT_CERT_DIR}"
+if [ ! -f "\${CLIENT_KEY}" ] || [ ! -f "\${CLIENT_CERT}" ]; then
+  openssl req -newkey rsa:2048 -nodes \
+    -keyout "\${CLIENT_KEY}" \
+    -out /tmp/client.csr \
+    -subj "/CN=client"
+  openssl x509 -req -days 365 -sha256 \
+    -in /tmp/client.csr \
+    -signkey "\${CLIENT_KEY}" \
+    -out "\${CLIENT_CERT}"
+  rm /tmp/client.csr
+fi
+chmod 600 "\${CLIENT_KEY}"
+chmod 644 "\${CLIENT_CERT}"
 
 rm -f /usr/local/etc/haproxy/certs/default.crt || true
 systemctl enable --now docker
