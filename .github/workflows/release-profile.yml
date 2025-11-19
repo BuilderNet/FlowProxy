@@ -40,6 +40,10 @@ jobs:
       - uses: rui314/setup-mold@v1
       - name: Install rust-toolchain.toml
         run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          key: profiling
       - name: Build profiling binary
         run: cargo build --profile profiling --target x86_64-unknown-linux-gnu --locked
 
