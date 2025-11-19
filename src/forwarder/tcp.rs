@@ -44,6 +44,7 @@ struct ForwarderResponse<Ok, Err> {
     /// The type of the order.
     order_type: &'static str,
     /// The hash of the order forwarded.
+    #[allow(dead_code)]
     hash: B256,
     /// The instant at which request was sent.
     start_time: Instant,
@@ -139,51 +140,40 @@ impl TcpForwarder {
             status = tracing::field::Empty,
     ))]
     fn on_response(&mut self, response: ForwarderResponse<Bytes, ReqError>) {
-        let ForwarderResponse {
-            start_time,
-            response: response_result,
-            order_type,
-            is_big,
-            hash,
-            ..
-        } = response;
+        let ForwarderResponse { start_time, response: response_result, order_type, is_big, .. } =
+            response;
         let elapsed = start_time.elapsed();
 
         tracing::Span::current().record("elapsed", tracing::field::debug(&elapsed));
 
-        match response_result {
-            Ok(response) => {
-                // TODO: review metrics
+        let Ok(response) = response_result.inspect_err(|e| {
+            error!(?e, "failed to forward request");
+            self.metrics.tcp_call_failures(e.to_string()).inc();
+        }) else {
+            return;
+        };
 
-                self.metrics
-                    .rpc_call_duration(order_type, is_big.to_string())
-                    .observe(elapsed.as_secs_f64());
+        self.metrics
+            .rpc_call_duration(order_type, is_big.to_string())
+            .observe(elapsed.as_secs_f64());
 
-                let response = match serde_json::from_slice::<JsonRpcResponse<serde_json::Value>>(
-                    response.as_ref(),
-                ) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::error!(?e, ?hash, "failed to deserialize response");
-                        return;
-                    }
-                };
-
-                // Print warning if the RPC call took more than 1 second.
-                if elapsed > Duration::from_secs(1) {
-                    warn!("long rpc call");
+        let response =
+            match serde_json::from_slice::<JsonRpcResponse<serde_json::Value>>(response.as_ref()) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(?e, "failed to deserialize response");
+                    return;
                 }
+            };
 
-                if let JsonRpcResponseTy::Error { code, message } = response.result_or_error {
-                    tracing::error!(?code, ?message, ?hash, "received error response");
-                }
-            }
-            Err(e) => {
-                error!(?e, "error forwarding request");
+        // Print warning if the RPC call took more than 1 second.
+        if elapsed > Duration::from_secs(1) {
+            warn!("long rpc call");
+        }
 
-                // TODO: better error handling?
-                self.metrics.tcp_call_failures(e.to_string()).inc();
-            }
+        if let JsonRpcResponseTy::Error { code, message } = response.result_or_error {
+            tracing::error!(?code, ?message, "received error response");
+            self.metrics.rpc_call_failures(code.to_string()).inc();
         }
     }
 }
