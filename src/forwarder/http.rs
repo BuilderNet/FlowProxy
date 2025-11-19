@@ -88,7 +88,10 @@ impl HttpForwarder {
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> (Self, ResponseErrorDecoder) {
         let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
-        let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
+        let metrics = ForwarderMetrics::builder()
+            .with_label("peer_name", name.clone())
+            .with_label("transport", "http")
+            .build();
         let decoder = ResponseErrorDecoder {
             peer_name: name.clone(),
             peer_url: url.clone(),

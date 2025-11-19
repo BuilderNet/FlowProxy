@@ -82,7 +82,10 @@ impl<T: AsyncTransport> TcpForwarder<T> {
         address: SocketAddr,
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     ) -> Self {
-        let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
+        let metrics = ForwarderMetrics::builder()
+            .with_label("peer_name", name.clone())
+            .with_label("transport", "tcp")
+            .build();
         Self {
             client,
             peer_name: name,
