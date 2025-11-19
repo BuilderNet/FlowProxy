@@ -1,6 +1,6 @@
 use crate::{
     forwarder::{
-        client::{default_http_builder, HttpClientPool, TcpTlsClientPool},
+        client::{default_http_builder, AsyncTransport, HttpClientPool, ReqSocketIpPool},
         http::spawn_http_forwarder,
         tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
@@ -12,7 +12,10 @@ use crate::{
 use alloy_primitives::Address;
 use dashmap::DashMap;
 use msg_socket::ReqSocket;
-use msg_transport::tcp_tls::{self, TcpTls};
+use msg_transport::{
+    tcp::Tcp,
+    tcp_tls::{self, TcpTls},
+};
 use openssl::{
     ssl::{SslConnector, SslFiletype, SslMethod},
     x509::X509,
@@ -21,6 +24,7 @@ use std::{
     convert::Infallible, fmt::Debug, future::Future, net::SocketAddr, num::NonZero, path::PathBuf,
     str::FromStr, sync::Arc, time::Duration,
 };
+use tokio::net::{lookup_host, ToSocketAddrs};
 
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Certificate;
@@ -343,7 +347,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         }
     }
 
-    /// Create a TCP sender for the given peer.
+    /// Create a TCP sender for the given peer, to forwarder orderflow requests.
     ///
     /// On any error, returns `None`.
     async fn peer_tcp_sender(
@@ -351,10 +355,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         peer: &Peer,
         proxy_info: &PeerProxyInfo,
     ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
-        let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
-        let mut config = tcp_tls::config::Client::new(peer.dns_name.clone());
-
-        if let Some(certificate_res) = peer.openssl_tls_certificate() {
+        let tls_config = if let Some(certificate_res) = peer.openssl_tls_certificate() {
             let certificate = match certificate_res {
                 Ok(c) => c,
                 Err(e) => {
@@ -362,6 +363,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
                     return None;
                 }
             };
+
+            tracing::debug!("using tls connector");
 
             let connector = match tls_connector(
                 certificate,
@@ -375,10 +378,13 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
                 }
             };
 
-            config = config.with_ssl_connector(connector);
-        }
+            Some(tcp_tls::config::Client::new(peer.dns_name.clone()).with_ssl_connector(connector))
+        } else {
+            None
+        };
 
         let socket_addr_str = format!("{}:{}", ip_no_port(&peer.ip), proxy_info.system_api_port);
+        tracing::debug!(%socket_addr_str, "connecting to peer via tcp_tls");
         let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
             Ok(a) => a,
             Err(e) => {
@@ -387,24 +393,57 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
         };
 
+        if let Some(config) = tls_config {
+            let make_transport = || TcpTls::Client(tcp_tls::Client::new(config.clone()));
+            self.peer_sender_inner(peer, socket_addr, make_transport).await
+        } else {
+            let make_transport = || Tcp::default();
+            self.peer_sender_inner(peer, socket_addr, make_transport).await
+        }
+    }
+
+    /// Inner helper to create a TCP sender for the given peer, generic over the transport (TCP or TCP+TLS).
+    async fn peer_sender_inner<T: AsyncTransport, S: ToSocketAddrs + Debug>(
+        &self,
+        peer: &Peer,
+        address: S,
+        make_transport: impl Fn() -> T,
+    ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
+        let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
+
+        let address = match lookup_host(address).await {
+            Ok(mut a_iter) => {
+                let Some(a) = a_iter.next() else {
+                    tracing::error!("no addresses found");
+                    return None;
+                };
+                a
+            }
+            Err(e) => {
+                tracing::error!(?e, "failed to resolve address");
+                return None;
+            }
+        };
+
         for _ in 0..self.config.client_pool_size.get() {
-            let transport = TcpTls::Client(tcp_tls::Client::new(config.clone()));
+            let transport = make_transport();
             let mut socket = ReqSocket::new(transport);
             // TODO: maybe connect directly with DNS?
-            if let Err(e) = socket.connect(socket_addr).await {
-                tracing::error!(?e, ?socket_addr, "failed to connect");
+            if let Err(e) = socket.connect(address).await {
+                tracing::error!(?e, ?address, "failed to connect");
                 return None;
             }
             sockets.push(socket);
         }
-        let client_pool = TcpTlsClientPool::new(sockets);
+        let client_pool = ReqSocketIpPool::new(sockets);
 
         let sender =
-            spawn_tcp_forwarder(peer.name.clone(), socket_addr, client_pool, &self.task_executor);
+            spawn_tcp_forwarder(peer.name.clone(), address, client_pool, &self.task_executor);
 
         Some(sender)
     }
 
+    /// Create an HTTP sender for the given peer, to forwarder orderflow requests.
     async fn peer_http_sender(
         &self,
         peer: &Peer,

@@ -10,7 +10,7 @@ use std::{
 };
 
 use msg_socket::ReqSocket;
-use msg_transport::tcp_tls::TcpTls;
+use msg_transport::{tcp::Tcp, tcp_tls::TcpTls, Transport};
 
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
@@ -85,28 +85,43 @@ pub fn default_http_builder() -> reqwest::ClientBuilder {
     builder
 }
 
-pub type TcpTlsReqSocket = ReqSocket<TcpTls, SocketAddr>;
+/// An [msg_transport::Transport] that is also [`Send`], [`Sync`], [`Unpin`] and 'static.
+pub trait AsyncTransport: Transport<SocketAddr> + Send + Sync + Unpin + 'static {}
+impl AsyncTransport for Tcp {}
+impl AsyncTransport for TcpTls {}
+
+pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
 
 /// A pool of TCP [`ReqSocket`] clients, with TLS support.
-#[derive(Clone)]
 #[allow(missing_debug_implementations)]
-pub struct TcpTlsClientPool {
+pub struct ReqSocketIpPool<T: AsyncTransport> {
     /// The clients in the pool.
-    clients: Arc<[TcpTlsReqSocket]>,
+    clients: Arc<[ReqSocketIp<T>]>,
     /// The number of clients in the pool, so you don't have to deference the arc every time.
     num_clients: usize,
     /// The index of the last used client. Used for round-robin load balancing.
     last_used: Arc<AtomicU8>,
 }
 
-impl TcpTlsClientPool {
-    pub fn new(sockets: Vec<TcpTlsReqSocket>) -> Self {
+// Custom [`Clone`] implementation to avoid requiring T: Clone.
+impl<T: AsyncTransport> Clone for ReqSocketIpPool<T> {
+    fn clone(&self) -> Self {
+        Self {
+            clients: self.clients.clone(),
+            num_clients: self.num_clients,
+            last_used: self.last_used.clone(),
+        }
+    }
+}
+
+impl<T: AsyncTransport> ReqSocketIpPool<T> {
+    pub fn new(sockets: Vec<ReqSocketIp<T>>) -> Self {
         let num_clients = sockets.len();
         let clients = Arc::from(sockets);
         Self { clients, num_clients, last_used: Arc::new(AtomicU8::new(0)) }
     }
 
-    pub fn socket(&self) -> &TcpTlsReqSocket {
+    pub fn socket(&self) -> &ReqSocketIp<T> {
         // NOTE: This will automatically wrap.
         let index = self.last_used.fetch_add(1, Ordering::Relaxed);
         &self.clients[(index as usize) % self.num_clients]

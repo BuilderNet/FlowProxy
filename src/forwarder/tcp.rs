@@ -1,5 +1,8 @@
 use crate::{
-    forwarder::{client::TcpTlsClientPool, record_e2e_metrics, ForwardingRequest},
+    forwarder::{
+        client::{AsyncTransport, ReqSocketIpPool},
+        record_e2e_metrics, ForwardingRequest,
+    },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     primitives::WithHeaders,
@@ -22,15 +25,15 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::*;
 
-pub fn spawn_tcp_forwarder(
+pub fn spawn_tcp_forwarder<T: AsyncTransport>(
     name: String,
     address: SocketAddr,
-    client: TcpTlsClientPool,
+    client: ReqSocketIpPool<T>,
     task_executor: &TaskExecutor,
 ) -> priority::channel::UnboundedSender<Arc<ForwardingRequest>> {
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
 
-    let forwarder = TcpForwarder::new(client.clone(), name.clone(), address, request_rx);
+    let forwarder = TcpForwarder::new(client, name.clone(), address, request_rx);
     task_executor.spawn(forwarder);
 
     request_tx
@@ -58,8 +61,8 @@ struct ForwarderResponse<Ok, Err> {
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
 
 /// An TCP forwarder that forwards requests to a peer.
-struct TcpForwarder {
-    client: TcpTlsClientPool,
+struct TcpForwarder<T: AsyncTransport> {
+    client: ReqSocketIpPool<T>,
     /// The name of the builder we're forwarding to.
     peer_name: String,
     /// The URL of the peer.
@@ -72,9 +75,9 @@ struct TcpForwarder {
     metrics: ForwarderMetrics,
 }
 
-impl TcpForwarder {
+impl<T: AsyncTransport> TcpForwarder<T> {
     fn new(
-        client: TcpTlsClientPool,
+        client: ReqSocketIpPool<T>,
         name: String,
         address: SocketAddr,
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
@@ -178,7 +181,7 @@ impl TcpForwarder {
     }
 }
 
-impl Future for TcpForwarder {
+impl<T: AsyncTransport> Future for TcpForwarder<T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

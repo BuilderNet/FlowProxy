@@ -184,6 +184,10 @@ pub async fn run_with_listeners(
     let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
     let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
 
+    let mut reply_socket = RepSocket::new(Tcp::default());
+    reply_socket.bind(args.system_listen_addr_tcp).await.expect("to bind tcp socket address");
+    let system_api_port_tcp = reply_socket.local_addr().expect("binded socket").port();
+
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
         rate_limiting_enabled: args.enable_rate_limiting,
@@ -202,7 +206,7 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
-        system_api_port: args.system_listen_addr_tcp.port(),
+        system_api_port: system_api_port_tcp,
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
@@ -218,8 +222,6 @@ pub async fn run_with_listeners(
         }
     });
 
-    let mut reply_socket = RepSocket::new(Tcp::default());
-    reply_socket.bind(args.system_listen_addr_tcp).await.expect("to bind tcp socket address");
     let ingress_socket =
         IngressSocket::new(reply_socket, ingress.clone(), ctx.task_executor.clone());
     ctx.task_executor.spawn(ingress_socket.listen());
