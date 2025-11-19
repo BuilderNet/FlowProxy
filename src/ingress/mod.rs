@@ -703,12 +703,12 @@ impl OrderflowIngress {
         }
 
         let peer = 'peer: {
-            let body_clone = body.clone();
+            let data_clone = data.clone();
             let sig_clone = signature_header.clone();
             if let Some(address) = ingress
                 .pqueues
                 .spawn_with_priority(priority, move || {
-                    maybe_verify_signature(&sig_clone, &body_clone, USE_LEGACY_SIGNATURE)
+                    maybe_verify_signature(&sig_clone, &data_clone, USE_LEGACY_SIGNATURE)
                 })
                 .await
             {
@@ -729,7 +729,7 @@ impl OrderflowIngress {
         // This gets computed only if we enter in an error branch.
         let body_utf8 = || str::from_utf8(data.as_ref()).unwrap_or("<invalid utf8>");
 
-        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
+        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&data)
         {
             Ok(request) => request,
             Err(e) => {
@@ -741,8 +741,9 @@ impl OrderflowIngress {
         tracing::Span::current().record("method", tracing::field::display(&request.method));
 
         // Record the one-way latency of the RPC call.
-        let sent_at =
-            headers.get(BUILDERNET_SENT_AT_HEADER).and_then(|h| UtcDateTime::parse_header(h));
+        let sent_at = headers
+            .get(&BUILDERNET_SENT_AT_HEADER.to_lowercase())
+            .and_then(|h| UtcDateTime::parse_header(h));
         if let Some(sent_at) = sent_at {
             ingress
                 .system_metrics
