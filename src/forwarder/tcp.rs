@@ -122,6 +122,8 @@ impl<T: AsyncTransport> TcpForwarder<T> {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
                 .collect::<HashMap<String, String>>();
+
+            debug!(?headers, "headers");
             let payload = WithHeaders { headers, data: order.encoding().to_vec() };
             let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
 

@@ -685,22 +685,17 @@ impl OrderflowIngress {
         };
 
         // Before doing anything else, verify that the signature header is present.
-        if headers
-            .get(BUILDERNET_SIGNATURE_HEADER)
-            .or_else(|| headers.get(FLASHBOTS_SIGNATURE_HEADER))
-            .is_none()
-        {
-            tracing::error!(
-                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
-                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
-                "error verifying peer signature"
-            );
+        let Some(signature_header) = headers
+            .get(&BUILDERNET_SIGNATURE_HEADER.to_lowercase())
+            .or_else(|| headers.get(&FLASHBOTS_SIGNATURE_HEADER.to_lowercase()))
+        else {
+            tracing::error!("no signature headers found");
             return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
-        }
+        };
 
         let mut priority = Priority::Low;
         if let Some(priority_) =
-            headers.get(BUILDERNET_PRIORITY_HEADER).and_then(|h| h.parse().ok())
+            headers.get(&BUILDERNET_PRIORITY_HEADER.to_lowercase()).and_then(|h| h.parse().ok())
         {
             priority = priority_;
         } else {
@@ -709,14 +704,11 @@ impl OrderflowIngress {
 
         let peer = 'peer: {
             let body_clone = body.clone();
-            let headers_clone = headers.clone();
+            let sig_clone = signature_header.clone();
             if let Some(address) = ingress
                 .pqueues
                 .spawn_with_priority(priority, move || {
-                    let signature_header = headers_clone
-                        .get(BUILDERNET_SIGNATURE_HEADER)
-                        .or_else(|| headers_clone.get(FLASHBOTS_SIGNATURE_HEADER))?;
-                    maybe_verify_signature(signature_header, &body_clone, USE_LEGACY_SIGNATURE)
+                    maybe_verify_signature(&sig_clone, &body_clone, USE_LEGACY_SIGNATURE)
                 })
                 .await
             {
@@ -729,11 +721,7 @@ impl OrderflowIngress {
                 }
             }
 
-            tracing::error!(
-                buildernet_signature_header = ?headers.get(BUILDERNET_SIGNATURE_HEADER),
-                flashbots_signature_header = ?headers.get(FLASHBOTS_SIGNATURE_HEADER),
-                "error verifying peer signature"
-            );
+            tracing::error!(signature_header, "error verifying peer signature");
             return JsonRpcResponse::error(Value::Null, JsonRpcError::Internal);
         };
         tracing::Span::current().record("peer", tracing::field::display(&peer));
