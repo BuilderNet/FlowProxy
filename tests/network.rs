@@ -145,6 +145,7 @@ async fn network_e2e_tls() {
     ps.builders.entry(signer2.address().to_string()).and_modify(|entry| {
         // Overwrite the IP address to HAProxy system API
         entry.ip = format!("127.0.0.1:5544");
+        entry.dns_name = "localhost".to_string();
         entry.instance.tls_cert = std::fs::read_to_string(cert_dir.join("default.crt")).unwrap();
     });
 
