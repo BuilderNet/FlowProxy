@@ -19,8 +19,7 @@ use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use tokio::{net::TcpListener, sync::broadcast};
-use tracing::Instrument as _;
+use tokio::{net::TcpListener, sync::mpsc};
 
 #[cfg(target_os = "linux")]
 use testcontainers::{
@@ -43,20 +42,17 @@ pub(crate) async fn spawn_ingress_with_args(
 
     let task_manager = rbuilder_utils::tasks::TaskManager::current();
 
-    tokio::spawn(
-        async move {
-            flowproxy::run_with_listeners(
-                args,
-                user_listener,
-                system_listener,
-                builder_listener,
-                CliContext { task_executor: task_manager.executor() },
-            )
-            .await
-            .unwrap();
-        }
-        .instrument(tracing::info_span!("proxy", ?address)),
-    );
+    tokio::spawn(async move {
+        flowproxy::run_with_listeners(
+            args,
+            user_listener,
+            system_listener,
+            builder_listener,
+            CliContext { task_executor: task_manager.executor() },
+        )
+        .await
+        .unwrap();
+    });
 
     IngressClient {
         url: format!("http://{address}"),
@@ -67,7 +63,9 @@ pub(crate) async fn spawn_ingress_with_args(
 
 pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
+    args.peer_update_interval_s = 5;
     args.builder_url = builder_url;
+    args.client_pool_size = 1.try_into().unwrap();
     spawn_ingress_with_args(args).await
 }
 
@@ -135,7 +133,7 @@ impl<S: Signer + Sync> IngressClient<S> {
 
 pub(crate) struct BuilderReceiver {
     pub(crate) local_addr: SocketAddr,
-    pub(crate) receiver: broadcast::Receiver<Value>,
+    pub(crate) receiver: mpsc::Receiver<Value>,
 }
 
 impl BuilderReceiver {
@@ -143,7 +141,7 @@ impl BuilderReceiver {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
-        let (sender, receiver) = broadcast::channel(128);
+        let (sender, receiver) = mpsc::channel(128);
 
         let router = Router::new().route("/", post(BuilderReceiver::receive)).with_state(sender);
 
@@ -162,15 +160,16 @@ impl BuilderReceiver {
         format!("http://{}", self.local_addr)
     }
 
+    #[tracing::instrument(skip_all, name = "builder_receiver")]
     async fn receive(
-        State(sender): State<broadcast::Sender<Value>>,
+        State(sender): State<mpsc::Sender<Value>>,
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<()> {
         let body = match maybe_decompress(true, &headers, body) {
             Ok(decompressed) => decompressed,
             Err(error) => {
-                tracing::error!("Error decompressing body: {:?}", error);
+                tracing::error!(?error, "failed to decompressing body");
                 return JsonRpcResponse::error(Value::Null, error);
             }
         };
@@ -182,11 +181,15 @@ impl BuilderReceiver {
         };
 
         let request_id = request.id.clone();
-        tracing::info!(id = ?request_id, method = request.method, "Received request");
+        tracing::info!(id = ?request_id, method = request.method, "received request");
 
-        tracing::info!("Sending request to builder");
-        tracing::debug!("Request: {:?}", request);
-        let _ = sender.send(request.take_single_param().unwrap());
+        tracing::info!("sending request to builder");
+        tracing::debug!(?request, "request");
+        if let Err(e) = sender.send(request.take_single_param().unwrap()).await {
+            panic!("failed to send received request to channel: {e}");
+        }
+
+        tracing::info!(id = ?request_id, "handled request");
 
         JsonRpcResponse::result(request_id, ())
     }

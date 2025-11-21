@@ -252,6 +252,15 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
+    /// The interval in seconds to update the peer list from BuilderHub.
+    #[clap(
+        long = "peer.update-interval-s",
+        default_value_t = 30,
+        env = "PEER_UPDATE_INTERVAL_S",
+        id = "PEER_UPDATE_INTERVAL_S"
+    )]
+    pub peer_update_interval_s: u64,
+
     /// For each peer, the size of the HTTP client pool used to forward requests.
     #[clap(
         long = "http.client-pool-size",
@@ -285,6 +294,7 @@ impl Default for OrderflowIngressArgs {
             builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
             private_key_pem_file: "./".parse().unwrap(),
             certificate_pem_file: "./".parse().unwrap(),
+            peer_update_interval_s: 30,
             builder_url: None,
             builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),

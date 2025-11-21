@@ -138,7 +138,8 @@ pub async fn run_with_listeners(
             ctx.task_executor.clone(),
         );
 
-        ctx.task_executor.spawn_critical("run_update_peers", peer_updater.run());
+        ctx.task_executor
+            .spawn_critical("run_update_peers", peer_updater.run(args.peer_update_interval_s));
     } else {
         tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
@@ -154,11 +155,8 @@ pub async fn run_with_listeners(
             ctx.task_executor.clone(),
         );
 
-        ctx.task_executor.spawn_critical("local_update_peers", async move {
-            // Wait 5 seconds before starting, so we can override
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            peer_updater.run().await;
-        });
+        ctx.task_executor
+            .spawn_critical("local_update_peers", peer_updater.run(args.peer_update_interval_s));
     }
 
     // Configure the priority worker pool.
@@ -234,6 +232,7 @@ pub async fn run_with_listeners(
     let ingress_socket =
         IngressSocket::new(reply_socket, ingress.clone(), ctx.task_executor.clone());
     ctx.task_executor.spawn(ingress_socket.listen());
+    tracing::info!(port = system_api_port_tcp, "starting system tcp listener");
 
     // Spawn user facing HTTP server for accepting bundles and raw transactions.
     let user_router = Router::new()

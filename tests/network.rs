@@ -7,10 +7,14 @@ use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use std::time::Duration;
 
 mod common;
+use tracing::{debug, info};
 
 /// This tests proper order propagation between 2 proxies.
 #[tokio::test]
-async fn network_e2e() {
+async fn network_e2e_raw_tx_works() {
+    let _ = tracing_subscriber::fmt::try_init();
+    info!("starting network e2e tcp test");
+
     let mut rng = rand::rng();
     let mut builder1 = BuilderReceiver::spawn().await;
     let mut builder2 = BuilderReceiver::spawn().await;
@@ -18,23 +22,28 @@ async fn network_e2e() {
     let client2 = spawn_ingress(Some(builder2.url())).await;
 
     // Wait for the proxies to be ready and connected to each other.
-    tokio::time::sleep(Duration::from_secs(35)).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
 
     let raw_tx = TxEnvelope::random(&mut rng).encoded_2718().into();
     let response = client1.send_raw_tx(&raw_tx).await;
+    info!("sent raw tx from client1");
     assert!(response.status().is_success());
 
     let received = builder1.recv::<Bytes>().await.unwrap();
     assert_eq!(received, raw_tx);
+    debug!("builder1 received tx from client1");
 
     let received = builder2.recv::<Bytes>().await.unwrap();
     assert_eq!(received, raw_tx);
+    debug!("builder2 received tx from client1");
 
     let bundle = RawBundle::random(&mut rng);
     let response = client2.send_bundle(&bundle).await;
+    info!("sent raw tx from client2");
     assert!(response.status().is_success());
 
     let mut received = builder2.recv::<RawBundle>().await.unwrap();
+    debug!("builder2 received tx from client2");
 
     assert!(received.metadata.signing_address.is_some());
     assert!(received.metadata.bundle_hash.is_some());
@@ -50,12 +59,13 @@ async fn network_e2e() {
     received.metadata.signing_address = None;
     received.metadata.bundle_hash = None;
     assert_eq!(received, bundle);
+    debug!("builder1 received tx from client2");
 
     tokio::time::sleep(Duration::from_secs(2)).await;
 }
 
 #[tokio::test]
-async fn network_e2e_mev_share_bundle() {
+async fn network_e2e_mev_share_bundle_works() {
     let mut rng = rand::rng();
     let mut builder1 = BuilderReceiver::spawn().await;
     let mut builder2 = BuilderReceiver::spawn().await;
