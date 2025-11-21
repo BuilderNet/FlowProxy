@@ -19,9 +19,6 @@ use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use testcontainers::{
-    core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
-};
 use tokio::{net::TcpListener, sync::broadcast};
 use tracing::Instrument as _;
 
@@ -198,10 +195,15 @@ impl BuilderReceiver {
 ///
 /// # Returns
 /// A running HAProxy container that will be cleaned up when dropped.
+#[cfg(target_os = "linux")]
 pub(crate) async fn spawn_haproxy(
     haproxy_cfg: &std::path::Path,
     cert_dir: &std::path::Path,
 ) -> Result<ContainerAsync<GenericImage>, testcontainers::core::error::TestcontainersError> {
+    use testcontainers::{
+        core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
+    };
+
     // Ensure the paths exist before mounting
     if !haproxy_cfg.exists() {
         panic!("haproxy.cfg not found at: {}", haproxy_cfg.display());

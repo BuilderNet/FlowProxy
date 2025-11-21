@@ -133,7 +133,6 @@ mod linux {
         // Listen on port 5552, the TCP receiver
         args2.system_listen_addr_http = SocketAddr::from_str("127.0.0.1:5542").unwrap();
         args2.system_listen_addr_tcp = SocketAddr::from_str("127.0.0.1:5552").unwrap();
-        args2.disable_forwarding = true;
 
         let mut builder1 = BuilderReceiver::spawn().await;
         let mut builder2 = BuilderReceiver::spawn().await;
@@ -161,8 +160,6 @@ mod linux {
         });
 
         let mut rng = rand::rng();
-
-        // Listens on port 5554
 
         tokio::time::sleep(Duration::from_secs(5)).await;
 
