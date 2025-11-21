@@ -22,6 +22,11 @@ use serde_json::{json, Value};
 use tokio::{net::TcpListener, sync::broadcast};
 use tracing::Instrument as _;
 
+#[cfg(target_os = "linux")]
+use testcontainers::{
+    core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
+};
+
 pub(crate) struct IngressClient<S: Signer> {
     pub(crate) url: String,
     pub(crate) client: reqwest::Client,
@@ -200,10 +205,6 @@ pub(crate) async fn spawn_haproxy(
     haproxy_cfg: &std::path::Path,
     cert_dir: &std::path::Path,
 ) -> Result<ContainerAsync<GenericImage>, testcontainers::core::error::TestcontainersError> {
-    use testcontainers::{
-        core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
-    };
-
     // Ensure the paths exist before mounting
     if !haproxy_cfg.exists() {
         panic!("haproxy.cfg not found at: {}", haproxy_cfg.display());
