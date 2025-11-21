@@ -1,4 +1,6 @@
-use std::{io::Read as _, net::SocketAddr, path::PathBuf, str::FromStr as _, time::Duration};
+use std::{
+    io::Read as _, net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr as _, time::Duration,
+};
 
 use alloy_primitives::Bytes;
 
@@ -116,6 +118,7 @@ async fn network_e2e_tls() {
     args.private_key_pem_file = cert_dir.join("default.key");
     args.certificate_pem_file = cert_dir.join("default.crt");
     args.orderflow_signer = Some(signer1);
+    args.client_pool_size = NonZero::new(1).unwrap();
 
     let mut args2 = args.clone();
     args2.private_key_pem_file = cert_dir.join("default.key");

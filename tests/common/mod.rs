@@ -20,10 +20,7 @@ use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use testcontainers::{
-    bollard::secret::Network,
-    core::{Mount, WaitFor},
-    runners::AsyncRunner as _,
-    ContainerAsync, GenericImage, ImageExt,
+    core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
 };
 use tokio::{net::TcpListener, sync::broadcast};
 use tracing::Instrument as _;
