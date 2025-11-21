@@ -484,12 +484,12 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 /// 2. Private key and certificate files for client authentication (mTLS).
 fn tls_connector(
     peer_root_certificate: X509,
-    private_key_pem_file: &PathBuf,
-    certificate_pem_file: &PathBuf,
+    _private_key_pem_file: &PathBuf,
+    _certificate_pem_file: &PathBuf,
 ) -> Result<SslConnector, openssl::error::ErrorStack> {
     let mut builder = SslConnector::builder(SslMethod::tls())?;
-    builder.set_private_key_file(private_key_pem_file, SslFiletype::PEM)?;
-    builder.set_certificate_file(certificate_pem_file, SslFiletype::PEM)?;
+    // builder.set_private_key_file(private_key_pem_file, SslFiletype::PEM)?;
+    // builder.set_certificate_file(certificate_pem_file, SslFiletype::PEM)?;
 
     let certificate_store = builder.cert_store_mut();
     certificate_store.add_cert(peer_root_certificate)?;
