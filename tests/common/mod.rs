@@ -20,9 +20,10 @@ use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use testcontainers::{
+    bollard::secret::Network,
     core::{Mount, WaitFor},
     runners::AsyncRunner as _,
-    ContainerAsync, GenericImage, ImageExt as _,
+    ContainerAsync, GenericImage, ImageExt,
 };
 use tokio::{net::TcpListener, sync::broadcast};
 use tracing::Instrument as _;
@@ -225,6 +226,7 @@ pub(crate) async fn spawn_haproxy(
             cert_dir.join("default.pem").to_string_lossy().to_string(),
             "/usr/local/etc/haproxy/certs/default.pem",
         ))
+        .with_network("host")
         .start()
         .await?;
 

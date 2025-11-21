@@ -143,9 +143,9 @@ async fn network_e2e_tls() {
     // Override server instance data
     let ps = LOCAL_PEER_STORE.clone();
     ps.builders.entry(signer2.address().to_string()).and_modify(|entry| {
-        // This is the HTTP address of HAProxy
+        // Overwrite the IP address to HAProxy system API
         entry.ip = format!("127.0.0.1:5544");
-        entry.instance.tls_cert = std::fs::read_to_string(cert_dir.join("default.pem")).unwrap();
+        entry.instance.tls_cert = std::fs::read_to_string(cert_dir.join("default.crt")).unwrap();
     });
 
     let mut rng = rand::rng();
