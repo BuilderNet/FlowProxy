@@ -159,6 +159,27 @@ async fn network_e2e_tls() {
 
     tokio::time::sleep(Duration::from_secs(5)).await;
 
+    let bundle = RawBundle::random(&mut rng);
+    let response = client1.send_bundle(&bundle).await;
+    assert!(response.status().is_success());
+
+    let mut received = builder1.recv::<RawBundle>().await.unwrap();
+
+    assert!(received.metadata.signing_address.is_some());
+    assert!(received.metadata.bundle_hash.is_some());
+    // NOTE: This will have a signing address populated which we reset
+    received.metadata.signing_address = None;
+    received.metadata.bundle_hash = None;
+    assert_eq!(received, bundle);
+
+    let mut received = builder2.recv::<RawBundle>().await.unwrap();
+    assert!(received.metadata.signing_address.is_some());
+    assert!(received.metadata.bundle_hash.is_some());
+    // NOTE: This will have a signing address populated which we reset
+    received.metadata.signing_address = None;
+    received.metadata.bundle_hash = None;
+    assert_eq!(received, bundle);
+
     let mut stdout = String::new();
     haproxy.stdout(false).read_to_string(&mut stdout).await.unwrap();
     let mut stderr = String::new();
