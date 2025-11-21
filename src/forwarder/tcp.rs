@@ -33,6 +33,7 @@ pub fn spawn_tcp_forwarder<T: AsyncTransport>(
 ) -> priority::channel::UnboundedSender<Arc<ForwardingRequest>> {
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
 
+    tracing::info!(addr = %address, "spawning tcp forwarder");
     let forwarder = TcpForwarder::new(client, name.clone(), address, request_rx);
     task_executor.spawn(forwarder);
 

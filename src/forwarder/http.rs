@@ -28,7 +28,7 @@ pub fn spawn_http_forwarder(
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
     match Url::parse(&url)?.scheme() {
         "http" | "https" => {
-            info!(%name, %url, "Spawning HTTP forwarder");
+            info!(name, %url, "spawning http forwarder");
             let (forwarder, decoder) =
                 HttpForwarder::new(client.clone(), name.clone(), url, request_rx);
             task_executor.spawn(forwarder);
