@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     hash::{Hash as _, Hasher as _},
     sync::Arc,
     time::{Duration, Instant},
@@ -709,6 +710,19 @@ impl Samplable for B256 {
         let every = every as u64;
         u64::from_be_bytes(first) % every == 0
     }
+}
+
+/// Contains information about another proxy peer instance, as returned by the `infoz` endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PeerProxyInfo {
+    /// The port where the peer receives TCP-only, system flow.
+    pub system_api_port: u16,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WithHeaders<T> {
+    pub headers: HashMap<String, String>,
+    pub data: T,
 }
 
 #[cfg(test)]

@@ -707,6 +707,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
+
+[[package]]
 name = "ark-bls12-381"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1830,7 +1836,7 @@ dependencies = [
  "hyper",
  "hyper-tls",
  "hyper-util",
- "lz4_flex",
+ "lz4_flex 0.11.5",
  "quanta",
  "replace_with",
  "sealed",
@@ -2557,7 +2563,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2817,6 +2823,9 @@ dependencies = [
  "hyper",
  "mime",
  "mini-moka",
+ "msg-socket",
+ "msg-transport",
+ "openssl",
  "parquet",
  "prometheus",
  "prometric",
@@ -3929,6 +3938,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lz4_flex"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab6473172471198271ff72e9379150e9dfd70d8e533e0752a27e515b48dd375e"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "macro-string"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4046,6 +4064,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "msg-common"
+version = "0.1.3"
+source = "git+https://github.com/chainbound/msg-rs?branch=main#f9f78e8f2a7161883f701b08d1c9a0ba8ac4c5e6"
+dependencies = [
+ "futures",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
+name = "msg-socket"
+version = "0.1.3"
+source = "git+https://github.com/chainbound/msg-rs?branch=main#f9f78e8f2a7161883f701b08d1c9a0ba8ac4c5e6"
+dependencies = [
+ "arc-swap",
+ "bytes",
+ "derive_more 2.0.1",
+ "futures",
+ "msg-common",
+ "msg-transport",
+ "msg-wire",
+ "parking_lot",
+ "rustc-hash",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "msg-transport"
+version = "0.1.3"
+source = "git+https://github.com/chainbound/msg-rs?branch=main#f9f78e8f2a7161883f701b08d1c9a0ba8ac4c5e6"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "derive_more 2.0.1",
+ "futures",
+ "libc",
+ "msg-common",
+ "openssl",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-openssl",
+ "tracing",
+]
+
+[[package]]
+name = "msg-wire"
+version = "0.1.3"
+source = "git+https://github.com/chainbound/msg-rs?branch=main#f9f78e8f2a7161883f701b08d1c9a0ba8ac4c5e6"
+dependencies = [
+ "bytes",
+ "flate2",
+ "lz4_flex 0.12.0",
+ "msg-common",
+ "snap",
+ "thiserror 2.0.17",
+ "tokio-util",
+ "zstd",
+]
+
+[[package]]
 name = "multiaddr"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4134,7 +4216,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4358,9 +4440,9 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "openssl"
-version = "0.10.74"
+version = "0.10.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24ad14dd45412269e1a30f52ad8f0664f0f4f4a89ee8fe28c3b3527021ebb654"
+checksum = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328"
 dependencies = [
  "bitflags",
  "cfg-if",
@@ -4390,9 +4472,9 @@ checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.110"
+version = "0.9.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a9f0075ba3c21b09f8e8b2026584b1d18d49388648f2fbbf3c97ea8deced8e2"
+checksum = "82cab2d520aa75e3c58898289429321eb788c3106963d0dc886ec7a5f4adc321"
 dependencies = [
  "cc",
  "libc",
@@ -4493,7 +4575,7 @@ dependencies = [
  "flate2",
  "half",
  "hashbrown 0.16.0",
- "lz4_flex",
+ "lz4_flex 0.11.5",
  "num",
  "num-bigint",
  "paste",
@@ -5011,7 +5093,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6139,7 +6221,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7023,7 +7105,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7264,6 +7346,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbae76ab933c85776efabc971569dd6119c580d8f5d448769dec1764bf796ef2"
 dependencies = [
  "native-tls",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-openssl"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59df6849caa43bb7567f9a36f863c447d95a11d5903c9cc334ba32576a27eadd"
+dependencies = [
+ "openssl",
+ "openssl-sys",
  "tokio",
 ]
 
@@ -7948,7 +8041,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

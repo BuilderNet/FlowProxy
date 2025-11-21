@@ -1,9 +1,13 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
-    builderhub::PeersUpdater,
+    builderhub::{PeersUpdater, PeersUpdaterConfig},
     cache::SignerCache,
-    forwarder::client::{default_http_builder, ClientPool},
+    forwarder::{
+        client::{default_http_builder, HttpClientPool},
+        http::spawn_http_forwarder,
+    },
+    ingress::IngressSocket,
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
@@ -20,7 +24,9 @@ use axum::{
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
-use forwarder::{spawn_forwarder, IngressForwarders, PeerHandle};
+use forwarder::{IngressForwarders, PeerHandle};
+use msg_socket::{RepOptions, RepSocket};
+use msg_transport::tcp::Tcp;
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
@@ -69,9 +75,9 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
         metrics::spawn_process_collector().await?;
     }
 
-    let user_listener = TcpListener::bind(&args.user_listen_url).await?;
-    let system_listener = TcpListener::bind(&args.system_listen_url).await?;
-    let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_url {
+    let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
+    let system_listener = TcpListener::bind(&args.system_listen_addr_http).await?;
+    let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_addr {
         Some(TcpListener::bind(builder_listen_url).await?)
     } else {
         None
@@ -112,21 +118,28 @@ pub async fn run_with_listeners(
 
     let peers = Arc::new(DashMap::<String, PeerHandle>::default());
 
+    let peer_update_config = PeersUpdaterConfig {
+        local_signer,
+        disable_forwarding: args.disable_forwarding,
+        client_pool_size: args.client_pool_size,
+        certificate_pem_file: args.certificate_pem_file,
+        private_key_pem_file: args.private_key_pem_file,
+    };
+
     if let Some(builder_hub_url) = args.builder_hub_url {
         tracing::debug!(url = builder_hub_url, "Running with BuilderHub");
         let builder_hub = builderhub::Client::new(builder_hub_url);
         builder_hub.register(local_signer).await?;
 
         let peer_updater = PeersUpdater::new(
-            local_signer,
+            peer_update_config,
             builder_hub,
             peers.clone(),
-            args.disable_forwarding,
-            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
-        ctx.task_executor.spawn_critical("run_update_peers", peer_updater.run());
+        ctx.task_executor
+            .spawn_critical("run_update_peers", peer_updater.run(args.peer_update_interval_s));
     } else {
         tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
@@ -136,15 +149,14 @@ pub async fn run_with_listeners(
 
         let peers = peers.clone();
         let peer_updater = PeersUpdater::new(
-            local_signer,
+            peer_update_config,
             peer_store,
             peers.clone(),
-            args.disable_forwarding,
-            args.client_pool_size,
             ctx.task_executor.clone(),
         );
 
-        ctx.task_executor.spawn_critical("local_update_peers", peer_updater.run());
+        ctx.task_executor
+            .spawn_critical("local_update_peers", peer_updater.run(args.peer_update_interval_s));
     }
 
     // Configure the priority worker pool.
@@ -153,11 +165,11 @@ pub async fn run_with_listeners(
     // Spawn forwarders
     let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
     let forwarders = if let Some(ref builder_url) = builder_url {
-        let local_sender = spawn_forwarder(
+        let local_sender = spawn_http_forwarder(
             String::from("local-builder"),
             builder_url.to_string(),
             // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.
-            ClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
+            HttpClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
             &ctx.task_executor,
         )?;
 
@@ -173,6 +185,15 @@ pub async fn run_with_listeners(
 
     let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
     let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
+
+    let mut reply_socket = RepSocket::with_options(
+        Tcp::default(),
+        // 512 bytes buffer before flushing. Response sizes are small, and we want a response
+        // quickly (not too much buffering).
+        RepOptions::default().backpressure_boundary(512),
+    );
+    reply_socket.bind(args.system_listen_addr_tcp).await.expect("to bind tcp socket address");
+    let system_api_port_tcp = reply_socket.local_addr().expect("binded socket").port();
 
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
@@ -192,6 +213,7 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        system_api_port: system_api_port_tcp,
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
@@ -206,6 +228,11 @@ pub async fn run_with_listeners(
             }
         }
     });
+
+    let ingress_socket =
+        IngressSocket::new(reply_socket, ingress.clone(), ctx.task_executor.clone());
+    ctx.task_executor.spawn(ingress_socket.listen());
+    tracing::info!(port = system_api_port_tcp, "starting system tcp listener");
 
     // Spawn user facing HTTP server for accepting bundles and raw transactions.
     let user_router = Router::new()
@@ -228,6 +255,7 @@ pub async fn run_with_listeners(
         .route("/health", get(|| async { Ok::<_, ()>(()) }))
         .route("/livez", get(|| async { Ok::<_, ()>(()) }))
         .route("/readyz", get(OrderflowIngress::ready_handler))
+        .route("/infoz", get(OrderflowIngress::info_handler))
         .layer(DefaultBodyLimit::max(args.max_request_size))
         // TODO: After mTLS, we can probably take this out.
         .route_layer(axum::middleware::from_fn_with_state(

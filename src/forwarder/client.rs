@@ -1,5 +1,6 @@
 //! Configuration for HTTP clients used to spawn forwarders.
 use std::{
+    net::SocketAddr,
     num::NonZero,
     sync::{
         atomic::{AtomicU8, Ordering},
@@ -7,6 +8,9 @@ use std::{
     },
     time::Duration,
 };
+
+use msg_socket::ReqSocket;
+use msg_transport::{tcp::Tcp, tcp_tls::TcpTls, Transport};
 
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
@@ -81,9 +85,52 @@ pub fn default_http_builder() -> reqwest::ClientBuilder {
     builder
 }
 
+/// An [msg_transport::Transport] that is also [`Send`], [`Sync`], [`Unpin`] and 'static.
+pub trait AsyncTransport: Transport<SocketAddr> + Send + Sync + Unpin + 'static {}
+impl AsyncTransport for Tcp {}
+impl AsyncTransport for TcpTls {}
+
+pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
+
+/// A pool of TCP [`ReqSocket`] clients, with TLS support.
+#[allow(missing_debug_implementations)]
+pub struct ReqSocketIpPool<T: AsyncTransport> {
+    /// The clients in the pool.
+    clients: Arc<[ReqSocketIp<T>]>,
+    /// The number of clients in the pool, so you don't have to deference the arc every time.
+    num_clients: usize,
+    /// The index of the last used client. Used for round-robin load balancing.
+    last_used: Arc<AtomicU8>,
+}
+
+// Custom [`Clone`] implementation to avoid requiring T: Clone.
+impl<T: AsyncTransport> Clone for ReqSocketIpPool<T> {
+    fn clone(&self) -> Self {
+        Self {
+            clients: self.clients.clone(),
+            num_clients: self.num_clients,
+            last_used: self.last_used.clone(),
+        }
+    }
+}
+
+impl<T: AsyncTransport> ReqSocketIpPool<T> {
+    pub fn new(sockets: Vec<ReqSocketIp<T>>) -> Self {
+        let num_clients = sockets.len();
+        let clients = Arc::from(sockets);
+        Self { clients, num_clients, last_used: Arc::new(AtomicU8::new(0)) }
+    }
+
+    pub fn socket(&self) -> &ReqSocketIp<T> {
+        // NOTE: This will automatically wrap.
+        let index = self.last_used.fetch_add(1, Ordering::Relaxed);
+        &self.clients[(index as usize) % self.num_clients]
+    }
+}
+
 /// A pool of HTTP clients for load balancing. Works with round-robin selection.
 #[derive(Debug, Clone)]
-pub struct ClientPool {
+pub struct HttpClientPool {
     /// The clients in the pool.
     clients: Arc<[reqwest::Client]>,
     /// The number of clients in the pool, so you don't have to deference the arc every time.
@@ -92,7 +139,7 @@ pub struct ClientPool {
     last_used: Arc<AtomicU8>,
 }
 
-impl ClientPool {
+impl HttpClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
     pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
         let clients = (0..num_clients.get()).map(|_| make_client()).collect();

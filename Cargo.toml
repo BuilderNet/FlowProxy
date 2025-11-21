@@ -86,6 +86,13 @@ derive_more = { version = "2", features = ["deref"] }
 fdlimit = "0.3.0"
 rayon = "1.11.0"
 
+# networking
+msg-transport = { git = "https://github.com/chainbound/msg-rs", branch = "main", features = [
+  "tcp-tls"
+] }
+msg-socket = { git = "https://github.com/chainbound/msg-rs", branch = "main" }
+openssl = { version = "0.10.75" }
+
 [dev-dependencies]
 tempfile = { version = "3.23.0" }
 testcontainers = { version = "0.25.0" }

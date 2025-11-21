@@ -5,7 +5,7 @@ use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 use flowproxy::{
-    consts::FLASHBOTS_SIGNATURE_HEADER,
+    consts::{BUILDERNET_SIGNATURE_HEADER, FLASHBOTS_SIGNATURE_HEADER},
     ingress::maybe_verify_signature,
     primitives::{SystemBundleDecoder, SystemBundleMetadata, UtcInstant},
     priority::Priority,
@@ -121,7 +121,15 @@ pub fn bench_sigverify(c: &mut Criterion) {
             },
             |inputs| {
                 for input in inputs {
-                    let result = maybe_verify_signature(&input.headers, &input.json, true)
+                    let signature_header = input
+                        .headers
+                        .get(BUILDERNET_SIGNATURE_HEADER)
+                        .or_else(|| input.headers.get(FLASHBOTS_SIGNATURE_HEADER))
+                        .expect("signature header")
+                        .to_str()
+                        .expect("convert to str");
+
+                    let result = maybe_verify_signature(signature_header, &input.json, true)
                         .expect("failed to verify signature");
                     black_box(result);
                 }
