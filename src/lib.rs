@@ -25,7 +25,7 @@ use axum::{
 use dashmap::DashMap;
 use entity::SpamThresholds;
 use forwarder::{IngressForwarders, PeerHandle};
-use msg_socket::RepSocket;
+use msg_socket::{RepOptions, RepSocket};
 use msg_transport::tcp::Tcp;
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
@@ -188,7 +188,12 @@ pub async fn run_with_listeners(
     let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
     let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
 
-    let mut reply_socket = RepSocket::new(Tcp::default());
+    let mut reply_socket = RepSocket::with_options(
+        Tcp::default(),
+        // 512 bytes buffer before flushing. Response sizes are small, and we want a response
+        // quickly (not too much buffering).
+        RepOptions::default().backpressure_boundary(512),
+    );
     reply_socket.bind(args.system_listen_addr_tcp).await.expect("to bind tcp socket address");
     let system_api_port_tcp = reply_socket.local_addr().expect("binded socket").port();
 

@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
-use msg_socket::ReqSocket;
+use msg_socket::{ReqOptions, ReqSocket};
 use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
@@ -428,7 +428,11 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
         for _ in 0..self.config.client_pool_size.get() {
             let transport = make_transport();
-            let mut socket = ReqSocket::new(transport);
+            let mut socket = ReqSocket::with_options(
+                transport,
+                // 4KiB buffer before flushing.
+                ReqOptions::default().backpressure_boundary(1024 * 4),
+            );
             // TODO: maybe connect directly with DNS?
             if let Err(e) = socket.connect(address).await {
                 tracing::error!(?e, ?address, "failed to connect");
