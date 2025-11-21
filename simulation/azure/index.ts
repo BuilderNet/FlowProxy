@@ -404,7 +404,7 @@ fi
 chmod 600 "\${CLIENT_KEY}"
 chmod 644 "\${CLIENT_CERT}"
 
-rm -f /usr/local/etc/haproxy/certs/default.crt || true
+rm -f /usr/local/etc/haproxy/certs/default.crt /usr/local/etc/haproxy/certs/default.key || true
 systemctl enable --now docker
 docker rm -f haproxy || true
 docker pull haproxy:${haProxyVersion}
