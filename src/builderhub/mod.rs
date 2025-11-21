@@ -230,8 +230,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     }
 
     /// Run the peer updater loop.
-    pub async fn run(mut self) {
-        let delay = Duration::from_secs(30);
+    pub async fn run(mut self, interval_s: u64) {
+        let delay = Duration::from_secs(interval_s);
 
         loop {
             self.update().await;
@@ -290,10 +290,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let response = match http_client.get(info_url).send().await {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(
-                    ?e,
-                    "failed to call infoz endpoint, falling back to http client pool"
-                );
+                tracing::warn!(?e, "failed to call infoz endpoint");
                 return None;
             }
         };
@@ -313,23 +310,27 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     /// forwarder.
     #[tracing::instrument(skip_all, fields(peer = ?peer))]
     async fn process_peer(&mut self, peer: Peer) {
+        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address == self.config.local_signer;
+        if is_self {
+            tracing::debug!("skipped processing self peer");
+            return;
+        }
+
         let entry = self.peers.entry(peer.name.clone());
-        let new_peer = match &entry {
+        match &entry {
             dashmap::Entry::Occupied(entry) => {
-                tracing::info!("received configuration update");
-                entry.get().info != peer
+                if entry.get().info != peer {
+                    tracing::info!("received configuration update");
+                } else {
+                    tracing::debug!("received no configuration changes, skipping");
+                    return;
+                }
             }
             dashmap::Entry::Vacant(_) => {
                 tracing::info!("received new peer configuration");
-                true
             }
         };
 
-        // Self-filter any new peers before connecting to them.
-        let is_self = peer.orderflow_proxy.ecdsa_pubkey_address == self.config.local_signer;
-        if !new_peer || is_self {
-            return;
-        }
         if self.config.disable_forwarding {
             tracing::warn!("skipped spawning forwarder (disabled forwarding)");
             return;
@@ -338,12 +339,13 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let peer_sender_maybe = if let Some(proxy_info) = self.proxy_info(&peer).await {
             self.peer_tcp_sender(&peer, &proxy_info).await
         } else {
+            tracing::info!("falling back to http forwarder");
             self.peer_http_sender(&peer).await
         };
 
         if let Some(sender) = peer_sender_maybe {
-            tracing::debug!("inserted configuration");
             entry.insert(PeerHandle { info: peer, sender });
+            tracing::debug!(peers = self.peers.len(), "inserted configuration");
         }
     }
 
@@ -384,7 +386,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         };
 
         let socket_addr_str = format!("{}:{}", ip_no_port(&peer.ip), proxy_info.system_api_port);
-        tracing::debug!(%socket_addr_str, "connecting to peer via tcp_tls");
+        tracing::debug!(addr = %socket_addr_str, "connecting to peer via tcp");
         let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
             Ok(a) => a,
             Err(e) => {
