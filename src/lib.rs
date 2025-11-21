@@ -154,7 +154,11 @@ pub async fn run_with_listeners(
             ctx.task_executor.clone(),
         );
 
-        ctx.task_executor.spawn_critical("local_update_peers", peer_updater.run());
+        ctx.task_executor.spawn_critical("local_update_peers", async move {
+            // Wait 5 seconds before starting, so we can override
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            peer_updater.run().await;
+        });
     }
 
     // Configure the priority worker pool.

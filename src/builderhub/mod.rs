@@ -145,7 +145,7 @@ impl PeerStore for client::Client {
 
 #[derive(Debug, Clone)]
 pub struct LocalPeerStore {
-    pub(crate) builders: Arc<DashMap<String, Peer>>,
+    pub builders: Arc<DashMap<String, Peer>>,
 }
 
 impl LocalPeerStore {

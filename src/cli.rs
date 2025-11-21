@@ -146,7 +146,7 @@ pub struct CacheArgs {
     pub signer_cache_size: u64,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 pub struct OrderflowIngressArgs {
     /// Listen socket address for receiving user flow.
