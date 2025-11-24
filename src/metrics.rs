@@ -12,6 +12,18 @@ pub(crate) static SYSTEM_METRICS: LazyLock<SystemMetrics> = LazyLock::new(System
 pub(crate) static CLICKHOUSE_METRICS: LazyLock<ClickhouseMetrics> =
     LazyLock::new(ClickhouseMetrics::default);
 
+/// Build information metrics.
+#[derive(Debug)]
+#[metrics(scope = "build")]
+pub(crate) struct BuildInfoMetrics {
+    /// Build information metric. Exposes version and git commit hash.
+    #[metric(labels = ["version", "commit"])]
+    info: Gauge,
+}
+
+pub(crate) static BUILD_INFO_METRICS: LazyLock<BuildInfoMetrics> =
+    LazyLock::new(BuildInfoMetrics::default);
+
 #[derive(Debug)]
 #[metrics(scope = "builderhub")]
 pub(crate) struct BuilderHubMetrics {
