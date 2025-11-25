@@ -115,6 +115,10 @@ tokio = { version = "1", default-features = false, features = [
   "test-util"
 ] }
 
+[patch.crates-io]
+prometric = { git = "https://github.com/chainbound/prometric", branch = "main" }
+prometric-derive = { git = "https://github.com/chainbound/prometric", branch = "main" }
+
 [[bench]]
 name = "validation"
 harness = false
