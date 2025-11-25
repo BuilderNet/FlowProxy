@@ -6,7 +6,7 @@ use crate::{
         ForwardingRequest, PeerHandle,
     },
     metrics::BuilderHubMetrics,
-    primitives::PeerProxyInfo,
+    primitives::{PeerProxyInfo, Protocol},
     priority, DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
@@ -336,15 +336,15 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             return;
         }
 
-        let peer_sender_maybe = if let Some(proxy_info) = self.proxy_info(&peer).await {
-            self.peer_tcp_sender(&peer, &proxy_info).await
+        let (peer_sender_maybe, protocol) = if let Some(proxy_info) = self.proxy_info(&peer).await {
+            (self.peer_tcp_sender(&peer, &proxy_info).await, Protocol::Tcp)
         } else {
             tracing::info!("falling back to http forwarder");
-            self.peer_http_sender(&peer).await
+            (self.peer_http_sender(&peer).await, Protocol::Http)
         };
 
         if let Some(sender) = peer_sender_maybe {
-            entry.insert(PeerHandle { info: peer, sender });
+            entry.insert(PeerHandle { info: peer, sender, protocol });
             tracing::debug!(peers = self.peers.len(), "inserted configuration");
         }
     }

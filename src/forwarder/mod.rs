@@ -6,8 +6,8 @@ use crate::{
     },
     metrics::SYSTEM_METRICS,
     primitives::{
-        EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
-        UtcInstant, WithEncoding,
+        EncodedOrder, Protocol, RawOrderMetadata, SystemBundle, SystemMevShareBundle,
+        SystemTransaction, UtcInstant, WithEncoding,
     },
     priority::{self, workers::PriorityWorkers, Priority},
     utils::UtcDateTimeHeader as _,
@@ -196,6 +196,8 @@ pub struct PeerHandle {
     pub info: builderhub::Peer,
     /// Sender to the peer forwarder.
     pub sender: priority::channel::UnboundedSender<Arc<ForwardingRequest>>,
+    /// The protocol used to communicate with the peer.
+    pub protocol: Protocol,
 }
 
 /// The direction of the forwarding request.

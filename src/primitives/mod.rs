@@ -725,6 +725,13 @@ pub struct WithHeaders<T> {
     pub data: T,
 }
 
+/// The protocol used to communicate with a peer.
+#[derive(Debug, Clone, Copy)]
+pub enum Protocol {
+    Tcp,
+    Http,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
