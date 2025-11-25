@@ -1,7 +1,7 @@
 //! FlowProxy metrics with [`prometric_derive`].
 use std::{sync::LazyLock, time::Duration};
 
-use prometric::{process::ProcessCollector, Counter, Gauge, Histogram};
+use prometric::{process::ProcessCollector, Counter, Gauge, Histogram, Summary};
 use prometric_derive::metrics;
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and
@@ -43,8 +43,8 @@ pub(crate) struct ForwarderMetrics {
     #[metric]
     json_rpc_decoding_failures: Counter,
     /// The duration of RPC calls in seconds.
-    #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.035, 0.05, 0.0625, 0.075, 0.0875, 0.100, 0.125, 0.150, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0])]
-    rpc_call_duration: Histogram,
+    #[metric(labels = ["order_type", "big_request"])]
+    rpc_call_duration: Summary,
     /// The total number of RPC call failures.
     #[metric(labels = ["rpc_code"])]
     rpc_call_failures: Counter,
@@ -171,26 +171,21 @@ pub(crate) struct ParquetMetrics {
     queue_size: Gauge,
 }
 
-const PROCESSING_TIME_BUCKETS: &[f64] = &[
-    0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5,
-    1.0, 2.0,
-];
-
 #[derive(Debug, Clone)]
 #[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
-    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    bundle_processing_time: Histogram,
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    bundle_processing_time: Summary,
     /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    mev_share_bundle_processing_time: Histogram,
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    mev_share_bundle_processing_time: Summary,
     /// End-to-end transaction processing time in seconds.
-    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    transaction_processing_time: Histogram,
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"])]
+    transaction_processing_time: Summary,
     /// End-to-end system order processing time in seconds.
-    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    system_order_processing_time: Histogram,
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"])]
+    system_order_processing_time: Summary,
     /// Number of times the queue capacity was hit per priority.
     #[metric(labels = ["priority"])]
     queue_capacity_hits: Counter,
