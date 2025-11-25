@@ -67,6 +67,9 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     if let Some(ref metrics_addr) = args.metrics {
         ExporterBuilder::new().with_address(metrics_addr).with_namespace("flowproxy").install()?;
         metrics::spawn_process_collector().await?;
+
+        // Set build info metric
+        metrics::BUILD_INFO_METRICS.info(env!("CARGO_PKG_VERSION"), env!("GIT_HASH")).set(1);
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_url).await?;
