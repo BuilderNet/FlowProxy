@@ -316,8 +316,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             return;
         }
 
-        let entry = self.peers.entry(peer.name.clone());
-        match &entry {
+        match self.peers.entry(peer.name.clone()) {
             dashmap::Entry::Occupied(entry) => {
                 if entry.get().info != peer {
                     tracing::info!("received configuration update");
@@ -344,7 +343,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         };
 
         if let Some(sender) = peer_sender_maybe {
-            entry.insert(PeerHandle { info: peer, sender, protocol });
+            self.peers.insert(peer.name.clone(), PeerHandle { info: peer, sender, protocol });
             tracing::debug!(peers = self.peers.len(), "inserted configuration");
         }
     }
