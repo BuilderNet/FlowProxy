@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::mpsc;
-use tracing::*;
+use tracing::Instrument as _;
 
 pub fn spawn_tcp_forwarder<T: AsyncTransport>(
     name: String,
@@ -100,7 +100,8 @@ impl<T: AsyncTransport> TcpForwarder<T> {
         let client_pool = self.client.clone();
 
         let request_span = request.span.clone();
-        let span = tracing::info_span!(parent: request_span.clone(), "tcp_forwarder_request", peer_url = %self.peer_address, is_big = request.is_big());
+        let span = tracing::info_span!(parent: request_span.clone(), "forwarder", protocol = "tcp", peer_url = %self.peer_address, is_big = request.is_big());
+        let span_clone = span.clone();
 
         let fut = async move {
             let direction = request.direction;
@@ -113,33 +114,33 @@ impl<T: AsyncTransport> TcpForwarder<T> {
 
             let bytes = request.encoded_order.encoding_tcp_forwarder().expect("tcp bytes to send");
 
+            tracing::trace!(bytes_len = bytes.len(), "sending tcp request");
             let start_time = Instant::now();
             let response = client_pool.socket().request(bytes.into()).await;
-            tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
-            ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
+            ForwarderResponse { start_time, response, is_big, order_type, hash, span: span_clone }
         } // We first want to enter the parent span, then the local span.
         .instrument(span);
 
         Box::pin(fut)
     }
 
-    #[tracing::instrument(skip_all, name = "tcp_forwarder_response"
-        fields(
-            peer_url = %self.peer_address,
-            is_big = response.is_big,
-            elapsed = tracing::field::Empty,
-            status = tracing::field::Empty,
-    ))]
     fn on_response(&mut self, response: ForwarderResponse<Bytes, ReqError>) {
-        let ForwarderResponse { start_time, response: response_result, order_type, is_big, .. } =
-            response;
+        let ForwarderResponse {
+            start_time,
+            response: response_result,
+            order_type,
+            is_big,
+            span,
+            ..
+        } = response;
         let elapsed = start_time.elapsed();
 
-        tracing::Span::current().record("elapsed", tracing::field::debug(&elapsed));
+        let _g = span.enter();
+        tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
         let Ok(response) = response_result.inspect_err(|e| {
-            error!(?e, "failed to forward request");
+            tracing::error!(?e, "failed to forward request");
             self.metrics.tcp_call_failures(e.to_string()).inc();
         }) else {
             return;
@@ -160,7 +161,7 @@ impl<T: AsyncTransport> TcpForwarder<T> {
 
         // Print warning if the RPC call took more than 1 second.
         if elapsed > Duration::from_secs(1) {
-            warn!("long rpc call");
+            tracing::warn!("long rpc call");
         }
 
         if let JsonRpcResponseTy::Error { code, message } = response.result_or_error {
@@ -179,16 +180,14 @@ impl<T: AsyncTransport> Future for TcpForwarder<T> {
         loop {
             // First poll for completed work.
             if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
-                response.span.clone().in_scope(|| {
-                    this.on_response(response);
-                });
+                this.on_response(response);
                 continue;
             }
 
             // Then accept new requests.
             if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
                 let Some(request) = maybe_request else {
-                    info!(name = %this.peer_name, "terminating forwarder");
+                    tracing::info!(name = %this.peer_name, "terminating forwarder");
                     return Poll::Ready(());
                 };
 
@@ -249,12 +248,12 @@ impl ResponseErrorDecoder {
         match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
             Ok(body) => {
                 if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                    error!(%code, %message, "decoded error response from builder");
+                    tracing::error!(%code, %message, "decoded error response from builder");
                     self.metrics.rpc_call_failures(code.to_string()).inc();
                 }
             }
             Err(e) => {
-                warn!(?e, "failed to decode response into json-rpc");
+                tracing::warn!(?e, "failed to decode response into json-rpc");
                 self.metrics.json_rpc_decoding_failures().inc();
             }
         }

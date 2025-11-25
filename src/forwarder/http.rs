@@ -121,8 +121,8 @@ impl HttpForwarder {
         let client_pool = self.client.clone();
         let peer_url = self.peer_url.clone();
 
-        let request_span = request.span.clone();
-        let span = tracing::info_span!(parent: request_span.clone(), "http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
+        let span = tracing::info_span!(parent: request.span.clone(), "forwarder", protocol = "http", peer_url = %self.peer_url, is_big = request.is_big());
+        let span_clone = span.clone();
 
         let fut = async move {
             let direction = request.direction;
@@ -148,37 +148,29 @@ impl HttpForwarder {
                 .await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
-            ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
+            ForwarderResponse { start_time, response, is_big, order_type, hash, span: span_clone }
         } // We first want to enter the parent span, then the local span.
         .instrument(span);
 
         Box::pin(fut)
     }
 
-    #[tracing::instrument(skip_all, name = "http_forwarder_response"
-        fields(
-            peer_url = %self.peer_url,
-            is_big = response.is_big,
-            elapsed = tracing::field::Empty,
-            status = tracing::field::Empty,
-    ))]
     fn on_response(&mut self, response: ForwarderResponse<reqwest::Response, reqwest::Error>) {
         let ForwarderResponse {
             start_time,
             response: response_result,
             order_type,
             is_big,
+            span,
             hash,
-            ..
         } = response;
         let elapsed = start_time.elapsed();
-
-        tracing::Span::current().record("elapsed", tracing::field::debug(&elapsed));
 
         match response_result {
             Ok(response) => {
                 let status = response.status();
-                tracing::Span::current().record("status", tracing::field::debug(&status));
+                let _g = tracing::info_span!(parent: span.clone(), "response", ?elapsed, ?status)
+                    .entered();
 
                 // Print warning if the RPC call took more than 1 second.
                 if elapsed > Duration::from_secs(1) {
@@ -307,8 +299,8 @@ pub struct ResponseErrorDecoder {
 }
 
 impl ResponseErrorDecoder {
-    #[tracing::instrument(skip_all, name = "response_error_decode")]
     async fn decode(&self, input: ErrorDecoderInput) {
+        let _g = input.span.enter();
         match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
             Ok(body) => {
                 if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {

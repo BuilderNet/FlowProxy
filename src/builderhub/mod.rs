@@ -240,7 +240,6 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     }
 
     /// Update the list of peers from the BuilderHub peer store.
-    #[tracing::instrument(skip_all, name = "update_peers")]
     async fn update(&mut self) {
         let builders = match self.peer_store.get_peers().await {
             Ok(builders) => builders,
