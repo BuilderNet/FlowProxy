@@ -102,14 +102,16 @@ pub async fn run_with_listeners(
     let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.task_executor.clone());
 
     let orderflow_signer = match args.orderflow_signer {
-        Some(signer) => signer,
-        None => {
-            tracing::warn!("No orderflow signer was configured, using a random signer. Fix this by passing `--orderflow-signer <PRIVATE KEY>`");
-            PrivateKeySigner::random()
+        Some(signer) => {
+            tracing::warn!(
+                "orderflow signer provided via cli, this is discouraged in production environments"
+            );
+            signer
         }
+        None => PrivateKeySigner::random(),
     };
     let local_signer = orderflow_signer.address();
-    tracing::info!(address = %local_signer, "Orderflow signer configured");
+    tracing::info!(address = %local_signer, "running with orderflow signer");
 
     let client = default_http_builder().build().expect("to create local-builder client");
 
