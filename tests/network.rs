@@ -11,7 +11,7 @@ use tracing::{debug, info};
 
 /// This tests proper order propagation between 2 proxies.
 #[tokio::test]
-async fn network_e2e_raw_tx_works() {
+async fn network_e2e_bundle_tx_works() {
     let _ = tracing_subscriber::fmt::try_init();
     info!("starting network e2e tcp test");
 

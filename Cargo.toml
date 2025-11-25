@@ -42,8 +42,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # metrics
-prometric = { version = "0.1.4", features = ["process"] }
-prometric-derive = { version = "0.1.4" }
+prometric = { version = "0.2.0", features = ["process"] }
+prometric-derive = { version = "0.2.0" }
 prometheus = "0.14.0"
 
 # indexing

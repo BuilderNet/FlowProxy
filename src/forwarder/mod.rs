@@ -7,7 +7,7 @@ use crate::{
     metrics::SYSTEM_METRICS,
     primitives::{
         EncodedOrder, Protocol, RawOrderMetadata, SystemBundle, SystemMevShareBundle,
-        SystemTransaction, UtcInstant, WithEncoding,
+        SystemTransaction, UtcInstant, WithEncoding, WithHeaders,
     },
     priority::{self, workers::PriorityWorkers, Priority},
     utils::UtcDateTimeHeader as _,
@@ -19,7 +19,7 @@ use axum::http::HeaderValue;
 use dashmap::DashMap;
 use hyper::{header::CONTENT_TYPE, HeaderMap};
 use serde_json::json;
-use std::{fmt::Display, sync::Arc};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 use time::UtcDateTime;
 use tracing::*;
 
@@ -68,14 +68,14 @@ impl IngressForwarders {
     /// Broadcast bundle to all forwarders.
     pub(crate) async fn broadcast_bundle(&self, bundle: SystemBundle) {
         let priority = bundle.metadata.priority;
-        let encoded_bundle = bundle.encode();
+        let mut encoded_order = bundle.encode();
 
         // Create local request first
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signer = self.signer.clone();
-        let encoding = encoded_bundle.encoding.clone();
+        let encoding = encoded_order.encoding.clone();
         let signature_header = self
             .workers
             .spawn_with_priority(priority, move || {
@@ -83,12 +83,23 @@ impl IngressForwarders {
             })
             .await;
 
-        // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(
-            encoded_bundle.into(),
-            signature_header,
-            UtcDateTime::now(),
-        ));
+        let headers = ForwardingRequest::create_headers(
+            priority,
+            Some(signature_header),
+            Some(UtcDateTime::now()),
+        );
+
+        // FIX: remove unwrap
+        let headers_strings = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+            .collect::<HashMap<String, String>>();
+
+        let payload = WithHeaders { headers: headers_strings, data: &encoded_order.encoding };
+        let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
+        encoded_order.encoding_tcp_forwarder = Some(data);
+
+        let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
         debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
@@ -100,13 +111,13 @@ impl IngressForwarders {
         priority: Priority,
         bundle: SystemMevShareBundle,
     ) {
-        let encoded_bundle = bundle.encode();
+        let mut encoded_order = bundle.encode();
         // Create local request first
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
         let _ = self.local.send(priority, local);
 
         let signer = self.signer.clone();
-        let encoding = encoded_bundle.encoding.clone();
+        let encoding = encoded_order.encoding.clone();
         let signature_header = self
             .workers
             .spawn_with_priority(priority, move || {
@@ -114,12 +125,24 @@ impl IngressForwarders {
             })
             .await;
 
+        let headers = ForwardingRequest::create_headers(
+            priority,
+            Some(signature_header),
+            Some(UtcDateTime::now()),
+        );
+
+        // FIX: remove unwrap
+        let headers_strings = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+            .collect::<HashMap<String, String>>();
+
+        let payload = WithHeaders { headers: headers_strings, data: &encoded_order.encoding };
+        let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
+        encoded_order.encoding_tcp_forwarder = Some(data);
+
         // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(
-            encoded_bundle.into(),
-            signature_header,
-            UtcDateTime::now(),
-        ));
+        let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
         debug!(peers = %self.peers.len(), "sending bundle to peers");
         self.broadcast(forward);
@@ -128,13 +151,13 @@ impl IngressForwarders {
     /// Broadcast transaction to all forwarders.
     pub(crate) async fn broadcast_transaction(&self, transaction: SystemTransaction) {
         let priority = transaction.priority;
-        let encoded_transaction = transaction.encode();
+        let mut encoded_order = transaction.encode();
 
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_transaction.clone().into()));
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signer = self.signer.clone();
-        let encoding = encoded_transaction.encoding.clone();
+        let encoding = encoded_order.encoding.clone();
         let signature_header = self
             .workers
             .spawn_with_priority(priority, move || {
@@ -142,12 +165,24 @@ impl IngressForwarders {
             })
             .await;
 
+        let headers = ForwardingRequest::create_headers(
+            priority,
+            Some(signature_header),
+            Some(UtcDateTime::now()),
+        );
+
+        // FIX: remove unwrap
+        let headers_strings = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+            .collect::<HashMap<String, String>>();
+
+        let payload = WithHeaders { headers: headers_strings, data: &encoded_order.encoding };
+        let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
+        encoded_order.encoding_tcp_forwarder = Some(data);
+
         // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(
-            encoded_transaction.into(),
-            signature_header,
-            UtcDateTime::now(),
-        ));
+        let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
         debug!(peers = %self.peers.len(), "sending transaction to peers");
         self.broadcast(forward);
@@ -182,8 +217,11 @@ impl IngressForwarders {
         let body = serde_json::to_vec(&json).expect("to JSON serialize request");
         // TODO: raw orders have no priority, but this will change, assume medium for now
         let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at, hash };
-        let order =
-            EncodedOrder::SystemOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
+        let order = EncodedOrder::SystemOrder(WithEncoding {
+            inner: raw_order,
+            encoding: body,
+            encoding_tcp_forwarder: None,
+        });
 
         let local = Arc::new(ForwardingRequest::system_to_local(order));
         let _ = self.local.send(priority, local);
@@ -254,16 +292,7 @@ impl ForwardingRequest {
         }
     }
 
-    pub fn user_to_system(
-        encoded_order: EncodedOrder,
-        signature_header: String,
-        sent_at_header: UtcDateTime,
-    ) -> Self {
-        let headers = Self::create_headers(
-            encoded_order.priority(),
-            Some(signature_header),
-            Some(sent_at_header),
-        );
+    pub fn user_to_system(encoded_order: EncodedOrder, headers: HeaderMap) -> Self {
         Self {
             encoded_order,
             headers,

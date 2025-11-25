@@ -356,7 +356,7 @@ impl SystemBundle {
     }
 
     /// Encode the system bundle in a JSON-RPC payload with params EIP-2718 encoded bytes.
-    pub fn encode(self) -> WithEncoding<Self> {
+    pub fn encode(self) -> WithEncoding<SystemBundle> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
@@ -365,7 +365,7 @@ impl SystemBundle {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+        WithEncoding { inner: self, encoding, encoding_tcp_forwarder: None }
     }
 }
 
@@ -458,7 +458,7 @@ impl SystemMevShareBundle {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+        WithEncoding { inner: self, encoding, encoding_tcp_forwarder: None }
     }
 }
 
@@ -515,7 +515,7 @@ impl SystemTransaction {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize transaction");
-        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+        WithEncoding { inner: self, encoding, encoding_tcp_forwarder: None }
     }
 
     pub fn tx_hash(&self) -> B256 {
@@ -610,7 +610,9 @@ impl From<UtcInstant> for Instant {
 #[derive(Debug, Clone)]
 pub struct WithEncoding<T> {
     pub inner: T,
-    pub encoding: Arc<Vec<u8>>,
+    pub encoding: Vec<u8>,
+    /// The encoding to be used for by the TCP forwarder.
+    pub encoding_tcp_forwarder: Option<Vec<u8>>,
 }
 
 /// An order that can be either a bundle or a transaction, along with its JSON-RPC encoding, ready
@@ -635,6 +637,15 @@ impl EncodedOrder {
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
             EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
+        }
+    }
+
+    pub fn encoding_tcp_forwarder(&self) -> Option<Vec<u8>> {
+        match self {
+            EncodedOrder::SystemOrder(order) => order.encoding_tcp_forwarder.clone(),
+            EncodedOrder::Bundle(bundle) => bundle.encoding_tcp_forwarder.clone(),
+            EncodedOrder::MevShareBundle(bundle) => bundle.encoding_tcp_forwarder.clone(),
+            EncodedOrder::Transaction(tx) => tx.encoding_tcp_forwarder.clone(),
         }
     }
 
@@ -726,7 +737,7 @@ pub struct WithHeaders<T> {
 }
 
 /// The protocol used to communicate with a peer.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     Tcp,
     Http,

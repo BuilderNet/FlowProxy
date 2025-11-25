@@ -5,7 +5,6 @@ use crate::{
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
-    primitives::WithHeaders,
     priority::{self},
 };
 use alloy_primitives::B256;
@@ -14,7 +13,6 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use msg_socket::ReqError;
 use rbuilder_utils::tasks::TaskExecutor;
 use std::{
-    collections::HashMap,
     future::Future,
     net::SocketAddr,
     pin::Pin,
@@ -109,29 +107,14 @@ impl<T: AsyncTransport> TcpForwarder<T> {
             let is_big = request.is_big();
             let hash = request.hash();
 
-            // Try to avoid cloning the body and headers if there is only one reference.
-            // TODO: custom format to add headers.
-            let (order, headers) = Arc::try_unwrap(request).map_or_else(
-                |req| (req.encoded_order.clone(), req.headers.clone()),
-                |inner| (inner.encoded_order, inner.headers),
-            );
+            let order_type = request.encoded_order.order_type();
 
-            record_e2e_metrics(&order, &direction, is_big);
+            record_e2e_metrics(&request.encoded_order, &direction, is_big);
 
-            let order_type = order.order_type();
+            let bytes = request.encoded_order.encoding_tcp_forwarder().expect("tcp bytes to send");
+
             let start_time = Instant::now();
-
-            // FIX: remove unwrap
-            let headers = headers
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-                .collect::<HashMap<String, String>>();
-
-            debug!(?headers, "headers");
-            let payload = WithHeaders { headers, data: order.encoding().to_vec() };
-            let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
-
-            let response = client_pool.socket().request(data.into()).await;
+            let response = client_pool.socket().request(bytes.into()).await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
             ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
