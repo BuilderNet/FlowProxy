@@ -87,10 +87,10 @@ fdlimit = "0.3.0"
 rayon = "1.11.0"
 
 # networking
-msg-transport = { git = "https://github.com/chainbound/msg-rs", rev = "02b708a3b3472eeaa728171b090c641b2932f67a", features = [
+msg-transport = { git = "https://github.com/chainbound/msg-rs", rev = "93b4ec0bc710352e2b65906bd8a0e78bc211d4ef", features = [
   "tcp-tls"
 ] }
-msg-socket = { git = "https://github.com/chainbound/msg-rs", rev = "02b708a3b3472eeaa728171b090c641b2932f67a" }
+msg-socket = { git = "https://github.com/chainbound/msg-rs", rev = "93b4ec0bc710352e2b65906bd8a0e78bc211d4ef" }
 openssl = { version = "0.10.75" }
 
 [dev-dependencies]
