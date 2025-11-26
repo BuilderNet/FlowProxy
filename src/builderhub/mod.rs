@@ -412,7 +412,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
         let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
 
-        let address = match lookup_host(address).await {
+        let sock_addr = match lookup_host(address).await {
             Ok(mut a_iter) => {
                 let Some(a) = a_iter.next() else {
                     tracing::error!("no addresses found");
@@ -433,9 +433,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
                 // 50KiB buffer before flushing.
                 ReqOptions::default().write_buffer(50 * 1024),
             );
-            // TODO: maybe connect directly with DNS?
-            if let Err(e) = socket.connect(address).await {
-                tracing::error!(?e, ?address, "failed to connect");
+            if let Err(e) = socket.connect(sock_addr).await {
+                tracing::error!(?e, ?sock_addr, "failed to connect");
                 return None;
             }
             sockets.push(socket);
@@ -443,7 +442,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let client_pool = ReqSocketIpPool::new(sockets);
 
         let sender =
-            spawn_tcp_forwarder(peer.name.clone(), address, client_pool, &self.task_executor);
+            spawn_tcp_forwarder(peer.name.clone(), sock_addr, client_pool, &self.task_executor);
 
         Some(sender)
     }
