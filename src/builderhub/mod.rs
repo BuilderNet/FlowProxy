@@ -1,6 +1,6 @@
 use crate::{
     forwarder::{
-        client::{default_http_builder, HttpClientPool, ReqSocketIpPool},
+        client::{default_http_builder, HttpClientPool, ReqSocketIpBucketPool},
         http::spawn_http_forwarder,
         tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
@@ -411,8 +411,6 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         address: S,
         make_transport: impl Fn() -> T,
     ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
-        let mut sockets = Vec::with_capacity(self.config.client_pool_size.get());
-
         let sock_addr = match lookup_host(address).await {
             Ok(mut a_iter) => {
                 let Some(a) = a_iter.next() else {
@@ -427,20 +425,27 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
         };
 
-        for _ in 0..self.config.client_pool_size.get() {
+        let make_socket = || {
             let transport = make_transport();
             let mut socket = ReqSocket::with_options(
                 transport,
                 // 50KiB buffer before flushing.
                 ReqOptions::default().write_buffer(50 * 1024),
             );
-            if let Err(e) = socket.connect(sock_addr).await {
-                tracing::error!(?e, ?sock_addr, "failed to connect");
-                return None;
-            }
-            sockets.push(socket);
-        }
-        let client_pool = ReqSocketIpPool::new(sockets);
+
+            // NOTE: since we're connecting with a resolved socket address, and we're not using
+            // blocking connect
+            tokio::task::block_in_place(|| {
+                let handle = tokio::runtime::Handle::current();
+                handle
+                    .block_on(socket.connect(sock_addr))
+                    .expect("resolved addr and no blocking connect should not err");
+            });
+
+            socket
+        };
+
+        let client_pool = ReqSocketIpBucketPool::new(make_socket);
 
         let sender =
             spawn_tcp_forwarder(peer.name.clone(), sock_addr, client_pool, &self.task_executor);

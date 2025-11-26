@@ -1,10 +1,12 @@
 //! Configuration for HTTP clients used to spawn forwarders.
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     num::NonZero,
+    ops::Range,
     sync::{
         atomic::{AtomicU8, Ordering},
-        Arc,
+        Arc, LazyLock,
     },
     time::Duration,
 };
@@ -87,39 +89,61 @@ pub fn default_http_builder() -> reqwest::ClientBuilder {
 
 pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
 
+/// A mapping of size ranges to [`T`].
+pub type Buckets<T> = HashMap<Range<usize>, T>;
+
+pub static DEFAULT_TCP_SOCKET_BUCKETS_BYTES: LazyLock<Buckets<usize>> =
+    LazyLock::<Buckets<usize>>::new(|| {
+        let mut map = HashMap::new();
+        map.insert(0..32_768, 4); // Up to 32KiB
+        map.insert(32_768..usize::MAX, 2); // 32KB to 128KB
+        map
+    });
+
 /// A pool of TCP [`ReqSocket`] clients, with TLS support.
 #[allow(missing_debug_implementations)]
-pub struct ReqSocketIpPool<T: Transport<SocketAddr>> {
+pub struct ReqSocketIpBucketPool<T: Transport<SocketAddr>> {
     /// The clients in the pool.
-    clients: Arc<[ReqSocketIp<T>]>,
-    /// The number of clients in the pool, so you don't have to deference the arc every time.
-    num_clients: usize,
-    /// The index of the last used client. Used for round-robin load balancing.
-    last_used: Arc<AtomicU8>,
+    clients: Arc<Buckets<(Vec<ReqSocketIp<T>>, AtomicU8)>>,
 }
 
 // Custom [`Clone`] implementation to avoid requiring T: Clone.
-impl<T: Transport<SocketAddr>> Clone for ReqSocketIpPool<T> {
+impl<T: Transport<SocketAddr>> Clone for ReqSocketIpBucketPool<T> {
     fn clone(&self) -> Self {
-        Self {
-            clients: self.clients.clone(),
-            num_clients: self.num_clients,
-            last_used: self.last_used.clone(),
-        }
+        Self { clients: self.clients.clone() }
     }
 }
 
-impl<T: Transport<SocketAddr>> ReqSocketIpPool<T> {
-    pub fn new(sockets: Vec<ReqSocketIp<T>>) -> Self {
-        let num_clients = sockets.len();
-        let clients = Arc::from(sockets);
-        Self { clients, num_clients, last_used: Arc::new(AtomicU8::new(0)) }
+impl<T: Transport<SocketAddr>> ReqSocketIpBucketPool<T> {
+    pub fn new(make_socket: impl Fn() -> ReqSocketIp<T>) -> Self {
+        Self::new_with_buckets(DEFAULT_TCP_SOCKET_BUCKETS_BYTES.clone(), make_socket)
     }
 
-    pub fn socket(&self) -> &ReqSocketIp<T> {
-        // NOTE: This will automatically wrap.
-        let index = self.last_used.fetch_add(1, Ordering::Relaxed);
-        &self.clients[(index as usize) % self.num_clients]
+    pub fn new_with_buckets(
+        buckets: Buckets<usize>,
+        make_socket: impl Fn() -> ReqSocketIp<T>,
+    ) -> Self {
+        let clients = buckets
+            .iter()
+            .map(|(range, &num_sockets)| {
+                let sockets = (0..num_sockets).map(|_| make_socket()).collect();
+                (range.clone(), (sockets, AtomicU8::new(0)))
+            })
+            .collect::<HashMap<_, _>>();
+
+        Self { clients: Arc::new(clients) }
+    }
+
+    /// Get a socket from the pool for the given size in bytes.
+    pub fn socket(&self, size_bytes: usize) -> &ReqSocketIp<T> {
+        let (_, (clients, last_used)) = self
+            .clients
+            .iter()
+            .find(|(range, _)| range.contains(&size_bytes))
+            .expect("buckets cover all sizes");
+
+        let index = last_used.fetch_add(1, Ordering::Relaxed);
+        &clients[(index as usize) % clients.len()]
     }
 }
 

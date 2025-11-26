@@ -1,5 +1,5 @@
 use crate::{
-    forwarder::{client::ReqSocketIpPool, record_e2e_metrics, ForwardingRequest},
+    forwarder::{client::ReqSocketIpBucketPool, record_e2e_metrics, ForwardingRequest},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     priority::{self},
@@ -24,7 +24,7 @@ use tracing::Instrument as _;
 pub fn spawn_tcp_forwarder<T: Transport<SocketAddr>>(
     name: String,
     address: SocketAddr,
-    client: ReqSocketIpPool<T>,
+    client: ReqSocketIpBucketPool<T>,
     task_executor: &TaskExecutor,
 ) -> priority::channel::UnboundedSender<Arc<ForwardingRequest>> {
     let (request_tx, request_rx) = priority::channel::unbounded_channel();
@@ -59,7 +59,7 @@ type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err
 
 /// An TCP forwarder that forwards requests to a peer.
 struct TcpForwarder<T: Transport<SocketAddr>> {
-    client: ReqSocketIpPool<T>,
+    client: ReqSocketIpBucketPool<T>,
     /// The name of the builder we're forwarding to.
     peer_name: String,
     /// The URL of the peer.
@@ -74,7 +74,7 @@ struct TcpForwarder<T: Transport<SocketAddr>> {
 
 impl<T: Transport<SocketAddr>> TcpForwarder<T> {
     fn new(
-        client: ReqSocketIpPool<T>,
+        client: ReqSocketIpBucketPool<T>,
         name: String,
         address: SocketAddr,
         request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
@@ -114,7 +114,7 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
 
             tracing::trace!(bytes_len = bytes.len(), "sending tcp request");
             let start_time = Instant::now();
-            let response = client_pool.socket().request(bytes.into()).await;
+            let response = client_pool.socket(request.encoded_size()).request(bytes.into()).await;
 
             ForwarderResponse { start_time, response, is_big, order_type, hash, span: span_clone }
         } // We first want to enter the parent span, then the local span.

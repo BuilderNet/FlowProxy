@@ -265,8 +265,12 @@ impl ForwardingRequest {
         self.encoded_order.priority()
     }
 
+    pub fn encoded_size(&self) -> usize {
+        self.encoded_order.encoding().len()
+    }
+
     pub fn is_big(&self) -> bool {
-        self.encoded_order.encoding().len() > BIG_REQUEST_SIZE_THRESHOLD_KB
+        self.encoded_size() > BIG_REQUEST_SIZE_THRESHOLD_KB
     }
 
     /// Returns the hash of the encoded order.
