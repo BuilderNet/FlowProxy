@@ -4166,7 +4166,7 @@ dependencies = [
 [[package]]
 name = "msg-common"
 version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?rev=02b708a3b3472eeaa728171b090c641b2932f67a#02b708a3b3472eeaa728171b090c641b2932f67a"
+source = "git+https://github.com/chainbound/msg-rs?rev=93b4ec0bc710352e2b65906bd8a0e78bc211d4ef#93b4ec0bc710352e2b65906bd8a0e78bc211d4ef"
 dependencies = [
  "futures",
  "tokio",
@@ -4176,7 +4176,7 @@ dependencies = [
 [[package]]
 name = "msg-socket"
 version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?rev=02b708a3b3472eeaa728171b090c641b2932f67a#02b708a3b3472eeaa728171b090c641b2932f67a"
+source = "git+https://github.com/chainbound/msg-rs?rev=93b4ec0bc710352e2b65906bd8a0e78bc211d4ef#93b4ec0bc710352e2b65906bd8a0e78bc211d4ef"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -4197,7 +4197,7 @@ dependencies = [
 [[package]]
 name = "msg-transport"
 version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?rev=02b708a3b3472eeaa728171b090c641b2932f67a#02b708a3b3472eeaa728171b090c641b2932f67a"
+source = "git+https://github.com/chainbound/msg-rs?rev=93b4ec0bc710352e2b65906bd8a0e78bc211d4ef#93b4ec0bc710352e2b65906bd8a0e78bc211d4ef"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -4215,7 +4215,7 @@ dependencies = [
 [[package]]
 name = "msg-wire"
 version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?rev=02b708a3b3472eeaa728171b090c641b2932f67a#02b708a3b3472eeaa728171b090c641b2932f67a"
+source = "git+https://github.com/chainbound/msg-rs?rev=93b4ec0bc710352e2b65906bd8a0e78bc211d4ef#93b4ec0bc710352e2b65906bd8a0e78bc211d4ef"
 dependencies = [
  "bytes",
  "flate2",
