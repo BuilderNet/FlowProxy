@@ -11,7 +11,7 @@ use flowproxy::{
     cli::OrderflowIngressArgs,
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_decompress,
-    jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
+    jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
     runner::CliContext,
 };
 use hyper::{header, HeaderMap};
@@ -174,10 +174,12 @@ impl BuilderReceiver {
             }
         };
 
-        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
-        {
+        let mut request: JsonRpcRequest<serde_json::Value> = match serde_json::from_slice(&body) {
             Ok(request) => request,
-            Err(error) => return JsonRpcResponse::error(Value::Null, error),
+            Err(e) => {
+                tracing::error!(?e, ?body, "failed to decode body");
+                return JsonRpcResponse::error(Value::Null, JsonRpcError::ParseError);
+            }
         };
 
         let request_id = request.id.clone();

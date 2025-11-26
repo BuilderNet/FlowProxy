@@ -69,8 +69,6 @@ axum = { version = "0.8", default-features = false, features = [
 ] }
 wyhash = "0.6.0"
 mime = "0.3"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 clap = { version = "4", features = ["derive", "env"] }
 eyre = "0.6"
 thiserror = "2"
@@ -86,11 +84,16 @@ derive_more = { version = "2", features = ["deref"] }
 fdlimit = "0.3.0"
 rayon = "1.11.0"
 
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bitcode = { version = "0.6.7", features = ["serde"] }
+
 # networking
-msg-transport = { git = "https://github.com/chainbound/msg-rs", rev = "93b4ec0bc710352e2b65906bd8a0e78bc211d4ef", features = [
+msg-transport = { git = "https://github.com/chainbound/msg-rs", rev = "5347c3b", features = [
   "tcp-tls"
 ] }
-msg-socket = { git = "https://github.com/chainbound/msg-rs", rev = "93b4ec0bc710352e2b65906bd8a0e78bc211d4ef" }
+msg-socket = { git = "https://github.com/chainbound/msg-rs", rev = "5347c3b" }
 openssl = { version = "0.10.75" }
 
 [dev-dependencies]

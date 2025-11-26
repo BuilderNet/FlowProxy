@@ -13,7 +13,7 @@ use crate::{
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, PeerProxyInfo, Samplable, SystemBundle,
+        EthResponse, EthereumTransaction, PeerProxyInfo, RawBundleBitcode, Samplable, SystemBundle,
         SystemBundleDecoder, SystemBundleMetadata, SystemMevShareBundle, SystemTransaction,
         UtcInstant, WithHeaders,
     },
@@ -662,6 +662,7 @@ impl OrderflowIngress {
         JsonRpcResponse::result(request.id, response)
     }
 
+    // TODO: don't return json-rpc response directly from tcp handler
     #[tracing::instrument(skip_all, name = "ingress",
         fields(
             handler = "system_tcp",
@@ -676,13 +677,19 @@ impl OrderflowIngress {
         let received_at = UtcInstant::now();
         let payload_size = body.len();
 
-        let WithHeaders::<Bytes> { headers, data } = match serde_json::from_slice(body.as_ref()) {
+        let WithHeaders::<Vec<u8>> { headers, data } = match bitcode::decode(body.as_ref()) {
             Ok(json) => json,
             Err(e) => {
-                tracing::error!(?e, "failed to convert raw bytes to string, invalid utf8");
+                tracing::error!(?e, "failed to convert raw bytes to string");
                 return JsonRpcResponse::error(Value::Null, JsonRpcError::InvalidParams);
             }
         };
+
+        let Some(method) = headers.get("method") else {
+            tracing::error!("method not provided in tcp payload header");
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::InvalidParams);
+        };
+        tracing::Span::current().record("method", tracing::field::display(method));
 
         // Before doing anything else, verify that the signature header is present.
         let Some(signature_header) = headers
@@ -729,17 +736,6 @@ impl OrderflowIngress {
         // This gets computed only if we enter in an error branch.
         let body_utf8 = || str::from_utf8(data.as_ref()).unwrap_or("<invalid utf8>");
 
-        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&data)
-        {
-            Ok(request) => request,
-            Err(e) => {
-                tracing::error!(?e, body_utf8 = body_utf8(), "failed to parse json-rpc request");
-                ingress.system_metrics.json_rpc_parse_errors(UNKNOWN).inc();
-                return JsonRpcResponse::error(Value::Null, e);
-            }
-        };
-        tracing::Span::current().record("method", tracing::field::display(&request.method));
-
         // Record the one-way latency of the RPC call.
         let sent_at = headers
             .get(&BUILDERNET_SENT_AT_HEADER.to_lowercase())
@@ -747,30 +743,27 @@ impl OrderflowIngress {
         if let Some(sent_at) = sent_at {
             ingress
                 .system_metrics
-                .rpc_latency_oneway(&peer, &request.method)
+                .rpc_latency_oneway(&peer, method)
                 .observe((received_at.utc - sent_at).as_seconds_f64());
         }
 
-        tracing::trace!(params = ?request.params, "serving json-rpc request");
+        tracing::trace!(body = ?data, "serving request");
 
-        let (raw, response) = match request.method.as_str() {
+        let (raw, response) = match method.as_str() {
             ETH_SEND_BUNDLE_METHOD => {
-                let Some(raw) = request.take_single_param() else {
-                    tracing::error!("failed to parse bundle: take single param failed");
-                    ingress.system_metrics.json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD).inc();
-                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
-                };
-
-                let bundle = match serde_json::from_value::<RawBundle>(raw.clone()) {
-                    Ok(b) => b,
+                let bundle = match bitcode::decode::<RawBundleBitcode>(&data) {
+                    Ok(b) => RawBundle::from(b),
                     Err(e) => {
                         tracing::error!(
                             ?e,
-                            body_utf8 = body_utf8(),
+                            body = ?body,
                             "failed to parse raw bundle from system request"
                         );
                         ingress.system_metrics.json_rpc_parse_errors(ETH_SEND_BUNDLE_METHOD).inc();
-                        return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
+                        return JsonRpcResponse::error(
+                            serde_json::Value::from(1),
+                            JsonRpcError::InvalidParams,
+                        );
                     }
                 };
 
@@ -800,7 +793,7 @@ impl OrderflowIngress {
                     }
 
                     return JsonRpcResponse::result(
-                        request.id,
+                        serde_json::Value::Null,
                         EthResponse::BundleHash(bundle_hash),
                     );
                 }
@@ -829,9 +822,38 @@ impl OrderflowIngress {
                     .request_body_size(ETH_SEND_BUNDLE_METHOD)
                     .observe(body.len() as f64);
 
+                let raw = match serde_json::to_value(bundle) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!(
+                            ?e,
+                            body = ?body,
+                            "failed to serialize raw bundle for local builder sharing"
+                        );
+                        return JsonRpcResponse::error(
+                            serde_json::Value::Null,
+                            JsonRpcError::Internal,
+                        );
+                    }
+                };
+
                 (raw, EthResponse::BundleHash(bundle_hash))
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
+                let mut request: JsonRpcRequest<serde_json::Value> =
+                    match JsonRpcRequest::from_bytes(&data) {
+                        Ok(request) => request,
+                        Err(e) => {
+                            tracing::error!(
+                                ?e,
+                                body_utf8 = body_utf8(),
+                                "failed to parse json-rpc request"
+                            );
+                            ingress.system_metrics.json_rpc_parse_errors(UNKNOWN).inc();
+                            return JsonRpcResponse::error(Value::Null, e);
+                        }
+                    };
+
                 let Some(raw) = request.take_single_param() else {
                     ingress
                         .system_metrics
@@ -880,6 +902,20 @@ impl OrderflowIngress {
                 (raw, EthResponse::TxHash(tx_hash))
             }
             MEV_SEND_BUNDLE_METHOD => {
+                let mut request: JsonRpcRequest<serde_json::Value> =
+                    match JsonRpcRequest::from_bytes(&data) {
+                        Ok(request) => request,
+                        Err(e) => {
+                            tracing::error!(
+                                ?e,
+                                body_utf8 = body_utf8(),
+                                "failed to parse json-rpc request"
+                            );
+                            ingress.system_metrics.json_rpc_parse_errors(UNKNOWN).inc();
+                            return JsonRpcResponse::error(Value::Null, e);
+                        }
+                    };
+
                 let Some(raw) = request.take_single_param() else {
                     tracing::error!("error parsing bundle: take single param failed");
                     ingress.system_metrics.json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD).inc();
@@ -932,23 +968,17 @@ impl OrderflowIngress {
                 tracing::error!("method not supported");
                 ingress.system_metrics.json_rpc_unknown_method(other.to_owned()).inc();
                 return JsonRpcResponse::error(
-                    request.id,
+                    serde_json::Value::Null,
                     JsonRpcError::MethodNotFound(other.to_owned()),
                 );
             }
         };
 
         // Send request only to the local builder forwarder.
-        ingress.forwarders.send_to_local(
-            priority,
-            &request.method,
-            raw,
-            response.hash(),
-            received_at,
-        );
+        ingress.forwarders.send_to_local(priority, method, raw, response.hash(), received_at);
 
         trace!(elapsed = ?received_at.instant.elapsed(), "processed json-rpc request");
-        JsonRpcResponse::result(request.id, response)
+        JsonRpcResponse::result(serde_json::Value::Null, response)
     }
 
     /// Handles a new bundle.

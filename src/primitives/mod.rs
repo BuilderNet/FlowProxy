@@ -14,7 +14,8 @@ use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result},
     Decodable2718 as _,
 };
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U64};
+use bitcode::{Decode, Encode};
 use derive_more::{Deref, From};
 use rbuilder_primitives::{
     serialize::{
@@ -30,7 +31,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    consts::{ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
+    consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, MEV_SEND_BUNDLE_METHOD},
     priority::Priority,
 };
 
@@ -365,7 +366,7 @@ impl SystemBundle {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding, encoding_tcp_forwarder: None }
+        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
     }
 }
 
@@ -458,7 +459,7 @@ impl SystemMevShareBundle {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding, encoding_tcp_forwarder: None }
+        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
     }
 }
 
@@ -515,7 +516,7 @@ impl SystemTransaction {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize transaction");
-        WithEncoding { inner: self, encoding, encoding_tcp_forwarder: None }
+        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
     }
 
     pub fn tx_hash(&self) -> B256 {
@@ -558,6 +559,14 @@ impl SystemOrder {
                 encoding: tx.encode().encoding,
                 encoding_tcp_forwarder: None,
             },
+        }
+    }
+
+    pub fn method_name(&self) -> &'static str {
+        match self {
+            SystemOrder::Bundle(_) => ETH_SEND_BUNDLE_METHOD,
+            SystemOrder::MevShareBundle(_) => MEV_SEND_BUNDLE_METHOD,
+            SystemOrder::Transaction(_) => ETH_SEND_RAW_TRANSACTION_METHOD,
         }
     }
 }
@@ -649,7 +658,7 @@ impl From<UtcInstant> for Instant {
 #[derive(Debug, Clone)]
 pub struct WithEncoding<T> {
     pub inner: T,
-    pub encoding: Vec<u8>,
+    pub encoding: Arc<Vec<u8>>,
     /// The encoding to be used for by the TCP forwarder.
     pub encoding_tcp_forwarder: Option<Vec<u8>>,
 }
@@ -701,12 +710,12 @@ impl EncodedOrder {
         }
     }
 
-    pub fn encoding_tcp_forwarder(&self) -> Option<Vec<u8>> {
+    pub fn encoding_tcp_forwarder(&self) -> Option<&Vec<u8>> {
         match self {
-            EncodedOrder::Raw(order) => order.encoding_tcp_forwarder.clone(),
-            EncodedOrder::Bundle(bundle) => bundle.encoding_tcp_forwarder.clone(),
-            EncodedOrder::MevShareBundle(bundle) => bundle.encoding_tcp_forwarder.clone(),
-            EncodedOrder::Transaction(tx) => tx.encoding_tcp_forwarder.clone(),
+            EncodedOrder::Raw(order) => order.encoding_tcp_forwarder.as_ref(),
+            EncodedOrder::Bundle(bundle) => bundle.encoding_tcp_forwarder.as_ref(),
+            EncodedOrder::MevShareBundle(bundle) => bundle.encoding_tcp_forwarder.as_ref(),
+            EncodedOrder::Transaction(tx) => tx.encoding_tcp_forwarder.as_ref(),
         }
     }
 
@@ -791,7 +800,7 @@ pub struct PeerProxyInfo {
     pub system_api_port: u16,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
 pub struct WithHeaders<T> {
     pub headers: HashMap<String, String>,
     pub data: T,
@@ -802,6 +811,124 @@ pub struct WithHeaders<T> {
 pub enum Protocol {
     Tcp,
     Http,
+}
+
+/// Bitcode-friendly representation of [`RawBundle`].
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+pub struct RawBundleBitcode {
+    pub metadata: RawBundleMetadataBitcode,
+    pub txs: Vec<Vec<u8>>, // equivalent to Bytes
+}
+
+/// Bitcode-friendly representation of [`RawBundleMetadata`].
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct RawBundleMetadataBitcode {
+    pub version: Option<String>,
+    pub block_number: Option<u64>,
+
+    pub reverting_tx_hashes: Vec<[u8; 32]>,
+    pub dropping_tx_hashes: Vec<[u8; 32]>,
+
+    pub replacement_uuid: Option<[u8; 16]>,
+    pub uuid: Option<[u8; 16]>,
+
+    pub signing_address: Option<[u8; 20]>,
+    pub refund_identity: Option<[u8; 20]>,
+
+    pub min_timestamp: Option<u64>,
+    pub max_timestamp: Option<u64>,
+    pub replacement_nonce: Option<u64>,
+
+    pub refund_percent: Option<u8>,
+    pub refund_recipient: Option<[u8; 20]>,
+
+    pub refund_tx_hashes: Option<Vec<[u8; 32]>>,
+    pub delayed_refund: Option<bool>,
+
+    pub bundle_hash: Option<[u8; 32]>,
+}
+
+impl From<&RawBundleMetadata> for RawBundleMetadataBitcode {
+    fn from(r: &RawBundleMetadata) -> Self {
+        Self {
+            version: r.version.clone(),
+            block_number: r.block_number.map(|v| v.try_into().expect("U64 fits into u64")),
+
+            reverting_tx_hashes: r.reverting_tx_hashes.clone().into_iter().map(|h| *h).collect(),
+            dropping_tx_hashes: r.dropping_tx_hashes.clone().into_iter().map(|h| *h).collect(),
+
+            replacement_uuid: r.replacement_uuid.map(|u| *u.as_bytes()),
+            uuid: r.uuid.map(|u| *u.as_bytes()),
+
+            signing_address: r.signing_address.map(|a| a.into()),
+            refund_identity: r.refund_identity.map(|a| a.into()),
+
+            min_timestamp: r.min_timestamp,
+            max_timestamp: r.max_timestamp,
+            replacement_nonce: r.replacement_nonce,
+
+            refund_percent: r.refund_percent,
+            refund_recipient: r.refund_recipient.map(|a| a.into()),
+
+            refund_tx_hashes: r
+                .refund_tx_hashes
+                .clone()
+                .map(|hashes| hashes.into_iter().map(|h| *h).collect()),
+
+            delayed_refund: r.delayed_refund,
+            bundle_hash: r.bundle_hash.map(|b| b.0),
+        }
+    }
+}
+
+impl From<RawBundleMetadataBitcode> for RawBundleMetadata {
+    fn from(r: RawBundleMetadataBitcode) -> Self {
+        Self {
+            version: r.version,
+            block_number: r.block_number.map(U64::from),
+
+            reverting_tx_hashes: r.reverting_tx_hashes.into_iter().map(B256::from).collect(),
+            dropping_tx_hashes: r.dropping_tx_hashes.into_iter().map(B256::from).collect(),
+
+            replacement_uuid: r.replacement_uuid.map(Uuid::from_bytes),
+            uuid: r.uuid.map(Uuid::from_bytes),
+
+            signing_address: r.signing_address.map(Address::from),
+            refund_identity: r.refund_identity.map(Address::from),
+
+            min_timestamp: r.min_timestamp,
+            max_timestamp: r.max_timestamp,
+            replacement_nonce: r.replacement_nonce,
+
+            refund_percent: r.refund_percent,
+            refund_recipient: r.refund_recipient.map(Address::from),
+
+            refund_tx_hashes: r
+                .refund_tx_hashes
+                .map(|hashes| hashes.into_iter().map(B256::from).collect()),
+
+            delayed_refund: r.delayed_refund,
+            bundle_hash: r.bundle_hash.map(B256::from),
+        }
+    }
+}
+
+impl From<&RawBundle> for RawBundleBitcode {
+    fn from(r: &RawBundle) -> Self {
+        Self {
+            metadata: RawBundleMetadataBitcode::from(&r.metadata),
+            txs: r.txs.iter().map(|b| b.to_vec()).collect(),
+        }
+    }
+}
+
+impl From<RawBundleBitcode> for RawBundle {
+    fn from(r: RawBundleBitcode) -> Self {
+        Self {
+            metadata: RawBundleMetadata::from(r.metadata),
+            txs: r.txs.iter().map(|v| v.clone().into()).collect(),
+        }
+    }
 }
 
 #[cfg(test)]

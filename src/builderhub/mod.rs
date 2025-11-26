@@ -11,7 +11,7 @@ use crate::{
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
-use msg_socket::{ReqOptions, ReqSocket};
+use msg_socket::ReqSocket;
 use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
@@ -427,20 +427,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
         let make_socket = || {
             let transport = make_transport();
-            let mut socket = ReqSocket::with_options(
-                transport,
-                // 50KiB buffer before flushing.
-                ReqOptions::default().write_buffer(50 * 1024),
-            );
-
-            // NOTE: since we're connecting with a resolved socket address, and we're not using
-            // blocking connect
-            tokio::task::block_in_place(|| {
-                let handle = tokio::runtime::Handle::current();
-                handle
-                    .block_on(socket.connect(sock_addr))
-                    .expect("resolved addr and no blocking connect should not err");
-            });
+            let mut socket = ReqSocket::new(transport);
+            socket.connect_sync(sock_addr);
 
             socket
         };

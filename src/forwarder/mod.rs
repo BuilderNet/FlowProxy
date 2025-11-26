@@ -2,12 +2,12 @@ use crate::{
     builderhub,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        FLASHBOTS_SIGNATURE_HEADER,
+        BUILDERNET_SIGNATURE_HEADER, FLASHBOTS_SIGNATURE_HEADER,
     },
     metrics::SYSTEM_METRICS,
     primitives::{
-        EncodedOrder, Protocol, RawOrderMetadata, SystemOrder, UtcInstant, WithEncoding,
-        WithHeaders,
+        EncodedOrder, Protocol, RawBundleBitcode, RawOrderMetadata, SystemOrder, UtcInstant,
+        WithEncoding, WithHeaders,
     },
     priority::{self, workers::PriorityWorkers, Priority},
     utils::UtcDateTimeHeader as _,
@@ -67,8 +67,26 @@ impl IngressForwarders {
 
     /// Broadcast a certain order to all forwarders.
     pub(crate) async fn broadcast_order(&self, order: SystemOrder) {
+        // NOTE: this code is fairly complex and unoptimized due to keeping backwards
+        // compability with:
+        // 1. Local builder only accepting JSON-RPC encoded orders.
+        // 2. Some peers still on HTTP/2 and not TCP sockets.
+        // 3. Only bundles support binary encoding for TCP forwarder
+
         let priority = order.priority();
-        let mut encoded_order = order.encode();
+        let method_name = order.method_name().to_string();
+
+        // Start with JSON-RPC encoding, that's needed for the local builder anyway.
+        let mut encoded_order = order.clone().encode();
+
+        // If it's a bundle, create bitcode encoding for TCP forwarder
+        let encoding_binary = if let SystemOrder::Bundle(bundle) = &order {
+            let bundle = RawBundleBitcode::from(bundle.raw_bundle.as_ref());
+            let encoding = bitcode::encode(&bundle);
+            Some(Arc::new(encoding))
+        } else {
+            None
+        };
 
         // Create local request first
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
@@ -83,25 +101,51 @@ impl IngressForwarders {
             })
             .await;
 
+        // If we have TCP encoding, sign that as well
+        let maybe_signature_header_tcp = if let Some(encoding) = encoding_binary.clone() {
+            let signer = self.signer.clone();
+            let sig = self
+                .workers
+                .spawn_with_priority(priority, move || {
+                    build_signature_header(&signer, encoding.as_ref())
+                })
+                .await;
+            Some(sig)
+        } else {
+            None
+        };
+
         let headers = ForwardingRequest::create_headers(
             priority,
             Some(signature_header),
             Some(UtcDateTime::now()),
         );
 
+        // Create headers for TCP forwarder
         // FIX: remove unwrap
-        let headers_strings = headers
+        let mut headers_strings = headers
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
             .collect::<HashMap<String, String>>();
+        headers_strings.insert("method".to_string(), method_name);
+        // In case we have binary encoding, we have to overwrite the signature header
+        if let Some(sig) = maybe_signature_header_tcp {
+            tracing::debug!(?sig, "built TCP signature header for order");
+            headers_strings.insert(BUILDERNET_SIGNATURE_HEADER.to_string().to_lowercase(), sig);
+        }
 
-        let payload = WithHeaders { headers: headers_strings, data: &encoded_order.encoding };
-        let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
+        // Now we can finally create the payload sent to TCP forwarder
+        let payload = WithHeaders {
+            headers: headers_strings,
+            data: encoding_binary.unwrap_or(encoded_order.encoding.clone()),
+        };
+        let data = bitcode::encode(&payload);
+
         encoded_order.encoding_tcp_forwarder = Some(data);
 
         let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
-        debug!(peers = %self.peers.len(), "sending bundle to peers");
+        debug!(peers = %self.peers.len(), "sending order to peers");
         self.broadcast_inner(forward);
     }
 
@@ -131,12 +175,14 @@ impl IngressForwarders {
             "params": [param]
         });
 
+        tracing::debug!(?json, "sending system order to local forwarder");
+
         let body = serde_json::to_vec(&json).expect("to JSON serialize request");
         // TODO: raw orders have no priority, but this will change, assume medium for now
         let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at, hash };
         let order = EncodedOrder::Raw(WithEncoding {
             inner: raw_order,
-            encoding: body,
+            encoding: Arc::new(body),
             encoding_tcp_forwarder: None,
         });
 

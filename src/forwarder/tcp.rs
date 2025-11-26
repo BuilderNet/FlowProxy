@@ -110,11 +110,16 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
 
             record_e2e_metrics(&request.encoded_order, &direction, is_big);
 
-            let bytes = request.encoded_order.encoding_tcp_forwarder().expect("tcp bytes to send");
+            let size = request.encoded_size();
+            let bytes = request
+                .encoded_order
+                .encoding_tcp_forwarder()
+                .cloned()
+                .unwrap_or_else(|| request.encoded_order.encoding().to_vec());
 
             tracing::trace!(bytes_len = bytes.len(), "sending tcp request");
             let start_time = Instant::now();
-            let response = client_pool.socket(request.encoded_size()).request(bytes.into()).await;
+            let response = client_pool.socket(size).request(bytes.into()).await;
 
             ForwarderResponse { start_time, response, is_big, order_type, hash, span: span_clone }
         } // We first want to enter the parent span, then the local span.

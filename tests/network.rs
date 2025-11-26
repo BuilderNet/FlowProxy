@@ -10,7 +10,7 @@ mod common;
 use tracing::{debug, info};
 
 /// This tests proper order propagation between 2 proxies.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn network_e2e_bundle_tx_works() {
     let _ = tracing_subscriber::fmt::try_init();
     info!("starting network e2e tcp test");
@@ -39,11 +39,11 @@ async fn network_e2e_bundle_tx_works() {
 
     let bundle = RawBundle::random(&mut rng);
     let response = client2.send_bundle(&bundle).await;
-    info!("sent raw tx from client2");
+    info!("sent raw bundle from client2");
     assert!(response.status().is_success());
 
     let mut received = builder2.recv::<RawBundle>().await.unwrap();
-    debug!("builder2 received tx from client2");
+    debug!("builder2 received raw bundle from client2");
 
     assert!(received.metadata.signing_address.is_some());
     assert!(received.metadata.bundle_hash.is_some());
