@@ -430,8 +430,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             let transport = make_transport();
             let mut socket = ReqSocket::with_options(
                 transport,
-                // 4KiB buffer before flushing.
-                ReqOptions::default().backpressure_boundary(1024 * 4),
+                // 50KiB buffer before flushing.
+                ReqOptions::default().write_buffer(50 * 1024),
             );
             // TODO: maybe connect directly with DNS?
             if let Err(e) = socket.connect(address).await {
