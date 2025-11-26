@@ -10,7 +10,7 @@ use std::{
 };
 
 use msg_socket::ReqSocket;
-use msg_transport::{tcp::Tcp, tcp_tls::TcpTls, Transport};
+use msg_transport::Transport;
 
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
@@ -85,16 +85,11 @@ pub fn default_http_builder() -> reqwest::ClientBuilder {
     builder
 }
 
-/// An [msg_transport::Transport] that is also [`Send`], [`Sync`], [`Unpin`] and 'static.
-pub trait AsyncTransport: Transport<SocketAddr> + Send + Sync + Unpin + 'static {}
-impl AsyncTransport for Tcp {}
-impl AsyncTransport for TcpTls {}
-
 pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
 
 /// A pool of TCP [`ReqSocket`] clients, with TLS support.
 #[allow(missing_debug_implementations)]
-pub struct ReqSocketIpPool<T: AsyncTransport> {
+pub struct ReqSocketIpPool<T: Transport<SocketAddr>> {
     /// The clients in the pool.
     clients: Arc<[ReqSocketIp<T>]>,
     /// The number of clients in the pool, so you don't have to deference the arc every time.
@@ -104,7 +99,7 @@ pub struct ReqSocketIpPool<T: AsyncTransport> {
 }
 
 // Custom [`Clone`] implementation to avoid requiring T: Clone.
-impl<T: AsyncTransport> Clone for ReqSocketIpPool<T> {
+impl<T: Transport<SocketAddr>> Clone for ReqSocketIpPool<T> {
     fn clone(&self) -> Self {
         Self {
             clients: self.clients.clone(),
@@ -114,7 +109,7 @@ impl<T: AsyncTransport> Clone for ReqSocketIpPool<T> {
     }
 }
 
-impl<T: AsyncTransport> ReqSocketIpPool<T> {
+impl<T: Transport<SocketAddr>> ReqSocketIpPool<T> {
     pub fn new(sockets: Vec<ReqSocketIp<T>>) -> Self {
         let num_clients = sockets.len();
         let clients = Arc::from(sockets);

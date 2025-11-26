@@ -1,6 +1,6 @@
 use crate::{
     forwarder::{
-        client::{default_http_builder, AsyncTransport, HttpClientPool, ReqSocketIpPool},
+        client::{default_http_builder, HttpClientPool, ReqSocketIpPool},
         http::spawn_http_forwarder,
         tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
@@ -15,6 +15,7 @@ use msg_socket::{ReqOptions, ReqSocket};
 use msg_transport::{
     tcp::Tcp,
     tcp_tls::{self, TcpTls},
+    Transport,
 };
 use openssl::{
     ssl::{SslConnector, SslFiletype, SslMethod},
@@ -404,7 +405,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
     /// Inner helper to create a TCP sender for the given peer, generic over the transport (TCP or
     /// TCP+TLS).
-    async fn peer_sender_inner<T: AsyncTransport, S: ToSocketAddrs + Debug>(
+    async fn peer_sender_inner<T: Transport<SocketAddr>, S: ToSocketAddrs + Debug>(
         &self,
         peer: &Peer,
         address: S,

@@ -1,8 +1,5 @@
 use crate::{
-    forwarder::{
-        client::{AsyncTransport, ReqSocketIpPool},
-        record_e2e_metrics, ForwardingRequest,
-    },
+    forwarder::{client::ReqSocketIpPool, record_e2e_metrics, ForwardingRequest},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     priority::{self},
@@ -11,6 +8,7 @@ use alloy_primitives::B256;
 use alloy_rlp::Bytes;
 use futures::{stream::FuturesUnordered, StreamExt};
 use msg_socket::ReqError;
+use msg_transport::Transport;
 use rbuilder_utils::tasks::TaskExecutor;
 use std::{
     future::Future,
@@ -23,7 +21,7 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::Instrument as _;
 
-pub fn spawn_tcp_forwarder<T: AsyncTransport>(
+pub fn spawn_tcp_forwarder<T: Transport<SocketAddr>>(
     name: String,
     address: SocketAddr,
     client: ReqSocketIpPool<T>,
@@ -60,7 +58,7 @@ struct ForwarderResponse<Ok, Err> {
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
 
 /// An TCP forwarder that forwards requests to a peer.
-struct TcpForwarder<T: AsyncTransport> {
+struct TcpForwarder<T: Transport<SocketAddr>> {
     client: ReqSocketIpPool<T>,
     /// The name of the builder we're forwarding to.
     peer_name: String,
@@ -74,7 +72,7 @@ struct TcpForwarder<T: AsyncTransport> {
     metrics: ForwarderMetrics,
 }
 
-impl<T: AsyncTransport> TcpForwarder<T> {
+impl<T: Transport<SocketAddr>> TcpForwarder<T> {
     fn new(
         client: ReqSocketIpPool<T>,
         name: String,
@@ -171,7 +169,7 @@ impl<T: AsyncTransport> TcpForwarder<T> {
     }
 }
 
-impl<T: AsyncTransport> Future for TcpForwarder<T> {
+impl<T: Transport<SocketAddr>> Future for TcpForwarder<T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
