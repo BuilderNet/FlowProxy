@@ -6,8 +6,8 @@ use crate::{
     },
     metrics::SYSTEM_METRICS,
     primitives::{
-        EncodedOrder, Protocol, RawOrderMetadata, SystemBundle, SystemMevShareBundle,
-        SystemTransaction, UtcInstant, WithEncoding, WithHeaders,
+        EncodedOrder, Protocol, RawOrderMetadata, SystemOrder, UtcInstant, WithEncoding,
+        WithHeaders,
     },
     priority::{self, workers::PriorityWorkers, Priority},
     utils::UtcDateTimeHeader as _,
@@ -65,10 +65,10 @@ impl IngressForwarders {
             .map(|peer| peer.info.name.clone())
     }
 
-    /// Broadcast bundle to all forwarders.
-    pub(crate) async fn broadcast_bundle(&self, bundle: SystemBundle) {
-        let priority = bundle.metadata.priority;
-        let mut encoded_order = bundle.encode();
+    /// Broadcast a certain order to all forwarders.
+    pub(crate) async fn broadcast_order(&self, order: SystemOrder) {
+        let priority = order.priority();
+        let mut encoded_order = order.encode();
 
         // Create local request first
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
@@ -102,94 +102,11 @@ impl IngressForwarders {
         let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
         debug!(peers = %self.peers.len(), "sending bundle to peers");
-        self.broadcast(forward);
-    }
-
-    /// Broadcast MEV share bundle to all forwarders.
-    pub(crate) async fn broadcast_mev_share_bundle(
-        &self,
-        priority: Priority,
-        bundle: SystemMevShareBundle,
-    ) {
-        let mut encoded_order = bundle.encode();
-        // Create local request first
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
-        let _ = self.local.send(priority, local);
-
-        let signer = self.signer.clone();
-        let encoding = encoded_order.encoding.clone();
-        let signature_header = self
-            .workers
-            .spawn_with_priority(priority, move || {
-                build_signature_header(&signer, encoding.as_ref())
-            })
-            .await;
-
-        let headers = ForwardingRequest::create_headers(
-            priority,
-            Some(signature_header),
-            Some(UtcDateTime::now()),
-        );
-
-        // FIX: remove unwrap
-        let headers_strings = headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect::<HashMap<String, String>>();
-
-        let payload = WithHeaders { headers: headers_strings, data: &encoded_order.encoding };
-        let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
-        encoded_order.encoding_tcp_forwarder = Some(data);
-
-        // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
-
-        debug!(peers = %self.peers.len(), "sending bundle to peers");
-        self.broadcast(forward);
-    }
-
-    /// Broadcast transaction to all forwarders.
-    pub(crate) async fn broadcast_transaction(&self, transaction: SystemTransaction) {
-        let priority = transaction.priority;
-        let mut encoded_order = transaction.encode();
-
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
-        let _ = self.local.send(local.priority(), local);
-
-        let signer = self.signer.clone();
-        let encoding = encoded_order.encoding.clone();
-        let signature_header = self
-            .workers
-            .spawn_with_priority(priority, move || {
-                build_signature_header(&signer, encoding.as_ref())
-            })
-            .await;
-
-        let headers = ForwardingRequest::create_headers(
-            priority,
-            Some(signature_header),
-            Some(UtcDateTime::now()),
-        );
-
-        // FIX: remove unwrap
-        let headers_strings = headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect::<HashMap<String, String>>();
-
-        let payload = WithHeaders { headers: headers_strings, data: &encoded_order.encoding };
-        let data = serde_json::to_string(&payload).unwrap().as_bytes().to_vec();
-        encoded_order.encoding_tcp_forwarder = Some(data);
-
-        // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
-
-        debug!(peers = %self.peers.len(), "sending transaction to peers");
-        self.broadcast(forward);
+        self.broadcast_inner(forward);
     }
 
     /// Broadcast request to all peers.
-    fn broadcast(&self, forward: Arc<ForwardingRequest>) {
+    fn broadcast_inner(&self, forward: Arc<ForwardingRequest>) {
         for entry in self.peers.iter() {
             let handle = entry.value();
             if let Err(e) = handle.sender.send(forward.priority(), forward.clone()) {
@@ -217,7 +134,7 @@ impl IngressForwarders {
         let body = serde_json::to_vec(&json).expect("to JSON serialize request");
         // TODO: raw orders have no priority, but this will change, assume medium for now
         let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at, hash };
-        let order = EncodedOrder::SystemOrder(WithEncoding {
+        let order = EncodedOrder::Raw(WithEncoding {
             inner: raw_order,
             encoding: body,
             encoding_tcp_forwarder: None,
@@ -388,7 +305,7 @@ fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_
                 )
                 .observe(order.received_at().elapsed().as_secs_f64());
         }
-        EncodedOrder::SystemOrder(_) => {
+        EncodedOrder::Raw(_) => {
             SYSTEM_METRICS
                 .system_order_processing_time(
                     order.priority().as_str(),

@@ -1189,7 +1189,7 @@ impl OrderflowIngress {
             })?;
 
         // Send request to all forwarders.
-        self.forwarders.broadcast_transaction(system_transaction).await;
+        self.forwarders.broadcast_order(system_transaction.into()).await;
 
         let elapsed = start.elapsed();
         tracing::debug!(elapsed = ?elapsed, "processed raw transaction");
@@ -1207,7 +1207,7 @@ impl OrderflowIngress {
         let received_at = bundle.metadata.received_at;
 
         // Send request to all forwarders.
-        self.forwarders.broadcast_bundle(bundle).await;
+        self.forwarders.broadcast_order(bundle.into()).await;
 
         self.user_metrics
             .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
@@ -1223,7 +1223,7 @@ impl OrderflowIngress {
         let bundle_hash = bundle.bundle_hash();
         let received_at = bundle.received_at;
 
-        self.forwarders.broadcast_mev_share_bundle(priority, bundle).await;
+        self.forwarders.broadcast_order(bundle.into()).await;
 
         self.user_metrics
             .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())

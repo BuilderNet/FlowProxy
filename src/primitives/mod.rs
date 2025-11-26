@@ -15,7 +15,7 @@ use alloy_eips::{
     Decodable2718 as _,
 };
 use alloy_primitives::{Address, Bytes};
-use derive_more::Deref;
+use derive_more::{Deref, From};
 use rbuilder_primitives::{
     serialize::{
         CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult,
@@ -523,6 +523,45 @@ impl SystemTransaction {
     }
 }
 
+/// An enumeration of the orders that can be sent via system endopints.
+#[derive(Debug, Clone, From)]
+pub enum SystemOrder {
+    Bundle(SystemBundle),
+    MevShareBundle(SystemMevShareBundle),
+    Transaction(SystemTransaction),
+}
+
+impl SystemOrder {
+    /// Returns the priority of the order.
+    pub fn priority(&self) -> Priority {
+        match self {
+            SystemOrder::Bundle(bundle) => bundle.metadata.priority,
+            SystemOrder::MevShareBundle(bundle) => bundle.priority,
+            SystemOrder::Transaction(tx) => tx.priority,
+        }
+    }
+
+    pub fn encode(self) -> WithEncoding<SystemOrder> {
+        match self {
+            SystemOrder::Bundle(bundle) => WithEncoding {
+                inner: SystemOrder::Bundle(bundle.clone()),
+                encoding: bundle.encode().encoding,
+                encoding_tcp_forwarder: None,
+            },
+            SystemOrder::MevShareBundle(bundle) => WithEncoding {
+                inner: SystemOrder::MevShareBundle(bundle.clone()),
+                encoding: bundle.encode().encoding,
+                encoding_tcp_forwarder: None,
+            },
+            SystemOrder::Transaction(tx) => WithEncoding {
+                inner: SystemOrder::Transaction(tx.clone()),
+                encoding: tx.encode().encoding,
+                encoding_tcp_forwarder: None,
+            },
+        }
+    }
+}
+
 /// The receipt of a bundle received from the system endpoint, to be indexed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// The hash of the raw bundle.
@@ -620,7 +659,7 @@ pub struct WithEncoding<T> {
 #[derive(Debug, Clone)]
 pub enum EncodedOrder {
     /// Raw order bytes received from the system endpoint, already ready to be forwarded.
-    SystemOrder(WithEncoding<RawOrderMetadata>),
+    Raw(WithEncoding<RawOrderMetadata>),
     /// A bundle along with its JSON-RPC encoding.
     Bundle(WithEncoding<SystemBundle>),
     /// A MEV Share bundle along with its JSON-RPC encoding.
@@ -629,11 +668,33 @@ pub enum EncodedOrder {
     Transaction(WithEncoding<SystemTransaction>),
 }
 
+impl From<WithEncoding<SystemOrder>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemOrder>) -> Self {
+        match value.inner {
+            SystemOrder::Bundle(bundle) => EncodedOrder::Bundle(WithEncoding {
+                inner: bundle,
+                encoding: value.encoding,
+                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
+            }),
+            SystemOrder::MevShareBundle(bundle) => EncodedOrder::MevShareBundle(WithEncoding {
+                inner: bundle,
+                encoding: value.encoding,
+                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
+            }),
+            SystemOrder::Transaction(tx) => EncodedOrder::Transaction(WithEncoding {
+                inner: tx,
+                encoding: value.encoding,
+                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
+            }),
+        }
+    }
+}
+
 impl EncodedOrder {
     /// Returns the JSON-RPC encoding of the order.
     pub fn encoding(&self) -> &[u8] {
         match self {
-            EncodedOrder::SystemOrder(order) => &order.encoding,
+            EncodedOrder::Raw(order) => &order.encoding,
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
             EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
@@ -642,7 +703,7 @@ impl EncodedOrder {
 
     pub fn encoding_tcp_forwarder(&self) -> Option<Vec<u8>> {
         match self {
-            EncodedOrder::SystemOrder(order) => order.encoding_tcp_forwarder.clone(),
+            EncodedOrder::Raw(order) => order.encoding_tcp_forwarder.clone(),
             EncodedOrder::Bundle(bundle) => bundle.encoding_tcp_forwarder.clone(),
             EncodedOrder::MevShareBundle(bundle) => bundle.encoding_tcp_forwarder.clone(),
             EncodedOrder::Transaction(tx) => tx.encoding_tcp_forwarder.clone(),
@@ -652,7 +713,7 @@ impl EncodedOrder {
     /// Returns the priority of the order.
     pub fn priority(&self) -> Priority {
         match self {
-            EncodedOrder::SystemOrder(order) => order.inner.priority,
+            EncodedOrder::Raw(order) => order.inner.priority,
             EncodedOrder::Bundle(bundle) => bundle.inner.metadata.priority,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
@@ -661,7 +722,7 @@ impl EncodedOrder {
 
     pub fn received_at(&self) -> UtcInstant {
         match self {
-            EncodedOrder::SystemOrder(order) => order.inner.received_at,
+            EncodedOrder::Raw(order) => order.inner.received_at,
             EncodedOrder::Bundle(bundle) => bundle.inner.metadata.received_at,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
@@ -671,7 +732,7 @@ impl EncodedOrder {
     /// Returns the type of the order.
     pub fn order_type(&self) -> &'static str {
         match self {
-            EncodedOrder::SystemOrder(_) => "system",
+            EncodedOrder::Raw(_) => "system",
             EncodedOrder::Bundle(_) => "bundle",
             EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
             EncodedOrder::Transaction(_) => "transaction",
@@ -681,7 +742,7 @@ impl EncodedOrder {
     /// Returns the hash of the order.
     pub fn hash(&self) -> B256 {
         match self {
-            EncodedOrder::SystemOrder(order) => order.inner.hash,
+            EncodedOrder::Raw(order) => order.inner.hash,
             EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::Transaction(tx) => tx.inner.tx_hash(),
