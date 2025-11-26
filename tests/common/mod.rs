@@ -204,6 +204,7 @@ impl BuilderReceiver {
 /// # Returns
 /// A running HAProxy container that will be cleaned up when dropped.
 #[cfg(target_os = "linux")]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) async fn spawn_haproxy(
     haproxy_cfg: &std::path::Path,
     cert_dir: &std::path::Path,
