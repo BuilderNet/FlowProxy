@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     hash::{Hash as _, Hasher as _},
     sync::Arc,
     time::{Duration, Instant},
@@ -13,8 +14,9 @@ use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result},
     Decodable2718 as _,
 };
-use alloy_primitives::{Address, Bytes};
-use derive_more::Deref;
+use alloy_primitives::{Address, Bytes, U64};
+use bitcode::{Decode, Encode};
+use derive_more::{Deref, From};
 use rbuilder_primitives::{
     serialize::{
         CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult,
@@ -29,7 +31,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
-    consts::{ETH_SEND_BUNDLE_METHOD, MEV_SEND_BUNDLE_METHOD},
+    consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, MEV_SEND_BUNDLE_METHOD},
     priority::Priority,
 };
 
@@ -355,7 +357,7 @@ impl SystemBundle {
     }
 
     /// Encode the system bundle in a JSON-RPC payload with params EIP-2718 encoded bytes.
-    pub fn encode(self) -> WithEncoding<Self> {
+    pub fn encode(self) -> WithEncoding<SystemBundle> {
         let json = json!({
             "id": 1,
             "jsonrpc": "2.0",
@@ -364,7 +366,7 @@ impl SystemBundle {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
     }
 }
 
@@ -457,7 +459,7 @@ impl SystemMevShareBundle {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
     }
 }
 
@@ -514,11 +516,58 @@ impl SystemTransaction {
         });
 
         let encoding = serde_json::to_vec(&json).expect("to JSON serialize transaction");
-        WithEncoding { inner: self, encoding: Arc::new(encoding) }
+        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
     }
 
     pub fn tx_hash(&self) -> B256 {
         *self.transaction.tx_hash()
+    }
+}
+
+/// An enumeration of the orders that can be sent via system endopints.
+#[derive(Debug, Clone, From)]
+pub enum SystemOrder {
+    Bundle(SystemBundle),
+    MevShareBundle(SystemMevShareBundle),
+    Transaction(SystemTransaction),
+}
+
+impl SystemOrder {
+    /// Returns the priority of the order.
+    pub fn priority(&self) -> Priority {
+        match self {
+            SystemOrder::Bundle(bundle) => bundle.metadata.priority,
+            SystemOrder::MevShareBundle(bundle) => bundle.priority,
+            SystemOrder::Transaction(tx) => tx.priority,
+        }
+    }
+
+    pub fn encode(self) -> WithEncoding<SystemOrder> {
+        match self {
+            SystemOrder::Bundle(bundle) => WithEncoding {
+                inner: SystemOrder::Bundle(bundle.clone()),
+                encoding: bundle.encode().encoding,
+                encoding_tcp_forwarder: None,
+            },
+            SystemOrder::MevShareBundle(bundle) => WithEncoding {
+                inner: SystemOrder::MevShareBundle(bundle.clone()),
+                encoding: bundle.encode().encoding,
+                encoding_tcp_forwarder: None,
+            },
+            SystemOrder::Transaction(tx) => WithEncoding {
+                inner: SystemOrder::Transaction(tx.clone()),
+                encoding: tx.encode().encoding,
+                encoding_tcp_forwarder: None,
+            },
+        }
+    }
+
+    pub fn method_name(&self) -> &'static str {
+        match self {
+            SystemOrder::Bundle(_) => ETH_SEND_BUNDLE_METHOD,
+            SystemOrder::MevShareBundle(_) => MEV_SEND_BUNDLE_METHOD,
+            SystemOrder::Transaction(_) => ETH_SEND_RAW_TRANSACTION_METHOD,
+        }
     }
 }
 
@@ -610,6 +659,8 @@ impl From<UtcInstant> for Instant {
 pub struct WithEncoding<T> {
     pub inner: T,
     pub encoding: Arc<Vec<u8>>,
+    /// The encoding to be used for by the TCP forwarder.
+    pub encoding_tcp_forwarder: Option<Vec<u8>>,
 }
 
 /// An order that can be either a bundle or a transaction, along with its JSON-RPC encoding, ready
@@ -617,7 +668,7 @@ pub struct WithEncoding<T> {
 #[derive(Debug, Clone)]
 pub enum EncodedOrder {
     /// Raw order bytes received from the system endpoint, already ready to be forwarded.
-    SystemOrder(WithEncoding<RawOrderMetadata>),
+    Raw(WithEncoding<RawOrderMetadata>),
     /// A bundle along with its JSON-RPC encoding.
     Bundle(WithEncoding<SystemBundle>),
     /// A MEV Share bundle along with its JSON-RPC encoding.
@@ -626,21 +677,52 @@ pub enum EncodedOrder {
     Transaction(WithEncoding<SystemTransaction>),
 }
 
+impl From<WithEncoding<SystemOrder>> for EncodedOrder {
+    fn from(value: WithEncoding<SystemOrder>) -> Self {
+        match value.inner {
+            SystemOrder::Bundle(bundle) => EncodedOrder::Bundle(WithEncoding {
+                inner: bundle,
+                encoding: value.encoding,
+                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
+            }),
+            SystemOrder::MevShareBundle(bundle) => EncodedOrder::MevShareBundle(WithEncoding {
+                inner: bundle,
+                encoding: value.encoding,
+                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
+            }),
+            SystemOrder::Transaction(tx) => EncodedOrder::Transaction(WithEncoding {
+                inner: tx,
+                encoding: value.encoding,
+                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
+            }),
+        }
+    }
+}
+
 impl EncodedOrder {
     /// Returns the JSON-RPC encoding of the order.
     pub fn encoding(&self) -> &[u8] {
         match self {
-            EncodedOrder::SystemOrder(order) => &order.encoding,
+            EncodedOrder::Raw(order) => &order.encoding,
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
             EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
         }
     }
 
+    pub fn encoding_tcp_forwarder(&self) -> Option<&Vec<u8>> {
+        match self {
+            EncodedOrder::Raw(order) => order.encoding_tcp_forwarder.as_ref(),
+            EncodedOrder::Bundle(bundle) => bundle.encoding_tcp_forwarder.as_ref(),
+            EncodedOrder::MevShareBundle(bundle) => bundle.encoding_tcp_forwarder.as_ref(),
+            EncodedOrder::Transaction(tx) => tx.encoding_tcp_forwarder.as_ref(),
+        }
+    }
+
     /// Returns the priority of the order.
     pub fn priority(&self) -> Priority {
         match self {
-            EncodedOrder::SystemOrder(order) => order.inner.priority,
+            EncodedOrder::Raw(order) => order.inner.priority,
             EncodedOrder::Bundle(bundle) => bundle.inner.metadata.priority,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
@@ -649,7 +731,7 @@ impl EncodedOrder {
 
     pub fn received_at(&self) -> UtcInstant {
         match self {
-            EncodedOrder::SystemOrder(order) => order.inner.received_at,
+            EncodedOrder::Raw(order) => order.inner.received_at,
             EncodedOrder::Bundle(bundle) => bundle.inner.metadata.received_at,
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
@@ -659,7 +741,7 @@ impl EncodedOrder {
     /// Returns the type of the order.
     pub fn order_type(&self) -> &'static str {
         match self {
-            EncodedOrder::SystemOrder(_) => "system",
+            EncodedOrder::Raw(_) => "system",
             EncodedOrder::Bundle(_) => "bundle",
             EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
             EncodedOrder::Transaction(_) => "transaction",
@@ -669,7 +751,7 @@ impl EncodedOrder {
     /// Returns the hash of the order.
     pub fn hash(&self) -> B256 {
         match self {
-            EncodedOrder::SystemOrder(order) => order.inner.hash,
+            EncodedOrder::Raw(order) => order.inner.hash,
             EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::MevShareBundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::Transaction(tx) => tx.inner.tx_hash(),
@@ -708,6 +790,137 @@ impl Samplable for B256 {
         first.copy_from_slice(&self.0[..8]);
         let every = every as u64;
         u64::from_be_bytes(first) % every == 0
+    }
+}
+
+/// Contains information about another proxy peer instance, as returned by the `infoz` endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PeerProxyInfo {
+    /// The port where the peer receives TCP-only, system flow.
+    pub system_api_port: u16,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
+pub struct WithHeaders<T> {
+    pub headers: HashMap<String, String>,
+    pub data: T,
+}
+
+/// Bitcode-friendly representation of [`RawBundle`].
+#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
+pub struct RawBundleBitcode {
+    pub metadata: RawBundleMetadataBitcode,
+    pub txs: Vec<Vec<u8>>, // equivalent to Bytes
+}
+
+/// Bitcode-friendly representation of [`RawBundleMetadata`].
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct RawBundleMetadataBitcode {
+    pub version: Option<String>,
+    pub block_number: Option<u64>,
+
+    pub reverting_tx_hashes: Vec<[u8; 32]>,
+    pub dropping_tx_hashes: Vec<[u8; 32]>,
+
+    pub replacement_uuid: Option<[u8; 16]>,
+    pub uuid: Option<[u8; 16]>,
+
+    pub signing_address: Option<[u8; 20]>,
+    pub refund_identity: Option<[u8; 20]>,
+
+    pub min_timestamp: Option<u64>,
+    pub max_timestamp: Option<u64>,
+    pub replacement_nonce: Option<u64>,
+
+    pub refund_percent: Option<u8>,
+    pub refund_recipient: Option<[u8; 20]>,
+
+    pub refund_tx_hashes: Option<Vec<[u8; 32]>>,
+    pub delayed_refund: Option<bool>,
+
+    pub bundle_hash: Option<[u8; 32]>,
+}
+
+impl From<&RawBundleMetadata> for RawBundleMetadataBitcode {
+    fn from(r: &RawBundleMetadata) -> Self {
+        Self {
+            version: r.version.clone(),
+            block_number: r.block_number.map(|v| v.try_into().expect("U64 fits into u64")),
+
+            reverting_tx_hashes: r.reverting_tx_hashes.clone().into_iter().map(|h| *h).collect(),
+            dropping_tx_hashes: r.dropping_tx_hashes.clone().into_iter().map(|h| *h).collect(),
+
+            replacement_uuid: r.replacement_uuid.map(|u| *u.as_bytes()),
+            uuid: r.uuid.map(|u| *u.as_bytes()),
+
+            signing_address: r.signing_address.map(|a| a.into()),
+            refund_identity: r.refund_identity.map(|a| a.into()),
+
+            min_timestamp: r.min_timestamp,
+            max_timestamp: r.max_timestamp,
+            replacement_nonce: r.replacement_nonce,
+
+            refund_percent: r.refund_percent,
+            refund_recipient: r.refund_recipient.map(|a| a.into()),
+
+            refund_tx_hashes: r
+                .refund_tx_hashes
+                .clone()
+                .map(|hashes| hashes.into_iter().map(|h| *h).collect()),
+
+            delayed_refund: r.delayed_refund,
+            bundle_hash: r.bundle_hash.map(|b| b.0),
+        }
+    }
+}
+
+impl From<RawBundleMetadataBitcode> for RawBundleMetadata {
+    fn from(r: RawBundleMetadataBitcode) -> Self {
+        Self {
+            version: r.version,
+            block_number: r.block_number.map(U64::from),
+
+            reverting_tx_hashes: r.reverting_tx_hashes.into_iter().map(B256::from).collect(),
+            dropping_tx_hashes: r.dropping_tx_hashes.into_iter().map(B256::from).collect(),
+
+            replacement_uuid: r.replacement_uuid.map(Uuid::from_bytes),
+            uuid: r.uuid.map(Uuid::from_bytes),
+
+            signing_address: r.signing_address.map(Address::from),
+            refund_identity: r.refund_identity.map(Address::from),
+
+            min_timestamp: r.min_timestamp,
+            max_timestamp: r.max_timestamp,
+            replacement_nonce: r.replacement_nonce,
+
+            refund_percent: r.refund_percent,
+            refund_recipient: r.refund_recipient.map(Address::from),
+
+            refund_tx_hashes: r
+                .refund_tx_hashes
+                .map(|hashes| hashes.into_iter().map(B256::from).collect()),
+
+            delayed_refund: r.delayed_refund,
+            bundle_hash: r.bundle_hash.map(B256::from),
+        }
+    }
+}
+
+impl From<&RawBundle> for RawBundleBitcode {
+    fn from(r: &RawBundle) -> Self {
+        Self {
+            metadata: RawBundleMetadataBitcode::from(&r.metadata),
+            txs: r.txs.iter().map(|b| b.to_vec()).collect(),
+        }
+    }
+}
+
+impl From<RawBundleBitcode> for RawBundle {
+    fn from(r: RawBundleBitcode) -> Self {
+        Self {
+            metadata: RawBundleMetadata::from(r.metadata),
+            txs: r.txs.iter().map(|v| v.clone().into()).collect(),
+        }
     }
 }
 

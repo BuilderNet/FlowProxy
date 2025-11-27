@@ -1,4 +1,4 @@
-use std::{convert::Infallible, num::NonZero, path::PathBuf};
+use std::{convert::Infallible, net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -146,20 +146,32 @@ pub struct CacheArgs {
     pub signer_cache_size: u64,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version = concat!(env!("CARGO_PKG_VERSION"), "-", env!("GIT_HASH")))]
 pub struct OrderflowIngressArgs {
-    /// Listen URL for receiving user flow.
-    #[clap(long, value_hint = ValueHint::Url, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
-    pub user_listen_url: String,
+    /// Listen socket address for receiving user flow.
+    #[clap(long, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
+    pub user_listen_addr: SocketAddr,
 
-    /// Listen URL for receiving system flow.
-    #[clap(long, value_hint = ValueHint::Url, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
-    pub system_listen_url: String,
+    /// Listen socket address for receiving HTTP system flow.
+    #[clap(long, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
+    pub system_listen_addr_http: SocketAddr,
+
+    /// Listen socket address for receiving TPC-only system flow.
+    #[clap(long, env = "SYSTEM_LISTEN_ADDR_TCP", id = "SYSTEM_LISTEN_ADDR_TCP")]
+    pub system_listen_addr_tcp: SocketAddr,
+
+    /// Private key PEM file for client authentication (mTLS)
+    #[clap(long, env = "PRIVATE_KEY_PEM_FILE", id = "PRIVATE_KEY_PEM_FILE")]
+    pub private_key_pem_file: Option<PathBuf>,
+
+    /// Certificate PEM file for client authentication (mTLS)
+    #[clap(long, env = "CERTIFICATE_PEM_FILE", id = "CERTIFICATE_PEM_FILE")]
+    pub certificate_pem_file: Option<PathBuf>,
 
     /// Listen URL for receiving builder stats.
-    #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
-    pub builder_listen_url: Option<String>,
+    #[clap(long, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
+    pub builder_listen_addr: Option<SocketAddr>,
 
     /// The URL of the local builder. This should be set in production.
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDER_ENDPOINT", id = "BUILDER_ENDPOINT")]
@@ -240,14 +252,41 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
-    /// For each peer, the size of the HTTP client pool used to forward requests.
+    /// The interval in seconds to update the peer list from BuilderHub.
+    #[clap(
+        long = "peer.update-interval-s",
+        default_value_t = 30,
+        env = "PEER_UPDATE_INTERVAL_S",
+        id = "PEER_UPDATE_INTERVAL_S"
+    )]
+    pub peer_update_interval_s: u64,
+
+    /// For each peer, the size of the HTTP client pool used to forward requests. Deprecated.
     #[clap(
         long = "http.client-pool-size",
         default_value_t = NonZero::new(8).expect("non-zero"),
         env = "CLIENT_POOL_SIZE",
         id = "CLIENT_POOL_SIZE"
     )]
-    pub client_pool_size: NonZero<usize>,
+    pub http_client_pool_size: NonZero<usize>,
+
+    /// For each peer, the number of TCP clients to use for forwarding small messages (<32KiB).
+    #[clap(
+        long = "tcp.small-clients",
+        default_value_t = NonZero::new(4).expect("non-zero"),
+        env = "TCP_SMALL_CLIENTS",
+        id = "TCP_SMALL_CLIENTS"
+    )]
+    pub tcp_small_clients: NonZero<usize>,
+
+    /// For each peer, the number of TCP clients to use for forwarding big messages (>=32KiB).
+    #[clap(
+        long = "tcp.big-clients",
+        default_value_t = NonZero::new(2).expect("non-zero"),
+        env = "TCP_BIG_CLIENTS",
+        id = "TCP_BIG_CLIENTS"
+    )]
+    pub tcp_big_clients: NonZero<usize>,
 
     /// The number of IO worker threads used in Tokio.
     #[clap(long, default_value_t = 4, env = "IO_THREADS", id = "IO_THREADS")]
@@ -267,9 +306,13 @@ pub struct OrderflowIngressArgs {
 impl Default for OrderflowIngressArgs {
     fn default() -> Self {
         Self {
-            user_listen_url: String::from("127.0.0.1:0"),
-            system_listen_url: String::from("127.0.0.1:0"),
-            builder_listen_url: Some(String::from("127.0.0.1:0")),
+            user_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            system_listen_addr_http: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            system_listen_addr_tcp: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
+            private_key_pem_file: None,
+            certificate_pem_file: None,
+            peer_update_interval_s: 30,
             builder_url: None,
             builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),
@@ -287,7 +330,9 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            client_pool_size: NonZero::new(8).unwrap(),
+            http_client_pool_size: NonZero::new(8).expect("non-zero"),
+            tcp_small_clients: NonZero::new(4).expect("non-zero"),
+            tcp_big_clients: NonZero::new(2).expect("non-zero"),
             io_threads: 4,
             compute_threads: 4,
             cache: CacheArgs {
@@ -370,11 +415,17 @@ mod tests {
     fn cli_indexing_args_optional_succeds() {
         let args = vec![
             "test", // binary name
-            "--user-listen-url",
+            "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-url",
+            "--system-listen-addr-http",
             "0.0.0.0:9755",
-            "--builder-listen-url",
+            "--system-listen-addr-tcp",
+            "0.0.0.0:9756",
+            "--private-key-pem-file",
+            "./",
+            "--certificate-pem-file",
+            "./",
+            "--builder-listen-addr",
             "0.0.0.0:8756",
             "--builder-url",
             "http://0.0.0.0:2020",
@@ -395,11 +446,17 @@ mod tests {
     fn cli_indexing_args_partial_fail() {
         let args = vec![
             "test", // binary name
-            "--user-listen-url",
+            "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-url",
+            "--system-listen-addr-http",
             "0.0.0.0:9755",
-            "--builder-listen-url",
+            "--system-listen-addr-tcp",
+            "0.0.0.0:9756",
+            "--private-key-pem-file",
+            "./",
+            "--certificate-pem-file",
+            "./",
+            "--builder-listen-addr",
             "0.0.0.0:8756",
             "--builder-url",
             "http://0.0.0.0:2020",
@@ -423,11 +480,17 @@ mod tests {
     fn cli_indexing_args_clickhouse_provided_succeds() {
         let args = vec![
             "test", // binary name
-            "--user-listen-url",
+            "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-url",
+            "--system-listen-addr-http",
             "0.0.0.0:9755",
-            "--builder-listen-url",
+            "--system-listen-addr-tcp",
+            "0.0.0.0:9756",
+            "--private-key-pem-file",
+            "./",
+            "--certificate-pem-file",
+            "./",
+            "--builder-listen-addr",
             "0.0.0.0:8756",
             "--builder-url",
             "http://0.0.0.0:2020",
@@ -465,11 +528,17 @@ mod tests {
     fn cli_indexing_args_parquet_provided_succeds() {
         let args = vec![
             "test", // binary name
-            "--user-listen-url",
+            "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-url",
+            "--system-listen-addr-http",
             "0.0.0.0:9755",
-            "--builder-listen-url",
+            "--system-listen-addr-tcp",
+            "0.0.0.0:9756",
+            "--private-key-pem-file",
+            "./",
+            "--certificate-pem-file",
+            "./",
+            "--builder-listen-addr",
             "0.0.0.0:8756",
             "--builder-url",
             "http://0.0.0.0:2020",
@@ -495,11 +564,17 @@ mod tests {
     fn cli_indexing_args_provided_both_clickhouse_parquet_fails() {
         let args = vec![
             "test", // binary name
-            "--user-listen-url",
+            "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-url",
+            "--system-listen-addr-http",
             "0.0.0.0:9755",
-            "--builder-listen-url",
+            "--system-listen-addr-tcp",
+            "0.0.0.0:9756",
+            "--private-key-pem-file",
+            "./",
+            "--certificate-pem-file",
+            "./",
+            "--builder-listen-addr",
             "0.0.0.0:8756",
             "--builder-url",
             "http://0.0.0.0:2020",

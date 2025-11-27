@@ -1,12 +1,18 @@
 //! Configuration for HTTP clients used to spawn forwarders.
 use std::{
+    collections::HashMap,
+    net::SocketAddr,
     num::NonZero,
+    ops::Range,
     sync::{
         atomic::{AtomicU8, Ordering},
         Arc,
     },
     time::Duration,
 };
+
+use msg_socket::ReqSocket;
+use msg_transport::Transport;
 
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
@@ -81,9 +87,67 @@ pub fn default_http_builder() -> reqwest::ClientBuilder {
     builder
 }
 
+pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
+
+/// A mapping of size ranges to [`T`].
+pub type Buckets<T> = HashMap<Range<usize>, T>;
+
+/// A threshold for distnguishing between small and big messages in [`Buckets`] for
+/// [`ReqSocketIpBucketPool`].
+pub const BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES: usize = 32_768; // 32 KiB
+
+/// Create TCP client buckets with the given number of small and big clients, with a
+/// [`BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES`] threshold.
+pub fn tcp_clients_buckets(num_small: usize, num_big: usize) -> Buckets<usize> {
+    let mut map = HashMap::new();
+    map.insert(0..BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES, num_small);
+    map.insert(BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES..usize::MAX, num_big);
+    map
+}
+
+/// A pool of TCP [`ReqSocket`] clients, with TLS support.
+#[allow(missing_debug_implementations)]
+pub struct ReqSocketIpBucketPool<T: Transport<SocketAddr>> {
+    /// The clients in the pool.
+    clients: Arc<Buckets<(Vec<ReqSocketIp<T>>, AtomicU8)>>,
+}
+
+// Custom [`Clone`] implementation to avoid requiring T: Clone.
+impl<T: Transport<SocketAddr>> Clone for ReqSocketIpBucketPool<T> {
+    fn clone(&self) -> Self {
+        Self { clients: self.clients.clone() }
+    }
+}
+
+impl<T: Transport<SocketAddr>> ReqSocketIpBucketPool<T> {
+    pub fn new(buckets: Buckets<usize>, make_socket: impl Fn() -> ReqSocketIp<T>) -> Self {
+        let clients = buckets
+            .iter()
+            .map(|(range, &num_sockets)| {
+                let sockets = (0..num_sockets).map(|_| make_socket()).collect();
+                (range.clone(), (sockets, AtomicU8::new(0)))
+            })
+            .collect::<HashMap<_, _>>();
+
+        Self { clients: Arc::new(clients) }
+    }
+
+    /// Get a socket from the pool for the given size in bytes.
+    pub fn socket(&self, size_bytes: usize) -> &ReqSocketIp<T> {
+        let (_, (clients, last_used)) = self
+            .clients
+            .iter()
+            .find(|(range, _)| range.contains(&size_bytes))
+            .expect("buckets cover all sizes");
+
+        let index = last_used.fetch_add(1, Ordering::Relaxed);
+        &clients[(index as usize) % clients.len()]
+    }
+}
+
 /// A pool of HTTP clients for load balancing. Works with round-robin selection.
 #[derive(Debug, Clone)]
-pub struct ClientPool {
+pub struct HttpClientPool {
     /// The clients in the pool.
     clients: Arc<[reqwest::Client]>,
     /// The number of clients in the pool, so you don't have to deference the arc every time.
@@ -92,7 +156,7 @@ pub struct ClientPool {
     last_used: Arc<AtomicU8>,
 }
 
-impl ClientPool {
+impl HttpClientPool {
     /// Create a new client pool with `num_clients` clients, created by the `make_client` function.
     pub fn new(num_clients: NonZero<usize>, make_client: impl Fn() -> reqwest::Client) -> Self {
         let clients = (0..num_clients.get()).map(|_| make_client()).collect();

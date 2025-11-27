@@ -1,7 +1,7 @@
 // Common test utilities and types
 // This module is shared across all integration tests
 
-use std::{net::SocketAddr, time::Duration};
+use std::net::SocketAddr;
 
 use alloy_primitives::Bytes;
 use alloy_signer::Signer;
@@ -11,7 +11,7 @@ use flowproxy::{
     cli::OrderflowIngressArgs,
     consts::FLASHBOTS_SIGNATURE_HEADER,
     ingress::maybe_decompress,
-    jsonrpc::{JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
+    jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
     runner::CliContext,
 };
 use hyper::{header, HeaderMap};
@@ -19,8 +19,12 @@ use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
-use tokio::{net::TcpListener, sync::broadcast};
-use tracing::Instrument as _;
+use tokio::{net::TcpListener, sync::mpsc};
+
+#[cfg(target_os = "linux")]
+use testcontainers::{
+    core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
+};
 
 pub(crate) struct IngressClient<S: Signer> {
     pub(crate) url: String,
@@ -28,44 +32,41 @@ pub(crate) struct IngressClient<S: Signer> {
     pub(crate) signer: S,
 }
 
-pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
-    let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
-    args.builder_url = builder_url;
-    let user_listener = TcpListener::bind(&args.user_listen_url).await.unwrap();
-    let system_listener = TcpListener::bind(&args.system_listen_url).await.unwrap();
+pub(crate) async fn spawn_ingress_with_args(
+    args: OrderflowIngressArgs,
+) -> IngressClient<PrivateKeySigner> {
+    let user_listener = TcpListener::bind(&args.user_listen_addr).await.unwrap();
+    let system_listener = TcpListener::bind(&args.system_listen_addr_http).await.unwrap();
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
     let task_manager = rbuilder_utils::tasks::TaskManager::current();
 
-    tokio::spawn(
-        async move {
-            flowproxy::run_with_listeners(
-                args,
-                user_listener,
-                system_listener,
-                builder_listener,
-                CliContext { task_executor: task_manager.executor() },
-            )
-            .await
-            .unwrap();
-        }
-        .instrument(tracing::info_span!("proxy", ?address)),
-    );
+    tokio::spawn(async move {
+        flowproxy::run_with_listeners(
+            args,
+            user_listener,
+            system_listener,
+            builder_listener,
+            CliContext { task_executor: task_manager.executor() },
+        )
+        .await
+        .unwrap();
+    });
 
-    let url = format!("http://{address}");
-    let health_url = format!("{url}/health");
-    let client = reqwest::Client::default();
-
-    let mut user_live = false;
-    while !user_live {
-        user_live = client.get(&health_url).send().await.unwrap().status().is_success();
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    IngressClient {
+        url: format!("http://{address}"),
+        client: reqwest::Client::default(),
+        signer: PrivateKeySigner::random(),
     }
+}
 
-    let signer = PrivateKeySigner::random();
-
-    IngressClient { url, client, signer }
+pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
+    let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
+    args.peer_update_interval_s = 5;
+    args.builder_url = builder_url;
+    args.http_client_pool_size = 1.try_into().unwrap();
+    spawn_ingress_with_args(args).await
 }
 
 impl<S: Signer + Sync> IngressClient<S> {
@@ -132,7 +133,7 @@ impl<S: Signer + Sync> IngressClient<S> {
 
 pub(crate) struct BuilderReceiver {
     pub(crate) local_addr: SocketAddr,
-    pub(crate) receiver: broadcast::Receiver<Value>,
+    pub(crate) receiver: mpsc::Receiver<Value>,
 }
 
 impl BuilderReceiver {
@@ -140,7 +141,7 @@ impl BuilderReceiver {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
 
-        let (sender, receiver) = broadcast::channel(128);
+        let (sender, receiver) = mpsc::channel(128);
 
         let router = Router::new().route("/", post(BuilderReceiver::receive)).with_state(sender);
 
@@ -159,32 +160,81 @@ impl BuilderReceiver {
         format!("http://{}", self.local_addr)
     }
 
+    #[tracing::instrument(skip_all, name = "builder_receiver")]
     async fn receive(
-        State(sender): State<broadcast::Sender<Value>>,
+        State(sender): State<mpsc::Sender<Value>>,
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<()> {
         let body = match maybe_decompress(true, &headers, body) {
             Ok(decompressed) => decompressed,
             Err(error) => {
-                tracing::error!("Error decompressing body: {:?}", error);
+                tracing::error!(?error, "failed to decompressing body");
                 return JsonRpcResponse::error(Value::Null, error);
             }
         };
 
-        let mut request: JsonRpcRequest<serde_json::Value> = match JsonRpcRequest::from_bytes(&body)
-        {
+        let mut request: JsonRpcRequest<serde_json::Value> = match serde_json::from_slice(&body) {
             Ok(request) => request,
-            Err(error) => return JsonRpcResponse::error(Value::Null, error),
+            Err(e) => {
+                tracing::error!(?e, ?body, "failed to decode body");
+                return JsonRpcResponse::error(Value::Null, JsonRpcError::ParseError);
+            }
         };
 
         let request_id = request.id.clone();
-        tracing::info!(id = ?request_id, method = request.method, "Received request");
+        tracing::info!(id = ?request_id, method = request.method, "received request");
 
-        tracing::info!("Sending request to builder");
-        tracing::debug!("Request: {:?}", request);
-        let _ = sender.send(request.take_single_param().unwrap());
+        tracing::info!("sending request to builder");
+        tracing::debug!(?request, "request");
+        if let Err(e) = sender.send(request.take_single_param().unwrap()).await {
+            panic!("failed to send received request to channel: {e}");
+        }
+
+        tracing::info!(id = ?request_id, "handled request");
 
         JsonRpcResponse::result(request_id, ())
     }
+}
+
+/// Spawns an HAProxy container with the given configuration and certificate directory.
+///
+/// # Arguments
+/// * `testdata_dir` - Path to the directory containing haproxy.cfg
+/// * `cert_dir` - Path to the directory containing server certificates
+///
+/// # Returns
+/// A running HAProxy container that will be cleaned up when dropped.
+#[cfg(target_os = "linux")]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) async fn spawn_haproxy(
+    haproxy_cfg: &std::path::Path,
+    cert_dir: &std::path::Path,
+) -> Result<ContainerAsync<GenericImage>, testcontainers::core::error::TestcontainersError> {
+    // Ensure the paths exist before mounting
+    if !haproxy_cfg.exists() {
+        panic!("haproxy.cfg not found at: {}", haproxy_cfg.display());
+    }
+    if !cert_dir.exists() {
+        panic!("Certificate directory not found at: {}", cert_dir.display());
+    }
+
+    let container = GenericImage::new("haproxy", "3.2.8")
+        // Wait for HAProxy to be ready
+        // .with_wait_for(WaitFor::message_on_stdout("Proxy started"))
+        // Mount the HAProxy configuration file
+        .with_mount(Mount::bind_mount(
+            haproxy_cfg.to_string_lossy().to_string(),
+            "/usr/local/etc/haproxy/haproxy.cfg",
+        ))
+        // Mount the certificates directory
+        .with_mount(Mount::bind_mount(
+            cert_dir.join("default.pem").to_string_lossy().to_string(),
+            "/usr/local/etc/haproxy/certs/default.pem",
+        ))
+        .with_network("host")
+        .start()
+        .await?;
+
+    Ok(container)
 }

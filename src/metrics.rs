@@ -1,7 +1,7 @@
 //! FlowProxy metrics with [`prometric_derive`].
 use std::{sync::LazyLock, time::Duration};
 
-use prometric::{process::ProcessCollector, Counter, Gauge, Histogram};
+use prometric::{process::ProcessCollector, Counter, Gauge, Summary};
 use prometric_derive::metrics;
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and
@@ -45,6 +45,9 @@ pub(crate) struct ForwarderMetrics {
     /// The total number of HTTP call failures.
     #[metric(labels = ["reason"])]
     http_call_failures: Counter,
+    /// The total number of TCP call failures.
+    #[metric(labels = ["reason"])]
+    tcp_call_failures: Counter,
     /// The current number of inflight HTTP requests.
     #[metric]
     inflight_requests: Gauge,
@@ -52,8 +55,8 @@ pub(crate) struct ForwarderMetrics {
     #[metric]
     json_rpc_decoding_failures: Counter,
     /// The duration of RPC calls in seconds.
-    #[metric(labels = ["order_type", "big_request"], buckets = [0.001, 0.0025, 0.005, 0.0075, 0.01, 0.02, 0.035, 0.05, 0.0625, 0.075, 0.0875, 0.100, 0.125, 0.150, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0, 1.5, 2.0])]
-    rpc_call_duration: Histogram,
+    #[metric(labels = ["order_type", "big_request"])]
+    rpc_call_duration: Summary,
     /// The total number of RPC call failures.
     #[metric(labels = ["rpc_code"])]
     rpc_call_failures: Counter,
@@ -78,23 +81,23 @@ pub(crate) struct IngressMetrics {
     #[metric(labels = ["order_type"])]
     order_cache_hit: Counter,
     /// Request body size in bytes.
-    #[metric(rename = "request_body_size_bytes", labels = ["method"], buckets = [128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0, 262144.0, 524288.0, 1048576.0, 2097152.0, 4194304.0])]
-    request_body_size: Histogram,
+    #[metric(rename = "request_body_size_bytes", labels = ["method"])]
+    request_body_size: Summary,
     /// The total number of validation errors.
     #[metric(labels = ["error"])]
     validation_errors: Counter,
     /// The duration of HTTP requests.
-    #[metric(labels = ["method", "path", "status"], buckets = [0.0001, 0.0005, 0.001, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
-    http_request_duration: Histogram,
+    #[metric(labels = ["method", "path", "status"])]
+    http_request_duration: Summary,
     /// The duration of RPC calls.
-    #[metric(labels = ["method", "priority"], buckets = [0.0001, 0.00025, 0.0005, 0.00075, 0.001, 0.0025, 0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
-    rpc_request_duration: Histogram,
+    #[metric(labels = ["method", "priority"])]
+    rpc_request_duration: Summary,
     /// The number of transactions per bundle.
-    #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
-    txs_per_bundle: Histogram,
+    #[metric]
+    txs_per_bundle: Summary,
     /// The number of transactions per MEV-share bundle.
-    #[metric(buckets = [0.0, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0])]
-    txs_per_mev_share_bundle: Histogram,
+    #[metric]
+    txs_per_mev_share_bundle: Summary,
     /// The total number of empty bundles.
     #[metric]
     total_empty_bundles: Counter,
@@ -111,8 +114,8 @@ pub(crate) struct IngressMetrics {
     #[metric]
     signer_cache_entry_count: Gauge,
     /// The one-way latency of an inbound RPC call (not round-trip).
-    #[metric(rename = "rpc_latency_oneway_seconds", labels = ["source", "method"], buckets = [0.0001, 0.00025, 0.0005, 0.00075, 0.001, 0.0025, 0.005, 0.010, 0.020, 0.035, 0.050, 0.075, 0.100, 0.150, 0.200, 0.500, 1.0])]
-    rpc_latency_oneway: Histogram,
+    #[metric(rename = "rpc_latency_oneway_seconds", labels = ["source", "method"])]
+    rpc_latency_oneway: Summary,
 }
 
 #[derive(Debug)]
@@ -148,8 +151,8 @@ pub struct ClickhouseMetrics {
     #[metric]
     batches_committed: Counter,
     /// Duration of Clickhouse batch commits in seconds.
-    #[metric(buckets = [0.020, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0, 4.0, 8.0, 16.0])]
-    batch_commit_time: Histogram,
+    #[metric]
+    batch_commit_time: Summary,
     /// Current size of ClickHouse backup in bytes.
     #[metric(labels = ["order", "backend"])]
     backup_size_bytes: Gauge,
@@ -180,26 +183,21 @@ pub(crate) struct ParquetMetrics {
     queue_size: Gauge,
 }
 
-const PROCESSING_TIME_BUCKETS: &[f64] = &[
-    0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.035, 0.05, 0.075, 0.1, 0.15, 0.2, 0.35, 0.5,
-    1.0, 2.0,
-];
-
 #[derive(Debug, Clone)]
 #[metrics(scope = "system")]
 pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
-    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    bundle_processing_time: Histogram,
+    #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    bundle_processing_time: Summary,
     /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    mev_share_bundle_processing_time: Histogram,
+    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
+    mev_share_bundle_processing_time: Summary,
     /// End-to-end transaction processing time in seconds.
-    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    transaction_processing_time: Histogram,
+    #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"])]
+    transaction_processing_time: Summary,
     /// End-to-end system order processing time in seconds.
-    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"], buckets = PROCESSING_TIME_BUCKETS)]
-    system_order_processing_time: Histogram,
+    #[metric(rename = "e2e_system_order_processing_time", labels = ["priority", "direction", "order_type", "big_request"])]
+    system_order_processing_time: Summary,
     /// Number of times the queue capacity was hit per priority.
     #[metric(labels = ["priority"])]
     queue_capacity_hits: Counter,
@@ -213,8 +211,8 @@ pub(crate) struct SystemMetrics {
 pub(crate) struct WorkerMetrics {
     /// The duration of worker tasks in seconds, per priority. Includes the time spent waiting for
     /// the permit.
-    #[metric(rename = "task_duration_seconds", labels = ["priority"], buckets = [0.00005, 0.0001, 0.00025, 0.0005, 0.00075, 0.001, 0.0025, 0.005, 0.010, 0.025, 0.050, 0.100, 0.200, 0.500, 1.0, 2.0])]
-    task_durations: Histogram,
+    #[metric(rename = "task_duration_seconds", labels = ["priority"])]
+    task_durations: Summary,
 }
 
 pub(crate) async fn spawn_process_collector() -> eyre::Result<()> {

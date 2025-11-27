@@ -2,43 +2,37 @@ use crate::{
     builderhub,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        FLASHBOTS_SIGNATURE_HEADER,
+        BUILDERNET_SIGNATURE_HEADER, FLASHBOTS_SIGNATURE_HEADER,
     },
-    jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
-    metrics::{ForwarderMetrics, SYSTEM_METRICS},
+    metrics::SYSTEM_METRICS,
     primitives::{
-        EncodedOrder, RawOrderMetadata, SystemBundle, SystemMevShareBundle, SystemTransaction,
-        UtcInstant, WithEncoding,
+        EncodedOrder, RawBundleBitcode, RawOrderMetadata, SystemOrder, UtcInstant, WithEncoding,
+        WithHeaders,
     },
     priority::{self, workers::PriorityWorkers, Priority},
     utils::UtcDateTimeHeader as _,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{keccak256, Address, B256};
 use alloy_signer::SignerSync as _;
 use alloy_signer_local::PrivateKeySigner;
 use axum::http::HeaderValue;
 use dashmap::DashMap;
-use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::{header::CONTENT_TYPE, HeaderMap, StatusCode};
-use rbuilder_utils::tasks::TaskExecutor;
-use reqwest::Url;
-use revm_primitives::keccak256;
+use hyper::{header::CONTENT_TYPE, HeaderMap};
 use serde_json::json;
-use std::{
-    fmt::Display,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, fmt::Display, sync::Arc};
 use time::UtcDateTime;
-use tokio::sync::mpsc;
 use tracing::*;
 
 pub mod client;
+pub mod http;
+pub mod tcp;
 
-use client::ClientPool;
+/// Sign and build the signature header in the form of `signer_address:signature`.
+fn build_signature_header(signer: &PrivateKeySigner, body: &[u8]) -> String {
+    let body_hash = keccak256(body);
+    let signature = signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
+    format!("{:?}:{}", signer.address(), signature)
+}
 
 #[derive(Debug)]
 pub struct IngressForwarders {
@@ -71,17 +65,35 @@ impl IngressForwarders {
             .map(|peer| peer.info.name.clone())
     }
 
-    /// Broadcast bundle to all forwarders.
-    pub(crate) async fn broadcast_bundle(&self, bundle: SystemBundle) {
-        let priority = bundle.metadata.priority;
-        let encoded_bundle = bundle.encode();
+    /// Broadcast a certain order to all forwarders.
+    pub(crate) async fn broadcast_order(&self, order: SystemOrder) {
+        // NOTE: this code is fairly complex and unoptimized due to keeping backwards
+        // compability with:
+        // 1. Local builder only accepting JSON-RPC encoded orders.
+        // 2. Some peers still on HTTP/2 and not TCP sockets.
+        // 3. Only bundles support binary encoding for TCP forwarder
+
+        let priority = order.priority();
+        let method_name = order.method_name().to_string();
+
+        // Start with JSON-RPC encoding, that's needed for the local builder anyway.
+        let mut encoded_order = order.clone().encode();
+
+        // If it's a bundle, create bitcode encoding for TCP forwarder
+        let encoding_binary = if let SystemOrder::Bundle(bundle) = &order {
+            let bundle = RawBundleBitcode::from(bundle.raw_bundle.as_ref());
+            let encoding = bitcode::encode(&bundle);
+            Some(Arc::new(encoding))
+        } else {
+            None
+        };
 
         // Create local request first
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
+        let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
         let signer = self.signer.clone();
-        let encoding = encoded_bundle.encoding.clone();
+        let encoding = encoded_order.encoding.clone();
         let signature_header = self
             .workers
             .spawn_with_priority(priority, move || {
@@ -89,78 +101,56 @@ impl IngressForwarders {
             })
             .await;
 
-        // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(
-            encoded_bundle.into(),
-            signature_header,
-            UtcDateTime::now(),
-        ));
+        // If we have TCP encoding, sign that as well
+        let maybe_signature_header_tcp = if let Some(encoding) = encoding_binary.clone() {
+            let signer = self.signer.clone();
+            let sig = self
+                .workers
+                .spawn_with_priority(priority, move || {
+                    build_signature_header(&signer, encoding.as_ref())
+                })
+                .await;
+            Some(sig)
+        } else {
+            None
+        };
 
-        debug!(peers = %self.peers.len(), "sending bundle to peers");
-        self.broadcast(forward);
-    }
+        let headers = ForwardingRequest::create_headers(
+            priority,
+            Some(signature_header),
+            Some(UtcDateTime::now()),
+        );
 
-    /// Broadcast MEV share bundle to all forwarders.
-    pub(crate) async fn broadcast_mev_share_bundle(
-        &self,
-        priority: Priority,
-        bundle: SystemMevShareBundle,
-    ) {
-        let encoded_bundle = bundle.encode();
-        // Create local request first
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_bundle.clone().into()));
-        let _ = self.local.send(priority, local);
+        // Create headers for TCP forwarder
+        // FIX: remove unwrap
+        let mut headers_strings = headers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
+            .collect::<HashMap<String, String>>();
+        headers_strings.insert("method".to_string(), method_name);
+        // In case we have binary encoding, we have to overwrite the signature header
+        if let Some(sig) = maybe_signature_header_tcp {
+            tracing::debug!(?sig, "built TCP signature header for order");
+            headers_strings.insert(BUILDERNET_SIGNATURE_HEADER.to_string().to_lowercase(), sig);
+        }
 
-        let signer = self.signer.clone();
-        let encoding = encoded_bundle.encoding.clone();
-        let signature_header = self
-            .workers
-            .spawn_with_priority(priority, move || {
-                build_signature_header(&signer, encoding.as_ref())
-            })
-            .await;
+        // Now we can finally create the payload sent to TCP forwarder
+        let payload = WithHeaders {
+            headers: headers_strings,
+            data: encoding_binary.unwrap_or(encoded_order.encoding.clone()),
+        };
+        let data = bitcode::encode(&payload);
 
-        // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(
-            encoded_bundle.into(),
-            signature_header,
-            UtcDateTime::now(),
-        ));
+        encoded_order.encoding_tcp_forwarder = Some(data);
 
-        debug!(peers = %self.peers.len(), "sending bundle to peers");
-        self.broadcast(forward);
-    }
+        let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
-    /// Broadcast transaction to all forwarders.
-    pub(crate) async fn broadcast_transaction(&self, transaction: SystemTransaction) {
-        let priority = transaction.priority;
-        let encoded_transaction = transaction.encode();
-
-        let local = Arc::new(ForwardingRequest::user_to_local(encoded_transaction.clone().into()));
-        let _ = self.local.send(local.priority(), local);
-
-        let signer = self.signer.clone();
-        let encoding = encoded_transaction.encoding.clone();
-        let signature_header = self
-            .workers
-            .spawn_with_priority(priority, move || {
-                build_signature_header(&signer, encoding.as_ref())
-            })
-            .await;
-
-        // Difference: we add the signature header.
-        let forward = Arc::new(ForwardingRequest::user_to_system(
-            encoded_transaction.into(),
-            signature_header,
-            UtcDateTime::now(),
-        ));
-
-        debug!(peers = %self.peers.len(), "sending transaction to peers");
-        self.broadcast(forward);
+        debug!(peers = %self.peers.len(), "sending order to peers");
+        self.broadcast_inner(forward);
     }
 
     /// Broadcast request to all peers.
-    fn broadcast(&self, forward: Arc<ForwardingRequest>) {
+    fn broadcast_inner(&self, forward: Arc<ForwardingRequest>) {
         for entry in self.peers.iter() {
             let handle = entry.value();
             if let Err(e) = handle.sender.send(forward.priority(), forward.clone()) {
@@ -185,11 +175,16 @@ impl IngressForwarders {
             "params": [param]
         });
 
+        tracing::debug!(?json, "sending system order to local forwarder");
+
         let body = serde_json::to_vec(&json).expect("to JSON serialize request");
         // TODO: raw orders have no priority, but this will change, assume medium for now
         let raw_order = RawOrderMetadata { priority: Priority::Medium, received_at, hash };
-        let order =
-            EncodedOrder::SystemOrder(WithEncoding { inner: raw_order, encoding: Arc::new(body) });
+        let order = EncodedOrder::Raw(WithEncoding {
+            inner: raw_order,
+            encoding: Arc::new(body),
+            encoding_tcp_forwarder: None,
+        });
 
         let local = Arc::new(ForwardingRequest::system_to_local(order));
         let _ = self.local.send(priority, local);
@@ -202,37 +197,6 @@ pub struct PeerHandle {
     pub info: builderhub::Peer,
     /// Sender to the peer forwarder.
     pub sender: priority::channel::UnboundedSender<Arc<ForwardingRequest>>,
-}
-
-pub fn spawn_forwarder(
-    name: String,
-    url: String,
-    client: ClientPool, // request client to be reused for http senders
-    task_executor: &TaskExecutor,
-) -> eyre::Result<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
-    let (request_tx, request_rx) = priority::channel::unbounded_channel();
-    match Url::parse(&url)?.scheme() {
-        "http" | "https" => {
-            info!(%name, %url, "Spawning HTTP forwarder");
-            let (forwarder, decoder) =
-                HttpForwarder::new(client.clone(), name.clone(), url, request_rx);
-            task_executor.spawn(forwarder);
-            task_executor.spawn(decoder.run());
-        }
-
-        scheme => {
-            error!(scheme = %scheme, url = %url, builder = %name, "Unsupported URL scheme");
-            eyre::bail!("unsupported url scheme {scheme}. url: {url}. builder: {name}")
-        }
-    }
-    Ok(request_tx)
-}
-
-/// Sign and build the signature header in the form of `signer_address:signature`.
-fn build_signature_header(signer: &PrivateKeySigner, body: &[u8]) -> String {
-    let body_hash = keccak256(body);
-    let signature = signer.sign_message_sync(format!("{body_hash:?}").as_bytes()).unwrap();
-    format!("{:?}:{}", signer.address(), signature)
 }
 
 /// The direction of the forwarding request.
@@ -289,16 +253,7 @@ impl ForwardingRequest {
         }
     }
 
-    pub fn user_to_system(
-        encoded_order: EncodedOrder,
-        signature_header: String,
-        sent_at_header: UtcDateTime,
-    ) -> Self {
-        let headers = Self::create_headers(
-            encoded_order.priority(),
-            Some(signature_header),
-            Some(sent_at_header),
-        );
+    pub fn user_to_system(encoded_order: EncodedOrder, headers: HeaderMap) -> Self {
         Self {
             encoded_order,
             headers,
@@ -354,234 +309,17 @@ impl ForwardingRequest {
         self.encoded_order.priority()
     }
 
+    pub fn encoded_size(&self) -> usize {
+        self.encoded_order.encoding().len()
+    }
+
     pub fn is_big(&self) -> bool {
-        self.encoded_order.encoding().len() > BIG_REQUEST_SIZE_THRESHOLD_KB
+        self.encoded_size() > BIG_REQUEST_SIZE_THRESHOLD_KB
     }
 
     /// Returns the hash of the encoded order.
     pub fn hash(&self) -> B256 {
         self.encoded_order.hash()
-    }
-}
-
-/// The response received by the [`HttpForwarder`] after sending a request.
-#[derive(Debug)]
-struct ForwarderResponse<Ok, Err> {
-    /// Whether this was a big request.
-    is_big: bool,
-    /// The type of the order.
-    order_type: &'static str,
-    /// The hash of the order forwarded.
-    hash: B256,
-    /// The instant at which request was sent.
-    start_time: Instant,
-    /// Builder response.
-    response: Result<Ok, Err>,
-
-    /// The parent span associated with this response.
-    span: tracing::Span,
-}
-
-type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
-
-/// An HTTP forwarder that forwards requests to a peer.
-struct HttpForwarder {
-    client: ClientPool,
-    /// The name of the builder we're forwarding to.
-    peer_name: String,
-    /// The URL of the peer.
-    peer_url: String,
-    /// The receiver of forwarding requests.
-    request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
-    /// The sender to decode [`reqwest::Response`] errors.
-    error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
-    /// The pending responses that need to be processed.
-    pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
-    /// The metrics for the forwarder.
-    metrics: ForwarderMetrics,
-}
-
-impl HttpForwarder {
-    fn new(
-        client: ClientPool,
-        name: String,
-        url: String,
-        request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
-    ) -> (Self, ResponseErrorDecoder) {
-        let (error_decoder_tx, error_decoder_rx) = mpsc::channel(8192);
-        let metrics = ForwarderMetrics::builder().with_label("peer_name", name.clone()).build();
-        let decoder = ResponseErrorDecoder {
-            peer_name: name.clone(),
-            peer_url: url.clone(),
-            rx: error_decoder_rx,
-            metrics: metrics.clone(),
-        };
-
-        (
-            Self {
-                client,
-                peer_name: name,
-                peer_url: url,
-                request_rx,
-                pending: FuturesUnordered::new(),
-                error_decoder_tx,
-                metrics,
-            },
-            decoder,
-        )
-    }
-
-    /// Send an HTTP request to the peer, returning a future that resolves to the response.
-    fn send_http_request(
-        &self,
-        request: Arc<ForwardingRequest>,
-    ) -> RequestFut<reqwest::Response, reqwest::Error> {
-        let client_pool = self.client.clone();
-        let peer_url = self.peer_url.clone();
-
-        let request_span = request.span.clone();
-        let span = tracing::info_span!(parent: request_span.clone(), "http_forwarder_request", peer_url = %self.peer_url, is_big = request.is_big());
-
-        let fut = async move {
-            let direction = request.direction;
-            let is_big = request.is_big();
-            let hash = request.hash();
-
-            // Try to avoid cloning the body and headers if there is only one reference.
-            let (order, headers) = Arc::try_unwrap(request).map_or_else(
-                |req| (req.encoded_order.clone(), req.headers.clone()),
-                |inner| (inner.encoded_order, inner.headers),
-            );
-
-            record_e2e_metrics(&order, &direction, is_big);
-
-            let order_type = order.order_type();
-            let start_time = Instant::now();
-            let response = client_pool
-                .client()
-                .post(peer_url)
-                .body(order.encoding().to_vec())
-                .headers(headers)
-                .send()
-                .await;
-            tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
-
-            ForwarderResponse { start_time, response, is_big, order_type, hash, span: request_span }
-        } // We first want to enter the parent span, then the local span.
-        .instrument(span);
-
-        Box::pin(fut)
-    }
-
-    #[tracing::instrument(skip_all, name = "http_forwarder_response"
-        fields(
-            peer_url = %self.peer_url,
-            is_big = response.is_big,
-            elapsed = tracing::field::Empty,
-            status = tracing::field::Empty,
-    ))]
-    fn on_response(&mut self, response: ForwarderResponse<reqwest::Response, reqwest::Error>) {
-        let ForwarderResponse {
-            start_time,
-            response: response_result,
-            order_type,
-            is_big,
-            hash,
-            ..
-        } = response;
-        let elapsed = start_time.elapsed();
-
-        tracing::Span::current().record("elapsed", tracing::field::debug(&elapsed));
-
-        match response_result {
-            Ok(response) => {
-                let status = response.status();
-                tracing::Span::current().record("status", tracing::field::debug(&status));
-
-                // Print warning if the RPC call took more than 1 second.
-                if elapsed > Duration::from_secs(1) {
-                    warn!("long rpc call");
-                }
-
-                if status.is_success() {
-                    trace!("received success response");
-
-                    if status != StatusCode::OK {
-                        warn!("non-ok status code");
-                    }
-
-                    // Only record success if the status is OK.
-                    self.metrics
-                        .rpc_call_duration(order_type, is_big.to_string())
-                        .observe(elapsed.as_secs_f64());
-                } else {
-                    // If we have a non-OK status code, also record it.
-                    error!("failed to forward request");
-                    let reason =
-                        status.canonical_reason().map(String::from).unwrap_or(status.to_string());
-
-                    self.metrics.http_call_failures(reason).inc();
-
-                    if let Err(e) =
-                        self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
-                    {
-                        error!(?e, "failed to send error response to decoder");
-                    }
-                }
-            }
-            Err(error) => {
-                error!("error forwarding request");
-
-                // Parse the reason, which is either the status code reason of the error message
-                // itself. If the request fails for non-network reasons, the status code may be
-                // None.
-                let reason = error
-                    .status()
-                    .and_then(|s| s.canonical_reason().map(String::from))
-                    .unwrap_or(format!("{error:?}"));
-
-                if error.is_connect() {
-                    warn!(?reason, "connection error");
-                    self.metrics.http_connect_failures(reason).inc();
-                } else {
-                    self.metrics.http_call_failures(reason).inc();
-                }
-            }
-        }
-    }
-}
-
-impl Future for HttpForwarder {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.get_mut();
-
-        loop {
-            // First poll for completed work.
-            if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
-                response.span.clone().in_scope(|| {
-                    this.on_response(response);
-                });
-                continue;
-            }
-
-            // Then accept new requests.
-            if let Poll::Ready(maybe_request) = this.request_rx.poll_recv(cx) {
-                let Some(request) = maybe_request else {
-                    info!(name = %this.peer_name, "terminating forwarder");
-                    return Poll::Ready(());
-                };
-
-                let fut = this.send_http_request(request);
-                this.pending.push(fut);
-
-                this.metrics.inflight_requests().set(this.pending.len());
-                continue;
-            }
-
-            return Poll::Pending;
-        }
     }
 }
 
@@ -615,7 +353,7 @@ fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_
                 )
                 .observe(order.received_at().elapsed().as_secs_f64());
         }
-        EncodedOrder::SystemOrder(_) => {
+        EncodedOrder::Raw(_) => {
             SYSTEM_METRICS
                 .system_order_processing_time(
                     order.priority().as_str(),
@@ -625,81 +363,5 @@ fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_
                 )
                 .observe(order.received_at().elapsed().as_secs_f64());
         }
-    }
-}
-
-/// The input to the error decoder, containing the response to the request and its associated order
-/// hash.
-#[derive(Debug)]
-pub struct ErrorDecoderInput {
-    /// The hash of the order forwarded.
-    pub hash: B256,
-    /// The error response to be decoded.
-    pub response: reqwest::Response,
-
-    /// The tracing span associated with this data.
-    pub span: tracing::Span,
-}
-
-impl ErrorDecoderInput {
-    /// Create a new error decoder input.
-    pub fn new(hash: B256, response: reqwest::Response) -> Self {
-        Self { hash, response, span: tracing::Span::current() }
-    }
-
-    /// Set the tracing span for this input.
-    pub fn with_span(self, span: tracing::Span) -> Self {
-        Self { span, ..self }
-    }
-}
-
-/// A [`reqwest::Response`] error decoder, associated to a certain [`HttpForwarder`] which traces
-/// errors from client error responses.
-#[derive(Debug)]
-pub struct ResponseErrorDecoder {
-    /// The name of the builder
-    pub peer_name: String,
-    /// The url of the builder
-    pub peer_url: String,
-    /// The receiver of the error responses.
-    pub rx: mpsc::Receiver<ErrorDecoderInput>,
-    /// Metrics from the associated forwarder.
-    pub(crate) metrics: ForwarderMetrics,
-}
-
-impl ResponseErrorDecoder {
-    #[tracing::instrument(skip_all, name = "response_error_decode")]
-    async fn decode(&self, input: ErrorDecoderInput) {
-        match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
-            Ok(body) => {
-                if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                    error!(%code, %message, "decoded error response from builder");
-                    self.metrics.rpc_call_failures(code.to_string()).inc();
-                }
-            }
-            Err(e) => {
-                warn!(?e, "failed to decode response into json-rpc");
-                self.metrics.json_rpc_decoding_failures().inc();
-            }
-        }
-    }
-
-    /// Run the error decoder actor in loop.
-    pub async fn run(mut self) {
-        while let Some(input) = self.rx.recv().await {
-            let span = input.span.clone();
-            self.decode(input).instrument(span).await;
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn parse_url_scheme() {
-        assert_eq!(Url::parse("http://127.0.0.1:8080").unwrap().scheme(), "http");
-        assert_eq!(Url::parse("https://127.0.0.1:8080").unwrap().scheme(), "https");
     }
 }
