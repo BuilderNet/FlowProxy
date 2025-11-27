@@ -6,7 +6,7 @@ use crate::{
         ForwardingRequest, PeerHandle,
     },
     metrics::BuilderHubMetrics,
-    primitives::{PeerProxyInfo, Protocol},
+    primitives::PeerProxyInfo,
     priority, DEFAULT_SYSTEM_PORT,
 };
 use alloy_primitives::Address;
@@ -270,7 +270,6 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     /// Get information about a peer's running proxy instance, calling the `/infoz` endpoint.
     ///
     /// On any error, returns `None`.
-    #[tracing::instrument(skip_all)]
     async fn proxy_info(&self, peer: &Peer) -> Option<PeerProxyInfo> {
         let client_builder = default_http_builder();
 
@@ -298,7 +297,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let peer_info = match response.json::<PeerProxyInfo>().await {
             Ok(m) => m,
             Err(e) => {
-                tracing::error!(?e, "failed to deserialize info");
+                tracing::error!(?e, "failed to deserialize infoz json response");
                 return None;
             }
         };
@@ -335,15 +334,15 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             return;
         }
 
-        let (peer_sender_maybe, protocol) = if let Some(proxy_info) = self.proxy_info(&peer).await {
-            (self.peer_tcp_sender(&peer, &proxy_info).await, Protocol::Tcp)
+        let peer_sender_maybe = if let Some(proxy_info) = self.proxy_info(&peer).await {
+            self.peer_tcp_sender(&peer, &proxy_info).await
         } else {
             tracing::info!("falling back to http forwarder");
-            (self.peer_http_sender(&peer).await, Protocol::Http)
+            self.peer_http_sender(&peer).await
         };
 
         if let Some(sender) = peer_sender_maybe {
-            self.peers.insert(peer.name.clone(), PeerHandle { info: peer, sender, protocol });
+            self.peers.insert(peer.name.clone(), PeerHandle { info: peer, sender });
             tracing::debug!(peers = self.peers.len(), "inserted configuration");
         }
     }

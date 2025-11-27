@@ -806,13 +806,6 @@ pub struct WithHeaders<T> {
     pub data: T,
 }
 
-/// The protocol used to communicate with a peer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Protocol {
-    Tcp,
-    Http,
-}
-
 /// Bitcode-friendly representation of [`RawBundle`].
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode)]
 pub struct RawBundleBitcode {

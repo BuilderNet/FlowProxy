@@ -1,8 +1,6 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
-use alloy_signer::Signer as _;
-use alloy_signer_local::LocalSigner;
 use flate2::{write::GzEncoder, Compression};
 use flowproxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
@@ -11,7 +9,6 @@ use flowproxy::{
 };
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use reqwest::{header, StatusCode};
-use revm_primitives::keccak256;
 use serde_json::json;
 use std::io::Write;
 
@@ -31,82 +28,6 @@ mod assert {
             JsonRpcResponseTy::Error { code: expected.code(), message: expected }
         );
     }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn ingress_spam() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    use std::sync::Arc;
-
-    // Build client once
-    let client = Arc::new(
-        reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .danger_accept_invalid_hostnames(true)
-            .pool_idle_timeout(std::time::Duration::from_secs(60))
-            .tcp_nodelay(true)
-            .build()
-            .unwrap(),
-    );
-
-    // Pre-create signer once
-    let signer = Arc::new(LocalSigner::random());
-
-    // Spawn a fixed number of spam workers (per-thread parallelism)
-    let workers = 4;
-    for _ in 0..workers {
-        let client = client.clone();
-        let signer = signer.clone();
-
-        tokio::spawn(async move {
-            loop {
-                // IMPORTANT: rng is created AND dropped before any await
-                let (body, sighash) = {
-                    let mut rng = rand::rng(); // ThreadRng (not Send)
-
-                    let bundle = RawBundle::random(&mut rng);
-
-                    let request = serde_json::json!({
-                        "id": 0,
-                        "jsonrpc": "2.0",
-                        "method": "eth_sendBundle",
-                        "params": [bundle]
-                    });
-
-                    let body = serde_json::to_vec(&request).unwrap();
-                    let sighash = crate::keccak256(&body);
-                    (body, sighash)
-                };
-                let signature = signer.sign_message(sighash.as_slice()).await.unwrap();
-
-                let signature_header = format!("{:?}:{}", signer.address(), signature);
-
-                // Send request inline (not spawning new tasks)
-                // This keeps number of concurrent TCP requests bounded
-                match client
-                    .post("https://100.86.155.122:5544")
-                    .header(header::CONTENT_TYPE, "application/json")
-                    .header(FLASHBOTS_SIGNATURE_HEADER, &signature_header)
-                    .body(body)
-                    .send()
-                    .await
-                {
-                    Ok(res) => {
-                        let status = res.status();
-                        let text = res.text().await.unwrap();
-                        tracing::info!("Spam response: {:?}, text: {text}", status);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Request error: {:?}", e);
-                    }
-                }
-            }
-        });
-    }
-
-    // Let test run for some time
-    tokio::time::sleep(std::time::Duration::from_secs(120)).await;
 }
 
 #[tokio::test]
