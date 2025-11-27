@@ -80,13 +80,16 @@ impl IngressForwarders {
         let mut encoded_order = order.clone().encode();
 
         // If it's a bundle, create bitcode encoding for TCP forwarder
-        let encoding_binary = if let SystemOrder::Bundle(bundle) = &order {
-            let bundle = RawBundleBitcode::from(bundle.raw_bundle.as_ref());
-            let encoding = bitcode::encode(&bundle);
-            Some(Arc::new(encoding))
-        } else {
-            None
-        };
+        let encoding_binary = match &order {
+            SystemOrder::Bundle(bundle) => {
+                let bundle = RawBundleBitcode::from(bundle.raw_bundle.as_ref());
+                Some(bitcode::encode(&bundle))
+            }
+            // Raw txs are forwarded as is, no need to re-encode raw bytes.
+            SystemOrder::Transaction(tx) => Some(tx.raw.to_vec()),
+            _ => None,
+        }
+        .map(Arc::new);
 
         // Create local request first
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));

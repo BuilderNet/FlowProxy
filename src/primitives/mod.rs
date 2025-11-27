@@ -28,6 +28,7 @@ use rbuilder_primitives::{
 use revm_primitives::B256;
 use serde::Serialize;
 use serde_json::json;
+use strum::AsRefStr;
 use uuid::Uuid;
 
 use crate::{
@@ -590,7 +591,7 @@ pub struct BundleReceipt {
 }
 
 /// Decode pooled Ethereum transaction from raw bytes.
-pub fn decode_transaction(raw: &Bytes) -> Eip2718Result<PooledTransaction> {
+pub fn decode_transaction(raw: &[u8]) -> Eip2718Result<PooledTransaction> {
     if raw.is_empty() {
         return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort));
     }
@@ -921,6 +922,72 @@ impl From<RawBundleBitcode> for RawBundle {
             metadata: RawBundleMetadata::from(r.metadata),
             txs: r.txs.iter().map(|v| v.clone().into()).collect(),
         }
+    }
+}
+
+/// The type of data contained in a [`TcpResponse`].
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, From)]
+pub enum TcpReponseType {
+    NoData,
+    String(String),
+    Hash([u8; 32]),
+}
+
+/// Status codes for a [`TcpResponse`].
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode, AsRefStr, From, PartialEq, Eq)]
+pub enum TcpResponseStatus {
+    Success = 0,
+    ErrorInternal = 1,
+    ErrorDecoding = 2,
+    ErrorMissingArguments = 3,
+    ErrorInvalidSignature = 4,
+    ErrorUnknownArgument = 5,
+}
+
+/// A flexible, versioned response structure to use for communication over TCP for the system API.
+///
+/// To allow for future extensibility, the response contains a [`TcpResponse::status`] code and a
+/// [`TcpResponse::data`] tagged field to identify the type of response.
+#[derive(Debug, Clone, bitcode::Encode, bitcode::Decode)]
+pub struct TcpResponse {
+    /// The stauts code of the response. A value of zero is reserved for success.
+    pub status: TcpResponseStatus,
+    /// The data payload of the response.
+    pub data: TcpReponseType,
+}
+
+impl TcpResponse {
+    /// Create a no-data response with the given status.
+    pub fn no_data(status: TcpResponseStatus) -> Self {
+        Self { status, data: TcpReponseType::NoData }
+    }
+
+    /// Create an acknowledgment response with no data.
+    pub fn ack() -> Self {
+        Self::no_data(TcpResponseStatus::Success)
+    }
+
+    /// Create a success response with the given data.
+    pub fn success(data: impl Into<TcpReponseType>) -> Self {
+        Self { status: TcpResponseStatus::Success, data: data.into() }
+    }
+
+    /// Create an internal error response.
+    pub fn error_internal() -> Self {
+        Self::no_data(TcpResponseStatus::ErrorInternal)
+    }
+
+    /// Create an error response with the given status code and message.
+    pub fn error_message(status: TcpResponseStatus, message: impl Into<String>) -> Self {
+        Self { status, data: message.into().into() }
+    }
+
+    pub fn error_decoding(message: String) -> Self {
+        Self::error_message(TcpResponseStatus::ErrorDecoding, message)
+    }
+
+    pub fn error_invalid_signature() -> Self {
+        Self::no_data(TcpResponseStatus::ErrorInvalidSignature)
     }
 }
 

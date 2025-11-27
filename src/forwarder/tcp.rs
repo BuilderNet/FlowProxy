@@ -2,6 +2,7 @@ use crate::{
     forwarder::{client::ReqSocketIpBucketPool, record_e2e_metrics, ForwardingRequest},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
+    primitives::{TcpResponse, TcpResponseStatus},
     priority::{self},
 };
 use alloy_primitives::B256;
@@ -153,23 +154,23 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
             .rpc_call_duration(order_type, is_big.to_string())
             .observe(elapsed.as_secs_f64());
 
-        let response =
-            match serde_json::from_slice::<JsonRpcResponse<serde_json::Value>>(response.as_ref()) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!(?e, "failed to deserialize response");
-                    return;
-                }
-            };
+        let response = match bitcode::decode::<TcpResponse>(&response) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(?e, "failed to deserialize response");
+                return;
+            }
+        };
 
         // Print warning if the RPC call took more than 1 second.
         if elapsed > Duration::from_secs(1) {
             tracing::warn!("long rpc call");
         }
 
-        if let JsonRpcResponseTy::Error { code, message } = response.result_or_error {
-            tracing::error!(?code, ?message, "received error response");
-            self.metrics.rpc_call_failures(code.to_string()).inc();
+        if response.status != TcpResponseStatus::Success {
+            tracing::error!(status = response.status.as_ref(), data = ?response.data, "received error response");
+            // TODO:
+            // self.metrics.rpc_call_failures(code.to_string()).inc();
         }
     }
 }
