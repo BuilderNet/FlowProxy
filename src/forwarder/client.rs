@@ -6,7 +6,7 @@ use std::{
     ops::Range,
     sync::{
         atomic::{AtomicU8, Ordering},
-        Arc, LazyLock,
+        Arc,
     },
     time::Duration,
 };
@@ -92,13 +92,18 @@ pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
 /// A mapping of size ranges to [`T`].
 pub type Buckets<T> = HashMap<Range<usize>, T>;
 
-pub static DEFAULT_TCP_SOCKET_BUCKETS_BYTES: LazyLock<Buckets<usize>> =
-    LazyLock::<Buckets<usize>>::new(|| {
-        let mut map = HashMap::new();
-        map.insert(0..32_768, 4); // Up to 32KiB
-        map.insert(32_768..usize::MAX, 2); // 32KB to 128KB
-        map
-    });
+/// A threshold for distnguishing between small and big messages in [`Buckets`] for
+/// [`ReqSocketIpBucketPool`].
+pub const BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES: usize = 32_768; // 32 KiB
+
+/// Create TCP client buckets with the given number of small and big clients, with a
+/// [`BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES`] threshold.
+pub fn tcp_clients_buckets(num_small: usize, num_big: usize) -> Buckets<usize> {
+    let mut map = HashMap::new();
+    map.insert(0..BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES, num_small);
+    map.insert(BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES..usize::MAX, num_big);
+    map
+}
 
 /// A pool of TCP [`ReqSocket`] clients, with TLS support.
 #[allow(missing_debug_implementations)]
@@ -115,14 +120,7 @@ impl<T: Transport<SocketAddr>> Clone for ReqSocketIpBucketPool<T> {
 }
 
 impl<T: Transport<SocketAddr>> ReqSocketIpBucketPool<T> {
-    pub fn new(make_socket: impl Fn() -> ReqSocketIp<T>) -> Self {
-        Self::new_with_buckets(DEFAULT_TCP_SOCKET_BUCKETS_BYTES.clone(), make_socket)
-    }
-
-    pub fn new_with_buckets(
-        buckets: Buckets<usize>,
-        make_socket: impl Fn() -> ReqSocketIp<T>,
-    ) -> Self {
+    pub fn new(buckets: Buckets<usize>, make_socket: impl Fn() -> ReqSocketIp<T>) -> Self {
         let clients = buckets
             .iter()
             .map(|(range, &num_sockets)| {

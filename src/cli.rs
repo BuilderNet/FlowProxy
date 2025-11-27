@@ -261,14 +261,32 @@ pub struct OrderflowIngressArgs {
     )]
     pub peer_update_interval_s: u64,
 
-    /// For each peer, the size of the HTTP client pool used to forward requests.
+    /// For each peer, the size of the HTTP client pool used to forward requests. Deprecated.
     #[clap(
         long = "http.client-pool-size",
         default_value_t = NonZero::new(8).expect("non-zero"),
         env = "CLIENT_POOL_SIZE",
         id = "CLIENT_POOL_SIZE"
     )]
-    pub client_pool_size: NonZero<usize>,
+    pub http_client_pool_size: NonZero<usize>,
+
+    /// For each peer, the number of TCP clients to use for forwarding small messages (<32KiB).
+    #[clap(
+        long = "tcp.small-clients",
+        default_value_t = NonZero::new(4).expect("non-zero"),
+        env = "TCP_SMALL_CLIENTS",
+        id = "TCP_SMALL_CLIENTS"
+    )]
+    pub tcp_small_clients: NonZero<usize>,
+
+    /// For each peer, the number of TCP clients to use for forwarding big messages (>=32KiB).
+    #[clap(
+        long = "tcp.big-clients",
+        default_value_t = NonZero::new(2).expect("non-zero"),
+        env = "TCP_BIG_CLIENTS",
+        id = "TCP_BIG_CLIENTS"
+    )]
+    pub tcp_big_clients: NonZero<usize>,
 
     /// The number of IO worker threads used in Tokio.
     #[clap(long, default_value_t = 4, env = "IO_THREADS", id = "IO_THREADS")]
@@ -312,7 +330,9 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            client_pool_size: NonZero::new(8).unwrap(),
+            http_client_pool_size: NonZero::new(8).expect("non-zero"),
+            tcp_small_clients: NonZero::new(4).expect("non-zero"),
+            tcp_big_clients: NonZero::new(2).expect("non-zero"),
             io_threads: 4,
             compute_threads: 4,
             cache: CacheArgs {

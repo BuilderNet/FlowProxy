@@ -131,14 +131,14 @@ mod linux {
         let signer2 = PrivateKeySigner::random();
 
         let mut args = OrderflowIngressArgs::default().disable_builder_hub();
-        args.private_key_pem_file = cert_dir.join("default.key");
-        args.certificate_pem_file = cert_dir.join("default.crt");
+        args.private_key_pem_file = Some(cert_dir.join("default.key"));
+        args.certificate_pem_file = Some(cert_dir.join("default.crt"));
         args.orderflow_signer = Some(signer1);
-        args.client_pool_size = NonZero::new(1).unwrap();
+        args.http_client_pool_size = NonZero::new(1).unwrap();
 
         let mut args2 = args.clone();
-        args2.private_key_pem_file = cert_dir.join("default.key");
-        args2.certificate_pem_file = cert_dir.join("default.crt");
+        args2.private_key_pem_file = Some(cert_dir.join("default.key"));
+        args2.certificate_pem_file = Some(cert_dir.join("default.crt"));
         args2.orderflow_signer = Some(signer2.clone());
         // Listen on port 5552, the TCP receiver
         args2.system_listen_addr_http = SocketAddr::from_str("127.0.0.1:5542").unwrap();

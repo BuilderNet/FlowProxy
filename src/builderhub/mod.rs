@@ -1,6 +1,8 @@
 use crate::{
     forwarder::{
-        client::{default_http_builder, HttpClientPool, ReqSocketIpBucketPool},
+        client::{
+            default_http_builder, tcp_clients_buckets, HttpClientPool, ReqSocketIpBucketPool,
+        },
         http::spawn_http_forwarder,
         tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
@@ -190,7 +192,11 @@ pub struct PeersUpdaterConfig {
     /// Whether to disable spawning order forwarders to peers.
     pub disable_forwarding: bool,
     /// For each peer indicates the size of the client pool used to connect to it.
-    pub client_pool_size: NonZero<usize>,
+    pub http_client_pool_size: NonZero<usize>,
+    /// Number of TCP clients to use per peer for small messages.
+    pub tcp_small_clients: NonZero<usize>,
+    /// Number of TCP clients to use per peer for big messages.
+    pub tcp_big_clients: NonZero<usize>,
     /// Private key PEM file for client authentication (mTLS)
     pub private_key_pem_file: Option<PathBuf>,
     /// Certificate PEM file for client authentication (mTLS)
@@ -432,7 +438,11 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             socket
         };
 
-        let client_pool = ReqSocketIpBucketPool::new(make_socket);
+        let buckets = tcp_clients_buckets(
+            self.config.tcp_small_clients.get(),
+            self.config.tcp_big_clients.get(),
+        );
+        let client_pool = ReqSocketIpBucketPool::new(buckets, make_socket);
 
         let sender =
             spawn_tcp_forwarder(peer.name.clone(), sock_addr, client_pool, &self.task_executor);
@@ -446,7 +456,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         peer: &Peer,
     ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
         // Create a client pool.
-        let client_pool = HttpClientPool::new(self.config.client_pool_size, || {
+        let client_pool = HttpClientPool::new(self.config.http_client_pool_size, || {
             let client_builder = default_http_builder();
 
             // If the TLS certificate is present, use HTTPS and configure the client to use it.

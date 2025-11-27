@@ -121,7 +121,9 @@ pub async fn run_with_listeners(
     let peer_update_config = PeersUpdaterConfig {
         local_signer,
         disable_forwarding: args.disable_forwarding,
-        client_pool_size: args.client_pool_size,
+        http_client_pool_size: args.http_client_pool_size,
+        tcp_small_clients: args.tcp_small_clients,
+        tcp_big_clients: args.tcp_big_clients,
         certificate_pem_file: args.certificate_pem_file,
         private_key_pem_file: args.private_key_pem_file,
     };

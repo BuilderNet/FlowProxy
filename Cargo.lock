@@ -5167,7 +5167,8 @@ dependencies = [
 [[package]]
 name = "prometric"
 version = "0.2.0"
-source = "git+https://github.com/chainbound/prometric?branch=main#7f2f7aea880eb8cac4d68a97e5bd7c5c35ab706e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f2b4e9b64aaf27ec291d39bdcb8a935213ab1b3bbfc6a313eeb46ce41ed2c45"
 dependencies = [
  "arc-cell",
  "hyper",
@@ -5185,7 +5186,8 @@ dependencies = [
 [[package]]
 name = "prometric-derive"
 version = "0.2.0"
-source = "git+https://github.com/chainbound/prometric?branch=main#7f2f7aea880eb8cac4d68a97e5bd7c5c35ab706e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eba6e775bc42cc69bf78f26c902f4af44a84cb2705cf558b66a4565ef5e561ef"
 dependencies = [
  "darling 0.21.3",
  "proc-macro2",

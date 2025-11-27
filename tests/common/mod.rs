@@ -65,7 +65,7 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
     args.peer_update_interval_s = 5;
     args.builder_url = builder_url;
-    args.client_pool_size = 1.try_into().unwrap();
+    args.http_client_pool_size = 1.try_into().unwrap();
     spawn_ingress_with_args(args).await
 }
 
