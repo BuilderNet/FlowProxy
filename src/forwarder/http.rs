@@ -74,6 +74,8 @@ struct HttpForwarder {
     request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The sender to decode [`reqwest::Response`] errors.
     error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
+    /// Track the timestamp of the last "Connection-refused"-like log to limit logging rate.
+    last_error_log: Instant,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
     /// The metrics for the forwarder.
@@ -107,6 +109,7 @@ impl HttpForwarder {
                 request_rx,
                 pending: FuturesUnordered::new(),
                 error_decoder_tx,
+                last_error_log: Instant::now(),
                 metrics,
             },
             decoder,
@@ -153,6 +156,15 @@ impl HttpForwarder {
         .instrument(span);
 
         Box::pin(fut)
+    }
+
+    /// Determine whether we should log an error at this time, based on the provided limit.
+    fn should_log_error(&mut self) -> bool {
+        let now = Instant::now();
+        let should_log = now.duration_since(self.last_error_log) > Duration::from_millis(100);
+        self.last_error_log = now;
+
+        should_log
     }
 
     fn on_response(&mut self, response: ForwarderResponse<reqwest::Response, reqwest::Error>) {
@@ -204,7 +216,12 @@ impl HttpForwarder {
                 }
             }
             Err(error) => {
-                error!("error forwarding request");
+                // NOTE: Only log the full error message enough time passed since last lot. This can
+                // be particularly noisy for example if the peer fails and we get a
+                // lot of "Connection refused"
+                if self.should_log_error() {
+                    error!(?error, "error forwarding request");
+                }
 
                 // Parse the reason, which is either the status code reason of the error message
                 // itself. If the request fails for non-network reasons, the status code may be
