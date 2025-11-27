@@ -163,11 +163,11 @@ pub struct OrderflowIngressArgs {
 
     /// Private key PEM file for client authentication (mTLS)
     #[clap(long, env = "PRIVATE_KEY_PEM_FILE", id = "PRIVATE_KEY_PEM_FILE")]
-    pub private_key_pem_file: PathBuf,
+    pub private_key_pem_file: Option<PathBuf>,
 
     /// Certificate PEM file for client authentication (mTLS)
     #[clap(long, env = "CERTIFICATE_PEM_FILE", id = "CERTIFICATE_PEM_FILE")]
-    pub certificate_pem_file: PathBuf,
+    pub certificate_pem_file: Option<PathBuf>,
 
     /// Listen URL for receiving builder stats.
     #[clap(long, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
@@ -292,8 +292,8 @@ impl Default for OrderflowIngressArgs {
             system_listen_addr_http: SocketAddr::from_str("127.0.0.1:0").unwrap(),
             system_listen_addr_tcp: SocketAddr::from_str("127.0.0.1:0").unwrap(),
             builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
-            private_key_pem_file: "./".parse().unwrap(),
-            certificate_pem_file: "./".parse().unwrap(),
+            private_key_pem_file: None,
+            certificate_pem_file: None,
             peer_update_interval_s: 30,
             builder_url: None,
             builder_ready_endpoint: None,

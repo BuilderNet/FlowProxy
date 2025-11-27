@@ -192,9 +192,9 @@ pub struct PeersUpdaterConfig {
     /// For each peer indicates the size of the client pool used to connect to it.
     pub client_pool_size: NonZero<usize>,
     /// Private key PEM file for client authentication (mTLS)
-    pub private_key_pem_file: PathBuf,
+    pub private_key_pem_file: Option<PathBuf>,
     /// Certificate PEM file for client authentication (mTLS)
-    pub certificate_pem_file: PathBuf,
+    pub certificate_pem_file: Option<PathBuf>,
 }
 
 /// A [`PeerUpdater`] periodically fetches the list of peers from a BuilderHub peer store,
@@ -477,15 +477,21 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 ///
 /// 1. The peer root certificate, added to the certificate store. This is to establish connections
 ///    with peer acting as a server.
-/// 2. Private key and certificate files for client authentication (mTLS).
+/// 2. Private key and certificate files for client authentication (mTLS), if provided.
 fn tls_connector(
     peer_root_certificate: X509,
-    private_key_pem_file: &PathBuf,
-    certificate_pem_file: &PathBuf,
+    private_key_pem_file: &Option<PathBuf>,
+    certificate_pem_file: &Option<PathBuf>,
 ) -> Result<SslConnector, openssl::error::ErrorStack> {
     let mut builder = SslConnector::builder(SslMethod::tls())?;
-    builder.set_private_key_file(private_key_pem_file, SslFiletype::PEM)?;
-    builder.set_certificate_file(certificate_pem_file, SslFiletype::PEM)?;
+
+    if let Some(key) = private_key_pem_file {
+        builder.set_private_key_file(key, SslFiletype::PEM)?;
+    }
+
+    if let Some(certificate) = certificate_pem_file {
+        builder.set_certificate_file(certificate, SslFiletype::PEM)?;
+    }
 
     let certificate_store = builder.cert_store_mut();
     certificate_store.add_cert(peer_root_certificate)?;
