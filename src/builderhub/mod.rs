@@ -36,6 +36,14 @@ use serde::{Deserialize, Serialize};
 mod client;
 pub use client::Client;
 
+/// Default TLS ciphers for the TLS system clients. In some cases, CHACHA20 is negotiated by
+/// default, which isn't as fast as AES on hardware. AES is usually accelerated by special AES-NI
+/// CPU instructions present in both Intel and AMD CPUs.
+///
+/// <https://en.wikipedia.org/wiki/AES_instruction_set>
+const DEFAULT_TLS_CIPHERS: &str =
+    "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
+
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceData {
     /// TLS certificate of the instance in UTF-8 encoded PEM format.
@@ -505,6 +513,9 @@ fn tls_connector(
 
     let certificate_store = builder.cert_store_mut();
     certificate_store.add_cert(peer_root_certificate)?;
+
+    // Explicitly set the ciphersuites
+    builder.set_ciphersuites(DEFAULT_TLS_CIPHERS)?;
 
     Ok(builder.build())
 }
