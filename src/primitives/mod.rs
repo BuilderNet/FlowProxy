@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::Display,
     hash::{Hash as _, Hasher as _},
     sync::Arc,
     time::{Duration, Instant},
@@ -25,7 +26,7 @@ use rbuilder_primitives::{
     },
     Bundle, BundleReplacementData, ShareBundle,
 };
-use revm_primitives::B256;
+use revm_primitives::{hex, B256};
 use serde::Serialize;
 use serde_json::json;
 use strum::AsRefStr;
@@ -931,6 +932,16 @@ pub enum TcpReponseType {
     NoData,
     String(String),
     Hash([u8; 32]),
+}
+
+impl Display for TcpReponseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TcpReponseType::NoData => write!(f, "no data"),
+            TcpReponseType::String(s) => write!(f, "{s}"),
+            TcpReponseType::Hash(h) => write!(f, "0x{}", hex::encode(h)),
+        }
+    }
 }
 
 /// Status codes for a [`TcpResponse`].

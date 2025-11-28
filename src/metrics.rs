@@ -48,6 +48,9 @@ pub(crate) struct ForwarderMetrics {
     /// The total number of TCP call failures.
     #[metric(labels = ["reason"])]
     tcp_call_failures: Counter,
+    /// The total number of TCP response failures.
+    #[metric(labels = ["reason"])]
+    tcp_response_failures: Counter,
     /// The current number of inflight HTTP requests.
     #[metric]
     inflight_requests: Gauge,

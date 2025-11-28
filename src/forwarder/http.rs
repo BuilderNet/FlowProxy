@@ -1,5 +1,5 @@
 use crate::{
-    forwarder::{client::HttpClientPool, record_e2e_metrics, ForwardingRequest},
+    forwarder::{client::HttpClientPool, record_e2e_metrics, should_log_error, ForwardingRequest},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     priority::{self},
@@ -158,15 +158,6 @@ impl HttpForwarder {
         Box::pin(fut)
     }
 
-    /// Determine whether we should log an error at this time, based on the provided limit.
-    fn should_log_error(&mut self) -> bool {
-        let now = Instant::now();
-        let should_log = now.duration_since(self.last_error_log) > Duration::from_millis(100);
-        self.last_error_log = now;
-
-        should_log
-    }
-
     fn on_response(&mut self, response: ForwarderResponse<reqwest::Response, reqwest::Error>) {
         let ForwarderResponse {
             start_time,
@@ -219,7 +210,10 @@ impl HttpForwarder {
                 // NOTE: Only log the full error message enough time passed since last lot. This can
                 // be particularly noisy for example if the peer fails and we get a
                 // lot of "Connection refused"
-                if self.should_log_error() {
+                let (now, should_log) =
+                    should_log_error(self.last_error_log, Duration::from_millis(100));
+                if should_log {
+                    self.last_error_log = now;
                     error!(?error, "error forwarding request");
                 }
 

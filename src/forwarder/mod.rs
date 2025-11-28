@@ -19,7 +19,12 @@ use axum::http::HeaderValue;
 use dashmap::DashMap;
 use hyper::{header::CONTENT_TYPE, HeaderMap};
 use serde_json::json;
-use std::{collections::HashMap, fmt::Display, sync::Arc};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use time::UtcDateTime;
 use tracing::*;
 
@@ -367,4 +372,10 @@ fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_
                 .observe(order.received_at().elapsed().as_secs_f64());
         }
     }
+}
+
+/// Determine whether we should log an error at this time, based on the provided limit.
+fn should_log_error(before: Instant, threshold: Duration) -> (Instant, bool) {
+    let now = Instant::now();
+    (now, now.duration_since(before) > threshold)
 }

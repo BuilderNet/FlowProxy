@@ -1,5 +1,7 @@
 use crate::{
-    forwarder::{client::ReqSocketIpBucketPool, record_e2e_metrics, ForwardingRequest},
+    forwarder::{
+        client::ReqSocketIpBucketPool, record_e2e_metrics, should_log_error, ForwardingRequest,
+    },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     primitives::{TcpResponse, TcpResponseStatus},
@@ -69,6 +71,8 @@ struct TcpForwarder<T: Transport<SocketAddr>> {
     request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<Bytes, ReqError>>,
+    /// Track the timestamp of the last "Connection-refused"-like log to limit logging rate.
+    last_error_log: Instant,
     /// The metrics for the forwarder.
     metrics: ForwarderMetrics,
 }
@@ -89,6 +93,7 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
             peer_name: name,
             peer_address: address,
             request_rx,
+            last_error_log: Instant::now(),
             pending: FuturesUnordered::new(),
             metrics,
         }
@@ -143,11 +148,20 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
         let _g = span.enter();
         tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
-        let Ok(response) = response_result.inspect_err(|e| {
-            tracing::error!(?e, "failed to forward request");
-            self.metrics.tcp_call_failures(e.to_string()).inc();
-        }) else {
-            return;
+        let response = match response_result {
+            Err(e) => {
+                // NOTE: this might be a very noisy "connection refused" error, so we rate-limit
+                // the logs.
+                let (now, should_log) =
+                    should_log_error(self.last_error_log, Duration::from_millis(100));
+                if should_log {
+                    self.last_error_log = now;
+                    tracing::error!(?e, "failed to forwarder request");
+                }
+                self.metrics.tcp_call_failures(e.to_string()).inc();
+                return;
+            }
+            Ok(r) => r,
         };
 
         self.metrics
@@ -168,9 +182,15 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
         }
 
         if response.status != TcpResponseStatus::Success {
-            tracing::error!(status = response.status.as_ref(), data = ?response.data, "received error response");
-            // TODO:
-            // self.metrics.rpc_call_failures(code.to_string()).inc();
+            // NOTE: in case we send wrong data, we might get a lot of error responses and fill
+            // disk logs, so we rate-limit the logs.
+            let (now, should_log) =
+                should_log_error(self.last_error_log, Duration::from_millis(100));
+            if should_log {
+                self.last_error_log = now;
+                tracing::error!(status = response.status.as_ref(), data = ?response.data, "received error response");
+            }
+            self.metrics.tcp_response_failures(response.data.to_string()).inc();
         }
     }
 }
