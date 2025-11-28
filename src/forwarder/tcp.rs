@@ -1,6 +1,6 @@
 use crate::{
     forwarder::{
-        client::ReqSocketIpBucketPool, record_e2e_metrics, should_log_error, ForwardingRequest,
+        client::ReqSocketIpBucketPool, record_e2e_metrics, ForwardingRequest, LogRateLimiter,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
@@ -72,7 +72,7 @@ struct TcpForwarder<T: Transport<SocketAddr>> {
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<Bytes, ReqError>>,
     /// Track the timestamp of the last "Connection-refused"-like log to limit logging rate.
-    last_error_log: Instant,
+    log_limiter: LogRateLimiter,
     /// The metrics for the forwarder.
     metrics: ForwarderMetrics,
 }
@@ -93,7 +93,7 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
             peer_name: name,
             peer_address: address,
             request_rx,
-            last_error_log: Instant::now(),
+            log_limiter: LogRateLimiter::default(),
             pending: FuturesUnordered::new(),
             metrics,
         }
@@ -152,12 +152,9 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
             Err(e) => {
                 // NOTE: this might be a very noisy "connection refused" error, so we rate-limit
                 // the logs.
-                let (now, should_log) =
-                    should_log_error(self.last_error_log, Duration::from_millis(100));
-                if should_log {
-                    self.last_error_log = now;
+                self.log_limiter.log(|| {
                     tracing::error!(?e, "failed to forwarder request");
-                }
+                });
                 self.metrics.tcp_call_failures(e.to_string()).inc();
                 return;
             }
@@ -184,12 +181,9 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
         if response.status != TcpResponseStatus::Success {
             // NOTE: in case we send wrong data, we might get a lot of error responses and fill
             // disk logs, so we rate-limit the logs.
-            let (now, should_log) =
-                should_log_error(self.last_error_log, Duration::from_millis(100));
-            if should_log {
-                self.last_error_log = now;
+            self.log_limiter.log(|| {
                 tracing::error!(status = response.status.as_ref(), data = ?response.data, "received error response");
-            }
+                });
             self.metrics.tcp_response_failures(response.data.to_string()).inc();
         }
     }

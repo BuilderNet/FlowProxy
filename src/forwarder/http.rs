@@ -1,5 +1,5 @@
 use crate::{
-    forwarder::{client::HttpClientPool, record_e2e_metrics, should_log_error, ForwardingRequest},
+    forwarder::{client::HttpClientPool, record_e2e_metrics, ForwardingRequest, LogRateLimiter},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     priority::{self},
@@ -75,7 +75,7 @@ struct HttpForwarder {
     /// The sender to decode [`reqwest::Response`] errors.
     error_decoder_tx: mpsc::Sender<ErrorDecoderInput>,
     /// Track the timestamp of the last "Connection-refused"-like log to limit logging rate.
-    last_error_log: Instant,
+    log_limiter: LogRateLimiter,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<reqwest::Response, reqwest::Error>>,
     /// The metrics for the forwarder.
@@ -98,6 +98,7 @@ impl HttpForwarder {
             peer_name: name.clone(),
             peer_url: url.clone(),
             rx: error_decoder_rx,
+            log_limiter: LogRateLimiter::default(),
             metrics: metrics.clone(),
         };
 
@@ -109,7 +110,7 @@ impl HttpForwarder {
                 request_rx,
                 pending: FuturesUnordered::new(),
                 error_decoder_tx,
-                last_error_log: Instant::now(),
+                log_limiter: LogRateLimiter::default(),
                 metrics,
             },
             decoder,
@@ -184,7 +185,9 @@ impl HttpForwarder {
                     trace!("received success response");
 
                     if status != StatusCode::OK {
-                        warn!("non-ok status code");
+                        self.log_limiter.log(|| {
+                            warn!("non-ok status code");
+                        });
                     }
 
                     // Only record success if the status is OK.
@@ -193,7 +196,9 @@ impl HttpForwarder {
                         .observe(elapsed.as_secs_f64());
                 } else {
                     // If we have a non-OK status code, also record it.
-                    error!("failed to forward request");
+                    self.log_limiter.log(|| {
+                        error!("failed to forward request");
+                    });
                     let reason =
                         status.canonical_reason().map(String::from).unwrap_or(status.to_string());
 
@@ -202,7 +207,9 @@ impl HttpForwarder {
                     if let Err(e) =
                         self.error_decoder_tx.try_send(ErrorDecoderInput::new(hash, response))
                     {
-                        error!(?e, "failed to send error response to decoder");
+                        self.log_limiter.log(|| {
+                            error!(?e, "failed to send error response to decoder");
+                        });
                     }
                 }
             }
@@ -210,12 +217,9 @@ impl HttpForwarder {
                 // NOTE: Only log the full error message enough time passed since last lot. This can
                 // be particularly noisy for example if the peer fails and we get a
                 // lot of "Connection refused"
-                let (now, should_log) =
-                    should_log_error(self.last_error_log, Duration::from_millis(100));
-                if should_log {
-                    self.last_error_log = now;
+                self.log_limiter.log(|| {
                     error!(?error, "error forwarding request");
-                }
+                });
 
                 // Parse the reason, which is either the status code reason of the error message
                 // itself. If the request fails for non-network reasons, the status code may be
@@ -226,7 +230,9 @@ impl HttpForwarder {
                     .unwrap_or(format!("{error:?}"));
 
                 if error.is_connect() {
-                    warn!(?reason, "connection error");
+                    self.log_limiter.log(|| {
+                        warn!(?reason, "connection error");
+                    });
                     self.metrics.http_connect_failures(reason).inc();
                 } else {
                     self.metrics.http_call_failures(reason).inc();
@@ -305,22 +311,29 @@ pub struct ResponseErrorDecoder {
     pub peer_url: String,
     /// The receiver of the error responses.
     pub rx: mpsc::Receiver<ErrorDecoderInput>,
+    /// The timestamp of the last error log, for rate-limiting error messages.
+    pub log_limiter: LogRateLimiter,
+
     /// Metrics from the associated forwarder.
     pub(crate) metrics: ForwarderMetrics,
 }
 
 impl ResponseErrorDecoder {
-    async fn decode(&self, input: ErrorDecoderInput) {
+    async fn decode(&mut self, input: ErrorDecoderInput) {
         let _g = input.span.enter();
         match input.response.json::<JsonRpcResponse<serde_json::Value>>().await {
             Ok(body) => {
                 if let JsonRpcResponseTy::Error { code, message } = body.result_or_error {
-                    error!(%code, %message, "decoded error response from builder");
+                    self.log_limiter.log(|| {
+                        error!(%code, %message, "decoded error response from builder");
+                    });
                     self.metrics.rpc_call_failures(code.to_string()).inc();
                 }
             }
             Err(e) => {
-                warn!(?e, "failed to decode response into json-rpc");
+                self.log_limiter.log(|| {
+                    warn!(?e, "failed to decode response into json-rpc");
+                });
                 self.metrics.json_rpc_decoding_failures().inc();
             }
         }
