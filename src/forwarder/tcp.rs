@@ -1,7 +1,10 @@
 use crate::{
-    forwarder::{client::ReqSocketIpBucketPool, record_e2e_metrics, ForwardingRequest},
+    forwarder::{
+        client::ReqSocketIpBucketPool, record_e2e_metrics, should_log_error, ForwardingRequest,
+    },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
+    primitives::{TcpResponse, TcpResponseStatus},
     priority::{self},
 };
 use alloy_primitives::B256;
@@ -68,6 +71,8 @@ struct TcpForwarder<T: Transport<SocketAddr>> {
     request_rx: priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
     /// The pending responses that need to be processed.
     pending: FuturesUnordered<RequestFut<Bytes, ReqError>>,
+    /// Track the timestamp of the last "Connection-refused"-like log to limit logging rate.
+    last_error_log: Instant,
     /// The metrics for the forwarder.
     metrics: ForwarderMetrics,
 }
@@ -88,6 +93,7 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
             peer_name: name,
             peer_address: address,
             request_rx,
+            last_error_log: Instant::now(),
             pending: FuturesUnordered::new(),
             metrics,
         }
@@ -142,34 +148,49 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
         let _g = span.enter();
         tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
 
-        let Ok(response) = response_result.inspect_err(|e| {
-            tracing::error!(?e, "failed to forward request");
-            self.metrics.tcp_call_failures(e.to_string()).inc();
-        }) else {
-            return;
+        let response = match response_result {
+            Err(e) => {
+                // NOTE: this might be a very noisy "connection refused" error, so we rate-limit
+                // the logs.
+                let (now, should_log) =
+                    should_log_error(self.last_error_log, Duration::from_millis(100));
+                if should_log {
+                    self.last_error_log = now;
+                    tracing::error!(?e, "failed to forwarder request");
+                }
+                self.metrics.tcp_call_failures(e.to_string()).inc();
+                return;
+            }
+            Ok(r) => r,
         };
 
         self.metrics
             .rpc_call_duration(order_type, is_big.to_string())
             .observe(elapsed.as_secs_f64());
 
-        let response =
-            match serde_json::from_slice::<JsonRpcResponse<serde_json::Value>>(response.as_ref()) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!(?e, "failed to deserialize response");
-                    return;
-                }
-            };
+        let response = match bitcode::decode::<TcpResponse>(&response) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!(?e, "failed to deserialize response");
+                return;
+            }
+        };
 
         // Print warning if the RPC call took more than 1 second.
         if elapsed > Duration::from_secs(1) {
             tracing::warn!("long rpc call");
         }
 
-        if let JsonRpcResponseTy::Error { code, message } = response.result_or_error {
-            tracing::error!(?code, ?message, "received error response");
-            self.metrics.rpc_call_failures(code.to_string()).inc();
+        if response.status != TcpResponseStatus::Success {
+            // NOTE: in case we send wrong data, we might get a lot of error responses and fill
+            // disk logs, so we rate-limit the logs.
+            let (now, should_log) =
+                should_log_error(self.last_error_log, Duration::from_millis(100));
+            if should_log {
+                self.last_error_log = now;
+                tracing::error!(status = response.status.as_ref(), data = ?response.data, "received error response");
+            }
+            self.metrics.tcp_response_failures(response.data.to_string()).inc();
         }
     }
 }
