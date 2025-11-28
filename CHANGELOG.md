@@ -48,6 +48,10 @@ Detailed changes:
   Existing dashboards relying on these metrics should be updated accordingly, by
   looking at the exported `quantile` field instead of the "bucket" family of
   fields.
+- New TCP-related metrics `tcp_call_failures` and `tcp_response_failures`, both
+  counters, have been added to monitor TCP communication errors.
+- Rate limiting of error/warning logs has been added to prevent log flooding
+  on connection refused and general response errors.
 
 ## [v1.2.1] - 2025-11-13
 

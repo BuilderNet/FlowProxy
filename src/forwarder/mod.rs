@@ -374,8 +374,35 @@ fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_
     }
 }
 
-/// Determine whether we should log an error at this time, based on the provided limit.
-fn should_log_error(before: Instant, threshold: Duration) -> (Instant, bool) {
-    let now = Instant::now();
-    (now, now.duration_since(before) > threshold)
+/// A simple rate limiter for logging, with a configurable [`Duration`] threshold. Useful to avoid
+/// log spam, for example getting bursts of "connection refused"-like messages that could quickly
+/// fill the machine disk with logs.
+#[derive(Debug, Clone, Copy)]
+pub struct LogRateLimiter {
+    last_logged: Instant,
+    threshold: Duration,
+}
+
+impl LogRateLimiter {
+    pub fn new(threshold: Duration) -> Self {
+        Self { last_logged: Instant::now() - threshold, threshold }
+    }
+
+    /// Try to log by executing the provided closure `f` if the threshold duration has passed since
+    /// the last log.
+    pub fn log(&mut self, f: impl FnOnce()) {
+        let now = Instant::now();
+        let should_log = now.duration_since(self.last_logged) > self.threshold;
+
+        if should_log {
+            self.last_logged = now;
+            f();
+        }
+    }
+}
+
+impl Default for LogRateLimiter {
+    fn default() -> Self {
+        Self::new(Duration::from_millis(100))
+    }
 }
