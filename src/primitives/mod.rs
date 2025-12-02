@@ -601,7 +601,7 @@ pub fn decode_transaction(raw: &[u8]) -> Eip2718Result<EthPooledTransaction> {
     if raw.is_empty() {
         return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort));
     }
-    EthPooledTransaction::decode_2718_exact(&mut &raw[..])
+    EthPooledTransaction::decode_2718_exact(raw)
 }
 
 /// Recover ECDSA signer of the transaction.
