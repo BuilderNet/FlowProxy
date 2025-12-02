@@ -1,5 +1,6 @@
-use crate::{priority::Priority, rate_limit::CounterOverTime, utils};
-use alloy_consensus::transaction::PooledTransaction;
+use crate::{
+    primitives::EthPooledTransaction, priority::Priority, rate_limit::CounterOverTime, utils,
+};
 use alloy_primitives::Address;
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
@@ -246,7 +247,7 @@ impl EntityBuilderStats {
 /// Enum encapsulating entity items.
 #[derive(Debug)]
 pub enum EntityRequest<'a> {
-    PrivateTx(&'a PooledTransaction),
+    PrivateTx(&'a EthPooledTransaction),
     Bundle(&'a RawBundle),
     MevShareBundle(&'a RawShareBundle),
 }

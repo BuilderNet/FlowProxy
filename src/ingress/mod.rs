@@ -836,7 +836,7 @@ impl OrderflowIngress {
         // Spawn expensive operations like ECDSA recovery and consensus validation.
         self.pqueues
             .spawn_with_priority(priority, move || {
-                validate_transaction(&tx.decoded)?;
+                validate_transaction(&tx.decoded, received_at.utc.unix_timestamp() as u64)?;
                 tx.recover_signer()?;
                 Ok::<(), IngressError>(())
             })

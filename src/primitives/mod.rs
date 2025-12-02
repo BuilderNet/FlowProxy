@@ -7,10 +7,12 @@ use std::{
 use ::time::UtcDateTime;
 use alloy_consensus::{
     crypto::RecoveryError,
-    transaction::{PooledTransaction, Recovered, SignerRecoverable as _},
+    transaction::{Recovered, SignerRecoverable as _},
+    EthereumTxEnvelope, TxEip4844Variant,
 };
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result},
+    eip7594::BlobTransactionSidecarVariant,
     Decodable2718 as _,
 };
 use alloy_primitives::{Address, Bytes};
@@ -467,14 +469,14 @@ impl SystemMevShareBundle {
 pub struct EthereumTransaction {
     /// Decoded pooled transaction.
     #[deref]
-    pub decoded: PooledTransaction,
+    pub decoded: EthPooledTransaction,
     /// Original raw transaction bytes.
     pub raw: Bytes,
 }
 
 impl EthereumTransaction {
     /// Create new ethereum transaction.
-    pub fn new(decoded: PooledTransaction, raw: Bytes) -> Self {
+    pub fn new(decoded: EthPooledTransaction, raw: Bytes) -> Self {
         Self { decoded, raw }
     }
 }
@@ -540,18 +542,21 @@ pub struct BundleReceipt {
     pub priority: Priority,
 }
 
+/// Ethereum pooled transaction that supports both EIP-4844 and EIP-7594 style blob sidecars.
+pub type EthPooledTransaction = EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>;
+
 /// Decode pooled Ethereum transaction from raw bytes.
-pub fn decode_transaction(raw: &Bytes) -> Eip2718Result<PooledTransaction> {
+pub fn decode_transaction(raw: &[u8]) -> Eip2718Result<EthPooledTransaction> {
     if raw.is_empty() {
         return Err(Eip2718Error::RlpError(alloy_rlp::Error::InputTooShort));
     }
-    PooledTransaction::decode_2718(&mut &raw[..])
+    EthPooledTransaction::decode_2718_exact(raw)
 }
 
 /// Recover ECDSA signer of the transaction.
-pub fn recover_transaction(
-    transaction: PooledTransaction,
-) -> Result<Recovered<PooledTransaction>, RecoveryError> {
+pub fn into_recovered_transaction(
+    transaction: EthPooledTransaction,
+) -> Result<Recovered<EthPooledTransaction>, RecoveryError> {
     let signer = transaction.recover_signer()?;
     Ok(Recovered::new_unchecked(transaction, signer))
 }
