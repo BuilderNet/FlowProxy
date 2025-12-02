@@ -1,3 +1,5 @@
+use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
+use alloy_hardforks::mainnet::MAINNET_OSAKA_TIMESTAMP;
 use revm_primitives::hardfork::SpecId;
 
 /// Mainnet chain ID.
@@ -14,6 +16,9 @@ pub enum ValidationError {
     /// respect the [`MAX_INIT_CODE_BYTE_SIZE`].
     #[error("transaction's input size {0} exceeds max_init_code_size {1}")]
     ExceedsMaxInitCodeSize(usize, usize),
+    /// Thrown when the transaction gas limit exceeds the maximum allowed.
+    #[error("transaction gas limit {0} exceeds the cap {1}")]
+    ExceedsTxGasLimitCap(u64, u64),
     /// Thrown to ensure no one is able to specify a transaction with a tip higher than the total
     /// fee cap.
     #[error("max priority fee per gas higher than max fee per gas")]
@@ -35,6 +40,7 @@ pub enum ValidationError {
 
 pub fn validate_transaction(
     transaction: &impl alloy_consensus::Transaction,
+    timestamp: u64,
 ) -> Result<(), ValidationError> {
     // Validate input length.
     let input_len = transaction.input().len();
@@ -54,8 +60,14 @@ pub fn validate_transaction(
         }
     }
 
+    let spec_id = spec_by_timestamp(timestamp);
+    let gas_limit = transaction.gas_limit();
+    if spec_id >= SpecId::OSAKA && gas_limit > MAX_TX_GAS_LIMIT_OSAKA {
+        return Err(ValidationError::ExceedsTxGasLimitCap(gas_limit, MAX_TX_GAS_LIMIT_OSAKA))
+    }
+
     let gas = revm_interpreter::gas::calculate_initial_tx_gas(
-        SpecId::PRAGUE,
+        spec_id,
         transaction.input(),
         transaction.is_create(),
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
@@ -65,7 +77,6 @@ pub fn validate_transaction(
             .unwrap_or_default() as u64,
         transaction.authorization_list().map(|l| l.len()).unwrap_or_default() as u64,
     );
-    let gas_limit = transaction.gas_limit();
     if gas_limit < gas.initial_gas || gas_limit < gas.floor_gas {
         return Err(ValidationError::IntrinsicGasTooLow);
     }
@@ -83,4 +94,14 @@ pub fn validate_transaction(
     }
 
     Ok(())
+}
+
+/// Determine revm's [`SpecId`] based on the current timestamp.
+/// Earliest spec supported by the proxy is [`SpecId::PRAGUE`].
+pub fn spec_by_timestamp(timestamp: u64) -> SpecId {
+    if timestamp >= MAINNET_OSAKA_TIMESTAMP {
+        SpecId::OSAKA
+    } else {
+        SpecId::PRAGUE
+    }
 }
