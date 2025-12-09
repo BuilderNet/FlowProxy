@@ -2906,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "flowproxy"
-version = "1.3.2"
+version = "1.3.3"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",

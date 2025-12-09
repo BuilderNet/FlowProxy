@@ -108,7 +108,7 @@ pub(crate) struct IngressMetrics {
     #[metric(labels = ["method", "path", "status"])]
     http_request_duration: Summary,
     /// The duration of RPC calls.
-    #[metric(labels = ["method", "priority", "big_request"])]
+    #[metric(labels = ["method", "priority"])]
     rpc_request_duration: Summary,
     /// The number of transactions per bundle.
     #[metric]
