@@ -1,10 +1,10 @@
 use crate::{
     cache::{OrderCache, SignerCache},
     consts::{
-        BIG_REQUEST_SIZE_THRESHOLD, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        BUILDERNET_SIGNATURE_HEADER, DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS,
-        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
-        MEV_SEND_BUNDLE_METHOD, UNKNOWN, USE_LEGACY_SIGNATURE,
+        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
+        DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD,
+        UNKNOWN, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -163,8 +163,6 @@ impl OrderflowIngress {
             Err(error) => return JsonRpcResponse::error(Value::Null, error),
         };
 
-        let payload_size = body.len();
-
         // NOTE: Signature is mandatory
         let body_clone = body.clone();
         let Some(signer) = ingress
@@ -237,10 +235,7 @@ impl OrderflowIngress {
                     .request_body_size(ETH_SEND_BUNDLE_METHOD)
                     .observe(body.len() as f64);
 
-                ingress
-                    .on_bundle(entity, bundle, received_at, payload_size)
-                    .await
-                    .map(EthResponse::BundleHash)
+                ingress.on_bundle(entity, bundle, received_at).await.map(EthResponse::BundleHash)
             }
             ETH_SEND_RAW_TRANSACTION_METHOD => {
                 let Some(Ok(tx)) =
@@ -262,10 +257,7 @@ impl OrderflowIngress {
                     .request_body_size(ETH_SEND_RAW_TRANSACTION_METHOD)
                     .observe(body.len() as f64);
 
-                ingress
-                    .on_raw_transaction(entity, tx, received_at, payload_size)
-                    .await
-                    .map(EthResponse::TxHash)
+                ingress.on_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
             MEV_SEND_BUNDLE_METHOD => {
                 let Some(Ok(bundle)) = request.take_single_param().map(|p| {
@@ -283,7 +275,7 @@ impl OrderflowIngress {
                     .observe(body.len() as f64);
 
                 ingress
-                    .on_mev_share_bundle(entity, bundle, received_at, payload_size)
+                    .on_mev_share_bundle(entity, bundle, received_at)
                     .await
                     .map(EthResponse::BundleHash)
             }
@@ -384,7 +376,6 @@ impl OrderflowIngress {
     ) -> JsonRpcResponse<EthResponse> {
         let received_at = UtcInstant::now();
         let payload_size = body.len();
-        let big_request = payload_size > BIG_REQUEST_SIZE_THRESHOLD;
 
         // Before doing anything else, verify that the signature header is present.
         if headers
@@ -540,11 +531,7 @@ impl OrderflowIngress {
 
                 ingress
                     .system_metrics
-                    .rpc_request_duration(
-                        ETH_SEND_BUNDLE_METHOD,
-                        priority.as_str(),
-                        big_request.to_string(),
-                    )
+                    .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
                     .observe(received_at.elapsed().as_secs_f64());
 
                 ingress.system_metrics.txs_per_bundle().observe(bundle.txs.len() as f64);
@@ -594,11 +581,7 @@ impl OrderflowIngress {
 
                 ingress
                     .system_metrics
-                    .rpc_request_duration(
-                        ETH_SEND_RAW_TRANSACTION_METHOD,
-                        priority.as_str(),
-                        big_request.to_string(),
-                    )
+                    .rpc_request_duration(ETH_SEND_RAW_TRANSACTION_METHOD, priority.as_str())
                     .observe(received_at.elapsed().as_secs_f64());
                 ingress
                     .system_metrics
@@ -647,11 +630,7 @@ impl OrderflowIngress {
                 ingress.system_metrics.txs_per_mev_share_bundle().observe(bundle.body.len() as f64);
                 ingress
                     .system_metrics
-                    .rpc_request_duration(
-                        MEV_SEND_BUNDLE_METHOD,
-                        priority.as_str(),
-                        big_request.to_string(),
-                    )
+                    .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
                     .observe(received_at.elapsed().as_secs_f64());
                 ingress
                     .system_metrics
@@ -694,7 +673,6 @@ impl OrderflowIngress {
     pub async fn system_handler_tcp(ingress: Arc<Self>, body: alloy_rlp::Bytes) -> TcpResponse {
         let received_at = UtcInstant::now();
         let payload_size = body.len();
-        let big_request = payload_size > BIG_REQUEST_SIZE_THRESHOLD;
 
         let WithHeaders::<Vec<u8>> { headers, data } = match bitcode::decode(body.as_ref()) {
             Ok(json) => json,
@@ -834,11 +812,7 @@ impl OrderflowIngress {
 
                 ingress
                     .system_metrics
-                    .rpc_request_duration(
-                        ETH_SEND_BUNDLE_METHOD,
-                        priority.as_str(),
-                        big_request.to_string(),
-                    )
+                    .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
                     .observe(received_at.elapsed().as_secs_f64());
 
                 ingress.system_metrics.txs_per_bundle().observe(bundle.txs.len() as f64);
@@ -904,11 +878,7 @@ impl OrderflowIngress {
 
                 ingress
                     .system_metrics
-                    .rpc_request_duration(
-                        ETH_SEND_RAW_TRANSACTION_METHOD,
-                        priority.as_str(),
-                        big_request.to_string(),
-                    )
+                    .rpc_request_duration(ETH_SEND_RAW_TRANSACTION_METHOD, priority.as_str())
                     .observe(received_at.elapsed().as_secs_f64());
                 ingress
                     .system_metrics
@@ -975,11 +945,7 @@ impl OrderflowIngress {
                 ingress.system_metrics.txs_per_mev_share_bundle().observe(bundle.body.len() as f64);
                 ingress
                     .system_metrics
-                    .rpc_request_duration(
-                        MEV_SEND_BUNDLE_METHOD,
-                        priority.as_str(),
-                        big_request.to_string(),
-                    )
+                    .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
                     .observe(received_at.elapsed().as_secs_f64());
                 ingress
                     .system_metrics
@@ -1017,7 +983,6 @@ impl OrderflowIngress {
         entity: Entity,
         mut bundle: RawBundle,
         received_at: UtcInstant,
-        payload_size: usize,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
 
@@ -1125,7 +1090,7 @@ impl OrderflowIngress {
 
         self.indexer_handle.index_bundle(bundle.clone());
 
-        self.send_bundle(bundle, payload_size).await
+        self.send_bundle(bundle).await
     }
 
     /// Handles a new mev share bundle.
@@ -1140,7 +1105,6 @@ impl OrderflowIngress {
         entity: Entity,
         bundle: RawShareBundle,
         received_at: UtcInstant,
-        payload_size: usize,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
 
@@ -1187,7 +1151,7 @@ impl OrderflowIngress {
 
         self.user_metrics.txs_per_mev_share_bundle().observe(bundle.raw.body.len() as f64);
 
-        self.send_mev_share_bundle(priority, bundle, payload_size).await
+        self.send_mev_share_bundle(priority, bundle).await
     }
 
     #[tracing::instrument(skip_all, name = "transaction",
@@ -1201,10 +1165,8 @@ impl OrderflowIngress {
         entity: Entity,
         transaction: EthereumTransaction,
         received_at: UtcInstant,
-        payload_size: usize,
     ) -> Result<B256, IngressError> {
         let start = Instant::now();
-        let big_request = payload_size > BIG_REQUEST_SIZE_THRESHOLD;
 
         let Entity::Signer(signer) = entity else { unreachable!() };
         let tx_hash = *transaction.hash();
@@ -1253,35 +1215,22 @@ impl OrderflowIngress {
         tracing::debug!(elapsed = ?elapsed, "processed raw transaction");
 
         self.user_metrics
-            .rpc_request_duration(
-                ETH_SEND_RAW_TRANSACTION_METHOD,
-                priority.as_str(),
-                big_request.to_string(),
-            )
+            .rpc_request_duration(ETH_SEND_RAW_TRANSACTION_METHOD, priority.as_str())
             .observe(received_at.elapsed().as_secs_f64());
 
         Ok(tx_hash)
     }
 
-    async fn send_bundle(
-        &self,
-        bundle: SystemBundle,
-        payload_size: usize,
-    ) -> Result<B256, IngressError> {
+    async fn send_bundle(&self, bundle: SystemBundle) -> Result<B256, IngressError> {
         let bundle_hash = bundle.bundle_hash();
         let priority = bundle.metadata.priority;
         let received_at = bundle.metadata.received_at;
-        let big_request = payload_size > BIG_REQUEST_SIZE_THRESHOLD;
 
         // Send request to all forwarders.
         self.forwarders.broadcast_order(bundle.into()).await;
 
         self.user_metrics
-            .rpc_request_duration(
-                ETH_SEND_BUNDLE_METHOD,
-                priority.as_str(),
-                big_request.to_string(),
-            )
+            .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
             .observe(received_at.elapsed().as_secs_f64());
         Ok(bundle_hash)
     }
@@ -1290,20 +1239,14 @@ impl OrderflowIngress {
         &self,
         priority: Priority,
         bundle: SystemMevShareBundle,
-        payload_size: usize,
     ) -> Result<B256, IngressError> {
         let bundle_hash = bundle.bundle_hash();
         let received_at = bundle.received_at;
-        let big_request = payload_size > BIG_REQUEST_SIZE_THRESHOLD;
 
         self.forwarders.broadcast_order(bundle.into()).await;
 
         self.user_metrics
-            .rpc_request_duration(
-                MEV_SEND_BUNDLE_METHOD,
-                priority.as_str(),
-                big_request.to_string(),
-            )
+            .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
             .observe(received_at.elapsed().as_secs_f64());
         Ok(bundle_hash)
     }
