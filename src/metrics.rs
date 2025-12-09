@@ -65,6 +65,21 @@ pub(crate) struct ForwarderMetrics {
     rpc_call_failures: Counter,
 }
 
+/// Metrics related to the TCP sockets used for communication
+#[metrics(scope = "socket")]
+#[derive(Debug, Clone)]
+pub(crate) struct SocketMetrics {
+    /// The congestion window, in bytes.
+    pub congestion_window: Gauge<u64>,
+    /// Our receive window in bytes.
+    pub receive_window: Gauge<u64>,
+
+    /// Total sender retransmitted bytes on the socket.
+    pub retransmitted_bytes: Gauge<u64>,
+    /// Total sender retransmitted packets on the socket.
+    pub retransmitted_packets: Gauge<u64>,
+}
+
 #[derive(Debug, Clone)]
 #[metrics(scope = "ingress")]
 pub(crate) struct IngressMetrics {

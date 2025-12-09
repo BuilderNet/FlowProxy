@@ -11,8 +11,15 @@ use std::{
     time::Duration,
 };
 
+use derive_more::{Deref, DerefMut};
 use msg_socket::ReqSocket;
-use msg_transport::Transport;
+use msg_transport::{
+    tcp::{Tcp, TcpStats},
+    tcp_tls::TcpTls,
+    Transport,
+};
+
+use crate::metrics::SocketMetrics;
 
 /// The default HTTP timeout in seconds.
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 2;
@@ -87,7 +94,36 @@ pub fn default_http_builder() -> reqwest::ClientBuilder {
     builder
 }
 
-pub type ReqSocketIp<T> = ReqSocket<T, SocketAddr>;
+/// A marker trait for a [`msg_transport::Transport`] that is either [`msg_transport::tcp::Tcp`] or
+/// [`msg_transport::tcp_tls::TcpTls`], with a known type for its stats.
+pub trait TcpTransport: Transport<SocketAddr, Stats = TcpStats> {}
+impl TcpTransport for Tcp {}
+impl TcpTransport for TcpTls {}
+
+/// A wrapper over [`msg_socket::ReqSocket`] with [`TcpTransport`] and associated socket metrics.
+#[derive(Deref, DerefMut)]
+#[allow(missing_debug_implementations)]
+pub struct ReqSocketTcp<T: TcpTransport> {
+    /// The underlying socket.
+    #[deref]
+    #[deref_mut]
+    inner: ReqSocket<T, SocketAddr>,
+    /// The metrics associated to the tcp socket.
+    metrics: SocketMetrics,
+}
+
+impl<T> ReqSocketTcp<T>
+where
+    T: TcpTransport,
+{
+    /// Update the metrics using the stats provided.
+    pub fn update_metrics(&self, stats: &TcpStats) {
+        self.metrics.congestion_window().set(stats.congestion_window);
+        self.metrics.receive_window().set(stats.receive_window);
+        self.metrics.retransmitted_bytes().set(stats.retransmitted_bytes);
+        self.metrics.retransmitted_packets().set(stats.retransmitted_packets);
+    }
+}
 
 /// A mapping of size ranges to [`T`].
 pub type Buckets<T> = HashMap<Range<usize>, T>;
@@ -112,24 +148,38 @@ pub fn tcp_clients_buckets(num_small: usize, num_big: usize) -> Buckets<usize> {
 
 /// A pool of TCP [`ReqSocket`] clients, with TLS support.
 #[allow(missing_debug_implementations)]
-pub struct ReqSocketIpBucketPool<T: Transport<SocketAddr>> {
+pub struct ReqSocketIpBucketPool<T: TcpTransport> {
     /// The clients in the pool.
-    clients: Arc<Buckets<(Vec<ReqSocketIp<T>>, AtomicU8)>>,
+    clients: Arc<Buckets<(Vec<ReqSocketTcp<T>>, AtomicU8)>>,
 }
 
 // Custom [`Clone`] implementation to avoid requiring T: Clone.
-impl<T: Transport<SocketAddr>> Clone for ReqSocketIpBucketPool<T> {
+impl<T: TcpTransport> Clone for ReqSocketIpBucketPool<T> {
     fn clone(&self) -> Self {
         Self { clients: self.clients.clone() }
     }
 }
 
-impl<T: Transport<SocketAddr>> ReqSocketIpBucketPool<T> {
-    pub fn new(buckets: Buckets<usize>, make_socket: impl Fn() -> ReqSocketIp<T>) -> Self {
+impl<T: TcpTransport> ReqSocketIpBucketPool<T> {
+    pub fn new(
+        buckets: Buckets<usize>,
+        peer_name: String,
+        make_socket: impl Fn() -> ReqSocket<T, SocketAddr>,
+    ) -> Self {
         let clients = buckets
             .iter()
             .map(|(range, &num_sockets)| {
-                let sockets = (0..num_sockets).map(|_| make_socket()).collect();
+                let sockets = (0..num_sockets)
+                    .map(|i| {
+                        let sock = make_socket();
+                        let metrics = SocketMetrics::builder()
+                            .with_label("id", i.to_string())
+                            .with_label("range", format!("{}..{}", range.start, range.end))
+                            .with_label("peer_name", peer_name.clone())
+                            .build();
+                        ReqSocketTcp { inner: sock, metrics }
+                    })
+                    .collect();
                 (range.clone(), (sockets, AtomicU8::new(0)))
             })
             .collect::<HashMap<_, _>>();
@@ -138,7 +188,7 @@ impl<T: Transport<SocketAddr>> ReqSocketIpBucketPool<T> {
     }
 
     /// Get a socket from the pool for the given size in bytes.
-    pub fn socket(&self, size_bytes: usize) -> &ReqSocketIp<T> {
+    pub fn socket(&self, size_bytes: usize) -> &ReqSocketTcp<T> {
         let (_, (clients, last_used)) = self
             .clients
             .iter()
