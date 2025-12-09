@@ -80,7 +80,7 @@ dependencies = [
  "auto_impl",
  "borsh",
  "c-kzg",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "either",
  "k256 0.13.4",
  "once_cell",
@@ -160,7 +160,7 @@ dependencies = [
  "auto_impl",
  "borsh",
  "c-kzg",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "either",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive",
@@ -184,7 +184,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-sol-types",
  "auto_impl",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "op-revm",
@@ -279,7 +279,7 @@ dependencies = [
  "alloy-sol-types",
  "async-trait",
  "auto_impl",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "futures-utils-wasm",
  "serde",
  "serde_json",
@@ -331,7 +331,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "const-hex",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "foldhash 0.1.5",
  "hashbrown 0.15.5",
  "indexmap 2.12.1",
@@ -358,7 +358,7 @@ dependencies = [
  "bytes",
  "cfg-if",
  "const-hex",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "foldhash 0.2.0",
  "getrandom 0.3.4",
  "hashbrown 0.16.1",
@@ -431,7 +431,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives 1.4.1",
  "alloy-rpc-types-engine",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive",
  "serde",
@@ -453,7 +453,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "alloy-serde",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive",
  "jsonwebtoken",
@@ -618,7 +618,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "arrayvec",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "nybbles",
  "serde",
  "smallvec",
@@ -2045,6 +2045,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert_case"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2417,22 +2426,23 @@ dependencies = [
 
 [[package]]
 name = "derive_more"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+checksum = "10b768e943bed7bf2cab53df09f4bc34bfd217cdb57d971e769874c9a6710618"
 dependencies = [
  "derive_more-impl",
 ]
 
 [[package]]
 name = "derive_more-impl"
-version = "2.0.1"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+checksum = "6d286bfdaf75e988b4a78e013ecd79c581e06399ab53fbacd2d916c2f904f30b"
 dependencies = [
- "convert_case 0.7.1",
+ "convert_case 0.10.0",
  "proc-macro2",
  "quote",
+ "rustc_version 0.4.1",
  "syn 2.0.111",
  "unicode-xid",
 ]
@@ -2653,7 +2663,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2912,7 +2922,7 @@ dependencies = [
  "clickhouse",
  "criterion",
  "dashmap 6.1.0",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "dotenvy",
  "eyre",
  "fdlimit",
@@ -4219,7 +4229,7 @@ name = "msg-common"
 version = "0.1.3"
 source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.3#0e87e65f0bcc9854122e774e288e6fbcdf696b12"
 dependencies = [
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "futures",
  "tokio",
  "tokio-util",
@@ -4233,7 +4243,7 @@ source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.3#0e87e65f0bcc985412
 dependencies = [
  "arc-swap",
  "bytes",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "futures",
  "msg-common",
  "msg-transport",
@@ -4254,7 +4264,7 @@ source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.3#0e87e65f0bcc985412
 dependencies = [
  "arc-swap",
  "async-trait",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "futures",
  "libc",
  "msg-common",
@@ -4378,7 +4388,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4559,7 +4569,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "alloy-serde",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "serde",
  "thiserror 2.0.17",
 ]
@@ -4575,7 +4585,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "alloy-rpc-types-engine",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive",
  "op-alloy-consensus",
@@ -5367,7 +5377,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5525,7 +5535,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "derivative",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "ethereum-consensus",
  "ethereum_ssz 0.9.1",
  "ethereum_ssz_derive",
@@ -5566,7 +5576,7 @@ dependencies = [
  "clickhouse",
  "clickhouse-derive 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "derivative",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "dyn-clone",
  "eyre",
  "futures",
@@ -5722,7 +5732,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives 1.4.1",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "metrics",
  "parking_lot",
  "pin-project",
@@ -5753,7 +5763,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-trie",
  "auto_impl",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
@@ -5835,7 +5845,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "bytes",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "reth-chainspec",
  "reth-codecs-derive",
  "reth-ethereum-primitives",
@@ -5898,7 +5908,7 @@ dependencies = [
  "alloy-eips",
  "alloy-evm",
  "alloy-primitives 1.4.1",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-trie-common",
@@ -5966,7 +5976,7 @@ dependencies = [
  "auto_impl",
  "byteorder",
  "bytes",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "modular-bitfield",
  "once_cell",
  "op-alloy-consensus",
@@ -5986,7 +5996,7 @@ version = "1.8.2"
 source = "git+https://github.com/paradigmxyz/reth?rev=9c30bf7af5e0d45deaf5917375c9922c16654b28#9c30bf7af5e0d45deaf5917375c9922c16654b28"
 dependencies = [
  "alloy-primitives 1.4.1",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "thiserror 2.0.17",
 ]
 
@@ -6005,7 +6015,7 @@ version = "1.8.2"
 source = "git+https://github.com/paradigmxyz/reth?rev=9c30bf7af5e0d45deaf5917375c9922c16654b28#9c30bf7af5e0d45deaf5917375c9922c16654b28"
 dependencies = [
  "alloy-primitives 1.4.1",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "serde",
  "strum",
 ]
@@ -6040,7 +6050,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives 1.4.1",
  "alloy-rlp",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
@@ -6134,7 +6144,7 @@ dependencies = [
  "alloy-primitives 1.4.1",
  "alloy-rlp",
  "alloy-trie",
- "derive_more 2.0.1",
+ "derive_more 2.1.0",
  "itertools 0.14.0",
  "nybbles",
  "rayon",
@@ -6585,7 +6595,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7477,7 +7487,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8412,7 +8422,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

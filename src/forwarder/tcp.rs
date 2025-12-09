@@ -1,6 +1,7 @@
 use crate::{
     forwarder::{
-        client::ReqSocketIpBucketPool, record_e2e_metrics, ForwardingRequest, LogRateLimiter,
+        client::{ReqSocketIpBucketPool, TcpTransport},
+        record_e2e_metrics, ForwardingRequest, LogRateLimiter,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
@@ -11,7 +12,6 @@ use alloy_primitives::B256;
 use alloy_rlp::Bytes;
 use futures::{stream::FuturesUnordered, StreamExt};
 use msg_socket::ReqError;
-use msg_transport::Transport;
 use rbuilder_utils::tasks::TaskExecutor;
 use std::{
     future::Future,
@@ -24,7 +24,7 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::Instrument as _;
 
-pub fn spawn_tcp_forwarder<T: Transport<SocketAddr>>(
+pub fn spawn_tcp_forwarder<T: TcpTransport>(
     name: String,
     address: SocketAddr,
     client: ReqSocketIpBucketPool<T>,
@@ -49,8 +49,8 @@ struct ForwarderResponse<Ok, Err> {
     /// The hash of the order forwarded.
     #[allow(dead_code)]
     hash: B256,
-    /// The instant at which request was sent.
-    start_time: Instant,
+    /// The duration between the request and the response
+    elapsed: Duration,
     /// Builder response.
     response: Result<Ok, Err>,
 
@@ -61,7 +61,7 @@ struct ForwarderResponse<Ok, Err> {
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
 
 /// An TCP forwarder that forwards requests to a peer.
-struct TcpForwarder<T: Transport<SocketAddr>> {
+struct TcpForwarder<T: TcpTransport> {
     client: ReqSocketIpBucketPool<T>,
     /// The name of the builder we're forwarding to.
     peer_name: String,
@@ -77,7 +77,7 @@ struct TcpForwarder<T: Transport<SocketAddr>> {
     metrics: ForwarderMetrics,
 }
 
-impl<T: Transport<SocketAddr>> TcpForwarder<T> {
+impl<T: TcpTransport> TcpForwarder<T> {
     fn new(
         client: ReqSocketIpBucketPool<T>,
         name: String,
@@ -124,10 +124,16 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
                 .unwrap_or_else(|| request.encoded_order.encoding().to_vec());
 
             tracing::trace!(bytes_len = bytes.len(), "sending tcp request");
-            let start_time = Instant::now();
-            let response = client_pool.socket(size).request(bytes.into()).await;
 
-            ForwarderResponse { start_time, response, is_big, order_type, hash, span: span_clone }
+            let start_time = Instant::now();
+            let socket = client_pool.socket(size);
+            let response = socket.request(bytes.into()).await;
+            let elapsed = start_time.elapsed();
+
+            let stats = socket.transport_stats();
+            socket.update_metrics(&stats);
+
+            ForwarderResponse { elapsed, response, is_big, order_type, hash, span: span_clone }
         } // We first want to enter the parent span, then the local span.
         .instrument(span);
 
@@ -136,17 +142,11 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
 
     fn on_response(&mut self, response: ForwarderResponse<Bytes, ReqError>) {
         let ForwarderResponse {
-            start_time,
-            response: response_result,
-            order_type,
-            is_big,
-            span,
-            ..
+            elapsed, response: response_result, order_type, is_big, span, ..
         } = response;
-        let elapsed = start_time.elapsed();
 
         let _g = span.enter();
-        tracing::trace!(elapsed = ?start_time.elapsed(), "received response");
+        tracing::trace!(?elapsed, "received response");
 
         let response = match response_result {
             Err(e) => {
@@ -189,7 +189,7 @@ impl<T: Transport<SocketAddr>> TcpForwarder<T> {
     }
 }
 
-impl<T: Transport<SocketAddr>> Future for TcpForwarder<T> {
+impl<T: TcpTransport> Future for TcpForwarder<T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
