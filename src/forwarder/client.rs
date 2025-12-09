@@ -100,8 +100,13 @@ pub const BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES: usize = 32_768; // 32 KiB
 /// [`BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES`] threshold.
 pub fn tcp_clients_buckets(num_small: usize, num_big: usize) -> Buckets<usize> {
     let mut map = HashMap::new();
-    map.insert(0..BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES, num_small);
-    map.insert(BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES..usize::MAX, num_big);
+    // If no big clients are requested, we use the same clients for all message sizes.
+    if num_big > 0 {
+        map.insert(0..BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES, num_small);
+        map.insert(BUCKET_MESSAGE_SIZE_THRESHOLD_BYTES..usize::MAX, num_big);
+    } else {
+        map.insert(0..usize::MAX, num_small);
+    }
     map
 }
 

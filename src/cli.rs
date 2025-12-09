@@ -282,11 +282,11 @@ pub struct OrderflowIngressArgs {
     /// For each peer, the number of TCP clients to use for forwarding big messages (>=32KiB).
     #[clap(
         long = "tcp.big-clients",
-        default_value_t = NonZero::new(2).expect("non-zero"),
+        default_value_t = 0,
         env = "TCP_BIG_CLIENTS",
         id = "TCP_BIG_CLIENTS"
     )]
-    pub tcp_big_clients: NonZero<usize>,
+    pub tcp_big_clients: usize,
 
     /// The number of IO worker threads used in Tokio.
     #[clap(long, default_value_t = 4, env = "IO_THREADS", id = "IO_THREADS")]
@@ -332,7 +332,7 @@ impl Default for OrderflowIngressArgs {
             gzip_enabled: false,
             http_client_pool_size: NonZero::new(8).expect("non-zero"),
             tcp_small_clients: NonZero::new(4).expect("non-zero"),
-            tcp_big_clients: NonZero::new(2).expect("non-zero"),
+            tcp_big_clients: 0,
             io_threads: 4,
             compute_threads: 4,
             cache: CacheArgs {
