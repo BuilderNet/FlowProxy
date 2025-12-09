@@ -41,7 +41,7 @@ pub const MEV_SEND_BUNDLE_METHOD: &str = "mev_sendBundle";
 pub const USE_LEGACY_SIGNATURE: bool = true;
 
 /// The threshold for a big request size in bytes.
-pub const BIG_REQUEST_SIZE_THRESHOLD_KB: usize = 50_000; // 50 KB
+pub const BIG_REQUEST_SIZE_THRESHOLD: usize = 50_000; // 50 KB
 
 /// The default bundle version.
 pub const DEFAULT_BUNDLE_VERSION: &str = "v2";

@@ -1,7 +1,7 @@
 use crate::{
     builderhub,
     consts::{
-        BIG_REQUEST_SIZE_THRESHOLD_KB, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
+        BIG_REQUEST_SIZE_THRESHOLD, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
         BUILDERNET_SIGNATURE_HEADER, FLASHBOTS_SIGNATURE_HEADER,
     },
     metrics::SYSTEM_METRICS,
@@ -322,7 +322,7 @@ impl ForwardingRequest {
     }
 
     pub fn is_big(&self) -> bool {
-        self.encoded_size() > BIG_REQUEST_SIZE_THRESHOLD_KB
+        self.encoded_size() > BIG_REQUEST_SIZE_THRESHOLD
     }
 
     /// Returns the hash of the encoded order.
