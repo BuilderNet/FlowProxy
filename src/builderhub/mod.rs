@@ -204,7 +204,7 @@ pub struct PeersUpdaterConfig {
     /// Number of TCP clients to use per peer for small messages.
     pub tcp_small_clients: NonZero<usize>,
     /// Number of TCP clients to use per peer for big messages.
-    pub tcp_big_clients: NonZero<usize>,
+    pub tcp_big_clients: usize,
     /// Private key PEM file for client authentication (mTLS)
     pub private_key_pem_file: Option<PathBuf>,
     /// Certificate PEM file for client authentication (mTLS)
@@ -446,10 +446,8 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             socket
         };
 
-        let buckets = tcp_clients_buckets(
-            self.config.tcp_small_clients.get(),
-            self.config.tcp_big_clients.get(),
-        );
+        let buckets =
+            tcp_clients_buckets(self.config.tcp_small_clients.get(), self.config.tcp_big_clients);
         let client_pool = ReqSocketIpBucketPool::new(buckets, make_socket);
 
         let sender =
