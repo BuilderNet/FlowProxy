@@ -73,16 +73,18 @@ async fn network_e2e_mev_share_bundle_works() {
     let client2 = spawn_ingress(Some(builder2.url())).await;
 
     // Wait for the proxies to be ready and connected to each other.
-    tokio::time::sleep(Duration::from_secs(35)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let bundle = RawShareBundle::random(&mut rng);
     let response = client2.send_mev_share_bundle(&bundle).await;
     assert!(response.status().is_success());
 
     let received = builder2.recv::<RawShareBundle>().await.unwrap();
+    debug!("builder2 received bundle");
     assert_eq!(received, bundle);
 
     let received = builder1.recv::<RawShareBundle>().await.unwrap();
+    debug!("builder1 received bundle");
     assert_eq!(received, bundle);
 }
 
@@ -134,15 +136,12 @@ mod linux {
         args.private_key_pem_file = Some(cert_dir.join("default.key"));
         args.certificate_pem_file = Some(cert_dir.join("default.crt"));
         args.orderflow_signer = Some(signer1);
-        args.http_client_pool_size = NonZero::new(1).unwrap();
 
         let mut args2 = args.clone();
         args2.private_key_pem_file = Some(cert_dir.join("default.key"));
         args2.certificate_pem_file = Some(cert_dir.join("default.crt"));
         args2.orderflow_signer = Some(signer2.clone());
-        // Listen on port 5552, the TCP receiver
-        args2.system_listen_addr_http = SocketAddr::from_str("127.0.0.1:5542").unwrap();
-        args2.system_listen_addr_tcp = SocketAddr::from_str("127.0.0.1:5552").unwrap();
+        args2.system_listen_addr = SocketAddr::from_str("127.0.0.1:5542").unwrap();
 
         let mut builder1 = BuilderReceiver::spawn().await;
         let mut builder2 = BuilderReceiver::spawn().await;

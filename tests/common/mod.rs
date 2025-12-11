@@ -15,6 +15,8 @@ use flowproxy::{
     runner::CliContext,
 };
 use hyper::{header, HeaderMap};
+use msg_socket::RepSocket;
+use msg_transport::tcp::Tcp;
 use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
@@ -36,7 +38,8 @@ pub(crate) async fn spawn_ingress_with_args(
     args: OrderflowIngressArgs,
 ) -> IngressClient<PrivateKeySigner> {
     let user_listener = TcpListener::bind(&args.user_listen_addr).await.unwrap();
-    let system_listener = TcpListener::bind(&args.system_listen_addr_http).await.unwrap();
+    let mut system_listener = RepSocket::new(Tcp::default());
+    system_listener.bind(args.system_listen_addr).await.expect("to bind tcp socket address");
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
 
@@ -65,7 +68,6 @@ pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
     args.peer_update_interval_s = 5;
     args.builder_url = builder_url;
-    args.http_client_pool_size = 1.try_into().unwrap();
     spawn_ingress_with_args(args).await
 }
 
