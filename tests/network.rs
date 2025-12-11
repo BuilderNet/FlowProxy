@@ -92,7 +92,7 @@ async fn network_e2e_mev_share_bundle_works() {
 /// makes this test fail).
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::{net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr as _, time::Duration};
+    use std::{net::SocketAddr, path::PathBuf, str::FromStr as _, time::Duration};
 
     use alloy_signer_local::PrivateKeySigner;
     use flowproxy::{
