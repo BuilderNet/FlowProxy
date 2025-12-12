@@ -443,41 +443,100 @@ systemctl daemon-reload
 rm /.bashrc || true
 export HOME=/root
 # This bashrc contains the foundry bin path
-# Install Foundry (for cast) to manage ECDSA keys
+# Install Foundry (for cast) to manage ECDSA keys — best effort to avoid failing the extension
 if ! command -v cast &> /dev/null; then
-    curl -L https://foundry.paradigm.xyz | bash
-    export PATH="$HOME/.foundry/bin:$PATH"
-
-    foundryup
+    (
+      set +e
+      success=0
+      for i in 1 2 3; do
+        if curl -L https://foundry.paradigm.xyz | bash; then
+          success=1
+          break
+        fi
+        echo "foundry install attempt $i failed; retrying in 5s..." >&2
+        sleep 5
+      done
+      # foundryup installs binaries under either ~/.foundry/bin or ~/.cargo/bin
+      export PATH="$HOME/.foundry/bin:$HOME/.cargo/bin:$PATH"
+      if [ -x "$HOME/.foundry/bin/foundryup" ]; then
+        "$HOME/.foundry/bin/foundryup" || true
+      fi
+      # Ensure cast is discoverable in PATH even if installation paths differ
+      if [ -x "$HOME/.foundry/bin/cast" ] && [ ! -x "/usr/local/bin/cast" ]; then
+        ln -sf "$HOME/.foundry/bin/cast" /usr/local/bin/cast || true
+      fi
+      if [ -x "$HOME/.cargo/bin/cast" ] && [ ! -x "/usr/local/bin/cast" ]; then
+        ln -sf "$HOME/.cargo/bin/cast" /usr/local/bin/cast || true
+      fi
+      if ! command -v cast &> /dev/null; then
+        echo "Warning: cast not installed; continuing without it" >&2
+      fi
+    )
 fi
 
-# Install Samply for profiling
+# Install Samply for profiling — best effort; do not fail provisioning if unavailable
 if ! command -v samply &> /dev/null; then
-    curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-installer.sh | sh
-    echo '1' | sudo tee /proc/sys/kernel/perf_event_paranoid
+    (
+      set +e
+      for i in 1 2; do
+        curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mstange/samply/releases/download/samply-v0.13.1/samply-installer.sh | sh && break
+        echo "samply install attempt $i failed; retrying in 5s..." >&2
+        sleep 5
+      done
+      if ! command -v samply &> /dev/null; then
+        echo "Warning: samply not installed; continuing without it" >&2
+      fi
+    )
 fi
 
 # Persist ECDSA key across extension updates
 KEY_FILE="/etc/flowproxy/ecdsa_private_key"
 
-if [ -f "$KEY_FILE" ]; then
-  # Use existing key
-  PRIVATE_KEY=$(cat "$KEY_FILE")
-  ADDRESS=$(cast wallet address "$PRIVATE_KEY")
-  echo "Using existing ECDSA key with address: $ADDRESS"
+# Resolve cast binary (may live in ~/.foundry/bin or ~/.cargo/bin)
+CAST_BIN="$(command -v cast || true)"
+if [ -z "$CAST_BIN" ] && [ -x "$HOME/.foundry/bin/cast" ]; then
+  CAST_BIN="$HOME/.foundry/bin/cast"
+fi
+if [ -z "$CAST_BIN" ] && [ -x "$HOME/.cargo/bin/cast" ]; then
+  CAST_BIN="$HOME/.cargo/bin/cast"
+fi
+
+ADDRESS=""
+if [ -z "$CAST_BIN" ]; then
+  echo "Warning: cast not available; skipping address derivation" >&2
 else
-  # Generate new key and save it
-  key_output=$(cast wallet new --json)
-  ADDRESS=$(echo "$key_output" | jq -r '.[0].address')
-  PRIVATE_KEY=$(echo "$key_output" | jq -r '.[0].private_key')
-  echo "$PRIVATE_KEY" > "$KEY_FILE"
-  chmod 600 "$KEY_FILE"
-  echo "Generated new ECDSA key with address: $ADDRESS"
+  if [ -f "$KEY_FILE" ]; then
+    # Use existing key
+    PRIVATE_KEY=$(cat "$KEY_FILE")
+    echo "Using existing ECDSA key"
+  else
+    # Generate new key and save it
+    set +e
+    key_output=$("$CAST_BIN" wallet new --json 2>/dev/null)
+    set -e
+    if [ -z "$key_output" ]; then
+      echo "Error: failed to generate ECDSA key with cast" >&2
+      exit 1
+    fi
+    ADDRESS=$(echo "$key_output" | jq -r '.[0].address')
+    PRIVATE_KEY=$(echo "$key_output" | jq -r '.[0].private_key')
+    echo "$PRIVATE_KEY" > "$KEY_FILE"
+    chmod 600 "$KEY_FILE"
+    echo "Generated new ECDSA key with address: $ADDRESS"
+  fi
+
+  # Derive address from private key (in case we loaded an existing one)
+  set +e
+  if [ -z "$ADDRESS" ]; then
+    ADDRESS=$("$CAST_BIN" wallet address "$PRIVATE_KEY" 2>/dev/null || true)
+  fi
+  set -e
+  echo "Using ECDSA key with address: \${ADDRESS:-unknown}"
 fi
 
 # Update flowproxy.env with the ECDSA private key (idempotent)
 sed -i '/^FLASHBOTS_ORDERFLOW_SIGNER=/d' /etc/flowproxy/flowproxy.env
-echo "FLASHBOTS_ORDERFLOW_SIGNER=$PRIVATE_KEY" >> /etc/flowproxy/flowproxy.env
+echo "FLASHBOTS_ORDERFLOW_SIGNER=\${PRIVATE_KEY:-}" >> /etc/flowproxy/flowproxy.env
 
 # Register credentials with BuilderHub before enabling the orderflow proxy
 set +e
