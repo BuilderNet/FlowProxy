@@ -231,8 +231,13 @@ pub(crate) async fn spawn_haproxy(
         ))
         // Mount the certificates directory
         .with_mount(Mount::bind_mount(
-            cert_dir.join("default.pem").to_string_lossy().to_string(),
-            "/usr/local/etc/haproxy/certs/default.pem",
+            cert_dir.join("cert.pem").to_string_lossy().to_string(),
+            "/usr/local/etc/haproxy/certs/cert.pem",
+        ))
+        // Mount the certificates directory
+        .with_mount(Mount::bind_mount(
+            cert_dir.join("cert.pem.key").to_string_lossy().to_string(),
+            "/usr/local/etc/haproxy/certs/cert.pem.key",
         ))
         .with_network("host")
         .start()

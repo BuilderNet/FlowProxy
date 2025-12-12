@@ -25,7 +25,6 @@ use std::{
 use tokio::net::{lookup_host, ToSocketAddrs};
 
 use rbuilder_utils::tasks::TaskExecutor;
-use reqwest::Certificate;
 use serde::{Deserialize, Serialize};
 
 mod client;
@@ -97,27 +96,10 @@ impl Peer {
 
     /// Get the TLS certificate from the orderflow proxy credentials.
     /// If the certificate is empty (an empty string), return `None`.
-    pub fn tls_certificate(&self) -> Option<Certificate> {
-        if self.instance.tls_cert.is_empty() {
-            None
-        } else {
-            // SAFETY: We expect the certificate to be valid. It's added as a root
-            // certificate.
-            Some(
-                Certificate::from_pem(self.instance.tls_cert.as_bytes())
-                    .expect("Valid certificate"),
-            )
-        }
-    }
-
-    /// Get the TLS certificate from the orderflow proxy credentials.
-    /// If the certificate is empty (an empty string), return `None`.
     pub fn openssl_tls_certificate(&self) -> Option<Result<X509, openssl::error::ErrorStack>> {
         if self.instance.tls_cert.is_empty() {
             None
         } else {
-            // SAFETY: We expect the certificate to be valid. It's added as a root
-            // certificate.
             Some(X509::from_pem(self.instance.tls_cert.as_bytes()))
         }
     }
@@ -445,7 +427,7 @@ mod tests {
         let ip_with_port = format!("{ip}:{DEFAULT_SYSTEM_PORT}");
         let sock = ip_with_port.parse::<std::net::SocketAddr>().unwrap();
 
-        let dns = "www.rust-lang.org".to_owned();
+        let dns = "chainbound.io".to_owned();
         let dns_with_port = format!("{dns}:{DEFAULT_SYSTEM_PORT}");
         let sock_from_dns = lookup_host(dns_with_port).await.unwrap().next().unwrap();
 
