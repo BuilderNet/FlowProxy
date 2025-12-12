@@ -153,13 +153,9 @@ pub struct OrderflowIngressArgs {
     #[clap(long, env = "USER_LISTEN_ADDR", id = "USER_LISTEN_ADDR")]
     pub user_listen_addr: SocketAddr,
 
-    /// Listen socket address for receiving HTTP system flow.
+    /// Listen socket address for receiving system flow.
     #[clap(long, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
-    pub system_listen_addr_http: SocketAddr,
-
-    /// Listen socket address for receiving TPC-only system flow.
-    #[clap(long, env = "SYSTEM_LISTEN_ADDR_TCP", id = "SYSTEM_LISTEN_ADDR_TCP")]
-    pub system_listen_addr_tcp: SocketAddr,
+    pub system_listen_addr: SocketAddr,
 
     /// Private key PEM file for client authentication (mTLS)
     #[clap(long, env = "PRIVATE_KEY_PEM_FILE", id = "PRIVATE_KEY_PEM_FILE")]
@@ -261,15 +257,6 @@ pub struct OrderflowIngressArgs {
     )]
     pub peer_update_interval_s: u64,
 
-    /// For each peer, the size of the HTTP client pool used to forward requests. Deprecated.
-    #[clap(
-        long = "http.client-pool-size",
-        default_value_t = NonZero::new(8).expect("non-zero"),
-        env = "CLIENT_POOL_SIZE",
-        id = "CLIENT_POOL_SIZE"
-    )]
-    pub http_client_pool_size: NonZero<usize>,
-
     /// For each peer, the number of TCP clients to use for forwarding small messages (<32KiB).
     #[clap(
         long = "tcp.small-clients",
@@ -307,8 +294,7 @@ impl Default for OrderflowIngressArgs {
     fn default() -> Self {
         Self {
             user_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-            system_listen_addr_http: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-            system_listen_addr_tcp: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            system_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap(),
             builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
             private_key_pem_file: None,
             certificate_pem_file: None,
@@ -330,7 +316,6 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            http_client_pool_size: NonZero::new(8).expect("non-zero"),
             tcp_small_clients: NonZero::new(4).expect("non-zero"),
             tcp_big_clients: 0,
             io_threads: 4,
@@ -417,10 +402,8 @@ mod tests {
             "test", // binary name
             "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-addr-http",
+            "--system-listen-addr",
             "0.0.0.0:9755",
-            "--system-listen-addr-tcp",
-            "0.0.0.0:9756",
             "--private-key-pem-file",
             "./",
             "--certificate-pem-file",
@@ -448,10 +431,8 @@ mod tests {
             "test", // binary name
             "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-addr-http",
+            "--system-listen-addr",
             "0.0.0.0:9755",
-            "--system-listen-addr-tcp",
-            "0.0.0.0:9756",
             "--private-key-pem-file",
             "./",
             "--certificate-pem-file",
@@ -482,10 +463,8 @@ mod tests {
             "test", // binary name
             "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-addr-http",
+            "--system-listen-addr",
             "0.0.0.0:9755",
-            "--system-listen-addr-tcp",
-            "0.0.0.0:9756",
             "--private-key-pem-file",
             "./",
             "--certificate-pem-file",
@@ -530,10 +509,8 @@ mod tests {
             "test", // binary name
             "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-addr-http",
+            "--system-listen-addr",
             "0.0.0.0:9755",
-            "--system-listen-addr-tcp",
-            "0.0.0.0:9756",
             "--private-key-pem-file",
             "./",
             "--certificate-pem-file",
@@ -566,10 +543,8 @@ mod tests {
             "test", // binary name
             "--user-listen-addr",
             "0.0.0.0:9754",
-            "--system-listen-addr-http",
+            "--system-listen-addr",
             "0.0.0.0:9755",
-            "--system-listen-addr-tcp",
-            "0.0.0.0:9756",
             "--private-key-pem-file",
             "./",
             "--certificate-pem-file",

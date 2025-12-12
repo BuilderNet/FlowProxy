@@ -153,7 +153,7 @@ impl<T: TcpTransport> TcpForwarder<T> {
                 // NOTE: this might be a very noisy "connection refused" error, so we rate-limit
                 // the logs.
                 self.log_limiter.log(|| {
-                    tracing::error!(?e, "failed to forwarder request");
+                    tracing::error!(?e, "failed to forward request");
                 });
                 self.metrics.tcp_call_failures(e.to_string()).inc();
                 return;

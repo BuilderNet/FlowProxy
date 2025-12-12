@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v2.0.0 - 2025-12-12
+
+This release drops the HTTP server used in FlowProxy for dealing with system
+requests. Now only the TCP server exists. It marks a breaking change in
+FlowProxy, because backwards compatibility is not maintained anymore.
+
+- The HTTP server on the usual system api port (5544) has been dropped, meaning
+  that also the `readyz`/`infoz`/`livez` endpoint are now unsupported as well.
+  Healthchecks will be performed by sending a special packet to the TCP server,
+  see <https://github.com/chainbound/msg-rs/pull/140>.
+- As mentioned above, all functionality related to `infoz` endpoint for port
+  discovery has been dropped, and the socket address returned from BuilderHub is
+  assumed to be for the TCP server.
+- The flag `--system-listen-addr-tcp` (`SYSTEM_LISTEN_ADDR_TCP`) has been
+  dropped.
+- The flag `--system-listen-addr-http` (`SYSTEM_LISTEN_ADDR`) has been renamed
+  to `--system-listen-addr`, with same environment variable name, and it now is
+  used to bind the TCP server.
+- The flag `--http.client-pool-size` (`CLIENT_POOL_SIZE`) has been removed since
+  there are no more HTTP clients used for forwarding orders to peers.
+
+## v1.3.3 - 2025-12-09
+
+- TCP sockets metrics have been added to the forwarder logic, so we can
+  inspect TCP congestion window and retransmitted bytes of running instances.
+- A label has been removed from metrics which caused higher CPU usage.
+
+## v1.3.2 - 2025-12-09
+
+- TCP big clients are now optional. If the number provided is zero, the "small"
+  clients will be used for every request size.
+
+## v1.3.1 - 2025-12-05
+
+- Fusaka support for `eth_sendRawTransaction`.
+
 ## v1.3.0 - 2025-11-27
 
 This PR introduces messaging on system API using request/reply TCP (+ TLS)
