@@ -65,9 +65,6 @@ pub mod trace;
 pub mod utils;
 pub mod validation;
 
-/// Default system port for proxy instances.
-const DEFAULT_SYSTEM_PORT: u16 = 5544;
-
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
     fdlimit::raise_fd_limit()?;
 

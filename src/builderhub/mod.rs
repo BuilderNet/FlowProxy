@@ -5,7 +5,7 @@ use crate::{
         ForwardingRequest, PeerHandle,
     },
     metrics::BuilderHubMetrics,
-    priority, DEFAULT_SYSTEM_PORT,
+    priority,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
@@ -19,8 +19,8 @@ use openssl::{
     x509::X509,
 };
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, net::SocketAddr, num::NonZero, path::PathBuf,
-    str::FromStr, sync::Arc, time::Duration,
+    convert::Infallible, fmt::Debug, future::Future, io, net::SocketAddr, num::NonZero,
+    path::PathBuf, sync::Arc, time::Duration,
 };
 use tokio::net::{lookup_host, ToSocketAddrs};
 
@@ -39,7 +39,11 @@ pub use client::Client;
 const DEFAULT_TLS_CIPHERS: &str =
     "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
 
+/// Default system port for proxy instances.
+const DEFAULT_SYSTEM_PORT: u16 = 5544;
+
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct InstanceData {
     /// TLS certificate of the instance in UTF-8 encoded PEM format.
     pub tls_cert: String,
@@ -47,6 +51,7 @@ pub struct InstanceData {
 
 /// The credentials of the running overflow proxy of a BuilderHub peer.
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct PeerCredentials {
     /// TLS certificate of the orderflow proxy in UTF-8 encoded PEM format.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -58,6 +63,7 @@ pub struct PeerCredentials {
 /// A [`Peer`] is a builder inside Builderhub. This holds informations about a builder peer, as
 /// returned by the `api/l1-builder/v1/builders` endpoint of BuilderHub.
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct Peer {
     /// Builder name.
     pub name: String,
@@ -72,10 +78,11 @@ pub struct Peer {
 }
 
 impl Peer {
-    /// Get the system API URL for the builder.
-    /// Mirrors Go proxy behavior: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
-    pub fn system_api(&self) -> String {
-        let host = if self.dns_name.is_empty() {
+    /// Get the system API TCP socket address for the builder.
+    ///
+    /// Reference: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
+    pub async fn system_api(&self) -> io::Result<Option<SocketAddr>> {
+        let host_with_port = if self.dns_name.is_empty() {
             if self.ip.contains(":") {
                 self.ip.clone()
             } else {
@@ -85,16 +92,12 @@ impl Peer {
             format!("{}:{}", self.dns_name, DEFAULT_SYSTEM_PORT)
         };
 
-        if self.reqwest_tls_certificate().is_some() {
-            format!("https://{host}")
-        } else {
-            format!("http://{host}")
-        }
+        Ok(lookup_host(host_with_port).await?.next())
     }
 
     /// Get the TLS certificate from the orderflow proxy credentials.
     /// If the certificate is empty (an empty string), return `None`.
-    pub fn reqwest_tls_certificate(&self) -> Option<Certificate> {
+    pub fn tls_certificate(&self) -> Option<Certificate> {
         if self.instance.tls_cert.is_empty() {
             None
         } else {
@@ -337,12 +340,14 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             None
         };
 
-        let socket_addr_str = &peer.ip;
-        tracing::debug!(addr = %socket_addr_str, "connecting to peer via tcp");
-        let socket_addr = match SocketAddr::from_str(socket_addr_str) {
-            Ok(a) => a,
+        let socket_addr = match peer.system_api().await {
+            Ok(Some(addr)) => addr,
+            Ok(None) => {
+                tracing::error!("failed to resolve socket address, lookup_host returned `None`");
+                return None;
+            }
             Err(e) => {
-                tracing::error!(?e, ip = %peer.ip, "failed to parse ip and port into socket address");
+                tracing::error!(?e, "failed to resolve socket address");
                 return None;
             }
         };
@@ -424,4 +429,37 @@ fn tls_connector(
     builder.set_ciphersuites(DEFAULT_TLS_CIPHERS)?;
 
     Ok(builder.build())
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::net::lookup_host;
+
+    use crate::builderhub::DEFAULT_SYSTEM_PORT;
+
+    use crate::builderhub::Peer;
+
+    #[tokio::test]
+    async fn system_api_host_and_port_works() {
+        let ip = "10.0.0.1".to_owned();
+        let ip_with_port = format!("{ip}:{DEFAULT_SYSTEM_PORT}");
+        let sock = ip_with_port.parse::<std::net::SocketAddr>().unwrap();
+
+        let dns = "www.rust-lang.org".to_owned();
+        let dns_with_port = format!("{dns}:{DEFAULT_SYSTEM_PORT}");
+        let sock_from_dns = lookup_host(dns_with_port).await.unwrap().next().unwrap();
+
+        let peer = Peer { ip: ip_with_port.clone(), ..Default::default() };
+
+        assert_eq!(peer.system_api().await.unwrap().unwrap(), sock);
+
+        let ip = "10.0.0.1".to_owned();
+        let peer = Peer { ip: ip.clone(), ..Default::default() };
+
+        assert_eq!(peer.system_api().await.unwrap().unwrap(), sock);
+
+        let peer = Peer { ip: ip.clone(), dns_name: dns.clone(), ..Default::default() };
+
+        assert_eq!(peer.system_api().await.unwrap().unwrap(), sock_from_dns);
+    }
 }
