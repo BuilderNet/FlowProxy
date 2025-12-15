@@ -1,16 +1,11 @@
 use crate::{
     forwarder::{
-        client::{
-            default_http_builder, tcp_clients_buckets, HttpClientPool, ReqSocketIpBucketPool,
-            TcpTransport,
-        },
-        http::spawn_http_forwarder,
+        client::{tcp_clients_buckets, ReqSocketIpBucketPool, TcpTransport},
         tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
     },
     metrics::BuilderHubMetrics,
-    primitives::PeerProxyInfo,
-    priority, DEFAULT_SYSTEM_PORT,
+    priority,
 };
 use alloy_primitives::Address;
 use dashmap::DashMap;
@@ -24,13 +19,12 @@ use openssl::{
     x509::X509,
 };
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, net::SocketAddr, num::NonZero, path::PathBuf,
-    str::FromStr, sync::Arc, time::Duration,
+    convert::Infallible, fmt::Debug, future::Future, io, net::SocketAddr, num::NonZero,
+    path::PathBuf, sync::Arc, time::Duration,
 };
 use tokio::net::{lookup_host, ToSocketAddrs};
 
 use rbuilder_utils::tasks::TaskExecutor;
-use reqwest::Certificate;
 use serde::{Deserialize, Serialize};
 
 mod client;
@@ -44,7 +38,11 @@ pub use client::Client;
 const DEFAULT_TLS_CIPHERS: &str =
     "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
 
+/// Default system port for proxy instances.
+const DEFAULT_SYSTEM_PORT: u16 = 5544;
+
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct InstanceData {
     /// TLS certificate of the instance in UTF-8 encoded PEM format.
     pub tls_cert: String,
@@ -52,6 +50,7 @@ pub struct InstanceData {
 
 /// The credentials of the running overflow proxy of a BuilderHub peer.
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct PeerCredentials {
     /// TLS certificate of the orderflow proxy in UTF-8 encoded PEM format.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +62,7 @@ pub struct PeerCredentials {
 /// A [`Peer`] is a builder inside Builderhub. This holds informations about a builder peer, as
 /// returned by the `api/l1-builder/v1/builders` endpoint of BuilderHub.
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Default))]
 pub struct Peer {
     /// Builder name.
     pub name: String,
@@ -76,20 +76,12 @@ pub struct Peer {
     pub instance: InstanceData,
 }
 
-/// Get the IP address without the port.
-pub fn ip_no_port(ip: &str) -> &str {
-    if let Some((ip, _)) = ip.split_once(':') {
-        ip
-    } else {
-        ip
-    }
-}
-
 impl Peer {
-    /// Get the system API URL for the builder.
-    /// Mirrors Go proxy behavior: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
-    pub fn system_api(&self) -> String {
-        let host = if self.dns_name.is_empty() {
+    /// Get the system API TCP socket address for the builder.
+    ///
+    /// Reference: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
+    pub async fn system_api(&self) -> io::Result<Option<SocketAddr>> {
+        let host_with_port = if self.dns_name.is_empty() {
             if self.ip.contains(":") {
                 self.ip.clone()
             } else {
@@ -99,26 +91,7 @@ impl Peer {
             format!("{}:{}", self.dns_name, DEFAULT_SYSTEM_PORT)
         };
 
-        if self.reqwest_tls_certificate().is_some() {
-            format!("https://{host}")
-        } else {
-            format!("http://{host}")
-        }
-    }
-
-    /// Get the TLS certificate from the orderflow proxy credentials.
-    /// If the certificate is empty (an empty string), return `None`.
-    pub fn reqwest_tls_certificate(&self) -> Option<Certificate> {
-        if self.instance.tls_cert.is_empty() {
-            None
-        } else {
-            // SAFETY: We expect the certificate to be valid. It's added as a root
-            // certificate.
-            Some(
-                Certificate::from_pem(self.instance.tls_cert.as_bytes())
-                    .expect("Valid certificate"),
-            )
-        }
+        Ok(lookup_host(host_with_port).await?.next())
     }
 
     /// Get the TLS certificate from the orderflow proxy credentials.
@@ -127,8 +100,6 @@ impl Peer {
         if self.instance.tls_cert.is_empty() {
             None
         } else {
-            // SAFETY: We expect the certificate to be valid. It's added as a root
-            // certificate.
             Some(X509::from_pem(self.instance.tls_cert.as_bytes()))
         }
     }
@@ -199,8 +170,6 @@ pub struct PeersUpdaterConfig {
     pub local_signer: Address,
     /// Whether to disable spawning order forwarders to peers.
     pub disable_forwarding: bool,
-    /// For each peer indicates the size of the client pool used to connect to it.
-    pub http_client_pool_size: NonZero<usize>,
     /// Number of TCP clients to use per peer for small messages.
     pub tcp_small_clients: NonZero<usize>,
     /// Number of TCP clients to use per peer for big messages.
@@ -281,44 +250,6 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         self.metrics.peer_count().set(self.peers.len());
     }
 
-    /// Get information about a peer's running proxy instance, calling the `/infoz` endpoint.
-    ///
-    /// On any error, returns `None`.
-    async fn proxy_info(&self, peer: &Peer) -> Option<PeerProxyInfo> {
-        let client_builder = default_http_builder();
-
-        // If the TLS certificate is present, use HTTPS and configure the client to use it.
-        let http_client = if let Some(ref tls_cert) = peer.reqwest_tls_certificate() {
-            client_builder
-                .https_only(true)
-                .add_root_certificate(tls_cert.clone())
-                .build()
-                .expect("failed to build client")
-        } else {
-            client_builder.build().expect("failed to build client")
-        };
-
-        // NOTE: HTTP System API is at root, so we can use it.
-        let info_url = format!("{}/infoz", peer.system_api());
-        let response = match http_client.get(info_url).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(?e, "failed to call infoz endpoint");
-                return None;
-            }
-        };
-
-        let peer_info = match response.json::<PeerProxyInfo>().await {
-            Ok(m) => m,
-            Err(e) => {
-                tracing::error!(?e, "failed to deserialize infoz json response");
-                return None;
-            }
-        };
-
-        Some(peer_info)
-    }
-
     /// Process a single peer, updating the local list of connected peers and spawning order
     /// forwarder.
     #[tracing::instrument(skip_all, fields(peer = ?peer))]
@@ -348,12 +279,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             return;
         }
 
-        let peer_sender_maybe = if let Some(proxy_info) = self.proxy_info(&peer).await {
-            self.peer_tcp_sender(&peer, &proxy_info).await
-        } else {
-            tracing::info!("falling back to http forwarder");
-            self.peer_http_sender(&peer).await
-        };
+        let peer_sender_maybe = self.peer_tcp_sender(&peer).await;
 
         if let Some(sender) = peer_sender_maybe {
             self.peers.insert(peer.name.clone(), PeerHandle { info: peer, sender });
@@ -367,7 +293,6 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
     async fn peer_tcp_sender(
         &self,
         peer: &Peer,
-        proxy_info: &PeerProxyInfo,
     ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
         let tls_config = if let Some(certificate_res) = peer.openssl_tls_certificate() {
             let certificate = match certificate_res {
@@ -397,12 +322,14 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             None
         };
 
-        let socket_addr_str = format!("{}:{}", ip_no_port(&peer.ip), proxy_info.system_api_port);
-        tracing::debug!(addr = %socket_addr_str, "connecting to peer via tcp");
-        let socket_addr = match SocketAddr::from_str(&socket_addr_str) {
-            Ok(a) => a,
+        let socket_addr = match peer.system_api().await {
+            Ok(Some(addr)) => addr,
+            Ok(None) => {
+                tracing::error!("failed to resolve socket address, lookup_host returned `None`");
+                return None;
+            }
             Err(e) => {
-                tracing::error!(?e, ip = %peer.ip, "failed to parse ip and port into socket address");
+                tracing::error!(?e, "failed to resolve socket address");
                 return None;
             }
         };
@@ -455,38 +382,6 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
         Some(sender)
     }
-
-    /// Create an HTTP sender for the given peer, to forwarder orderflow requests.
-    async fn peer_http_sender(
-        &self,
-        peer: &Peer,
-    ) -> Option<priority::channel::UnboundedSender<Arc<ForwardingRequest>>> {
-        // Create a client pool.
-        let client_pool = HttpClientPool::new(self.config.http_client_pool_size, || {
-            let client_builder = default_http_builder();
-
-            // If the TLS certificate is present, use HTTPS and configure the client to use it.
-            if let Some(ref tls_cert) = peer.reqwest_tls_certificate() {
-                client_builder
-                    .https_only(true)
-                    .add_root_certificate(tls_cert.clone())
-                    .build()
-                    .expect("failed to build client")
-            } else {
-                client_builder.build().expect("failed to build client")
-            }
-        });
-
-        let sender = spawn_http_forwarder(
-            peer.name.clone(),
-            peer.system_api(),
-            client_pool.clone(),
-            &self.task_executor,
-        )
-        .expect("malformed url");
-
-        Some(sender)
-    }
 }
 
 /// Create a TLS connector with:
@@ -520,27 +415,33 @@ fn tls_connector(
 
 #[cfg(test)]
 mod tests {
-    use crate::builderhub::ip_no_port;
+    use tokio::net::lookup_host;
 
-    #[test]
-    fn ip_no_port_works() {
-        let ip_with_port = "10.0.0.2:1234";
-        let ip_no_port_expected = "10.0.0.2";
-        let ip_no_port_got = ip_no_port(ip_with_port);
+    use crate::builderhub::DEFAULT_SYSTEM_PORT;
 
-        assert_eq!(
-            ip_no_port_expected, ip_no_port_got,
-            "expected {ip_no_port_expected}, got {ip_no_port_got}"
-        );
+    use crate::builderhub::Peer;
 
-        // Ensure this is a no-op if no port is present.
+    #[tokio::test]
+    async fn system_api_host_and_port_works() {
+        let ip = "10.0.0.1".to_owned();
+        let ip_with_port = format!("{ip}:{DEFAULT_SYSTEM_PORT}");
+        let sock = ip_with_port.parse::<std::net::SocketAddr>().unwrap();
 
-        let ip_no_port_expected = "10.0.0.2";
-        let ip_no_port_got = ip_no_port(ip_no_port_expected);
+        let dns = "chainbound.io".to_owned();
+        let dns_with_port = format!("{dns}:{DEFAULT_SYSTEM_PORT}");
+        let sock_from_dns = lookup_host(dns_with_port).await.unwrap().next().unwrap();
 
-        assert_eq!(
-            ip_no_port_expected, ip_no_port_got,
-            "expected {ip_no_port_expected}, got {ip_no_port_got}"
-        );
+        let peer = Peer { ip: ip_with_port.clone(), ..Default::default() };
+
+        assert_eq!(peer.system_api().await.unwrap().unwrap(), sock);
+
+        let ip = "10.0.0.1".to_owned();
+        let peer = Peer { ip: ip.clone(), ..Default::default() };
+
+        assert_eq!(peer.system_api().await.unwrap().unwrap(), sock);
+
+        let peer = Peer { ip: ip.clone(), dns_name: dns.clone(), ..Default::default() };
+
+        assert_eq!(peer.system_api().await.unwrap().unwrap(), sock_from_dns);
     }
 }

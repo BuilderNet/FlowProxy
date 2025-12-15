@@ -30,6 +30,7 @@ use msg_transport::tcp::Tcp;
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
+    net::SocketAddr,
     num::NonZero,
     str::FromStr as _,
     sync::Arc,
@@ -64,9 +65,6 @@ pub mod trace;
 pub mod utils;
 pub mod validation;
 
-/// Default system port for proxy instances.
-const DEFAULT_SYSTEM_PORT: u16 = 5544;
-
 pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
     fdlimit::raise_fd_limit()?;
 
@@ -79,7 +77,9 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
-    let system_listener = TcpListener::bind(&args.system_listen_addr_http).await?;
+    let mut system_listener = RepSocket::new(Tcp::default());
+    system_listener.bind(args.system_listen_addr).await.expect("to bind tcp socket address");
+
     let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_addr {
         Some(TcpListener::bind(builder_listen_url).await?)
     } else {
@@ -91,7 +91,7 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
 pub async fn run_with_listeners(
     args: OrderflowIngressArgs,
     user_listener: TcpListener,
-    system_listener: TcpListener,
+    system_listener: RepSocket<Tcp, SocketAddr>,
     builder_listener: Option<TcpListener>,
     ctx: CliContext,
 ) -> eyre::Result<()> {
@@ -126,7 +126,6 @@ pub async fn run_with_listeners(
     let peer_update_config = PeersUpdaterConfig {
         local_signer,
         disable_forwarding: args.disable_forwarding,
-        http_client_pool_size: args.http_client_pool_size,
         tcp_small_clients: args.tcp_small_clients,
         tcp_big_clients: args.tcp_big_clients,
         certificate_pem_file: args.certificate_pem_file,
@@ -151,8 +150,8 @@ pub async fn run_with_listeners(
         tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
 
-        let peer_store =
-            local_peer_store.register(local_signer, Some(system_listener.local_addr()?.port()));
+        let peer_store = local_peer_store
+            .register(local_signer, Some(system_listener.local_addr().expect("bound").port()));
 
         let peers = peers.clone();
         let peer_updater = PeersUpdater::new(
@@ -193,10 +192,6 @@ pub async fn run_with_listeners(
     let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
     let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
 
-    let mut reply_socket = RepSocket::new(Tcp::default());
-    reply_socket.bind(args.system_listen_addr_tcp).await.expect("to bind tcp socket address");
-    let system_api_port_tcp = reply_socket.local_addr().expect("binded socket").port();
-
     let ingress = Arc::new(OrderflowIngress {
         gzip_enabled: args.gzip_enabled,
         rate_limiting_enabled: args.enable_rate_limiting,
@@ -215,7 +210,6 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
-        system_api_port: system_api_port_tcp,
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
@@ -231,10 +225,10 @@ pub async fn run_with_listeners(
         }
     });
 
+    tracing::info!(addr = ?system_listener.local_addr(), "starting system tcp listener");
     let ingress_socket =
-        IngressSocket::new(reply_socket, ingress.clone(), ctx.task_executor.clone());
+        IngressSocket::new(system_listener, ingress.clone(), ctx.task_executor.clone());
     ctx.task_executor.spawn(ingress_socket.listen());
-    tracing::info!(port = system_api_port_tcp, "starting system tcp listener");
 
     // Spawn user facing HTTP server for accepting bundles and raw transactions.
     let user_router = Router::new()
@@ -251,23 +245,6 @@ pub async fn run_with_listeners(
     let addr = user_listener.local_addr()?;
     tracing::info!(target: "ingress", ?addr, "Starting user ingress server");
 
-    // Spawn system facing HTTP server for accepting bundles and raw transactions.
-    let system_router = Router::new()
-        .route("/", post(OrderflowIngress::system_handler))
-        .route("/health", get(|| async { Ok::<_, ()>(()) }))
-        .route("/livez", get(|| async { Ok::<_, ()>(()) }))
-        .route("/readyz", get(OrderflowIngress::ready_handler))
-        .route("/infoz", get(OrderflowIngress::info_handler))
-        .layer(DefaultBodyLimit::max(args.max_request_size))
-        // TODO: After mTLS, we can probably take this out.
-        .route_layer(axum::middleware::from_fn_with_state(
-            Arc::new(ingress.user_metrics.clone()),
-            track_server_metrics,
-        ))
-        .with_state(ingress.clone());
-    let addr = system_listener.local_addr()?;
-    tracing::info!(target: "ingress", ?addr, "Starting system ingress server");
-
     if let Some(builder_listener) = builder_listener {
         let builder_router = Router::new()
             .route("/", post(OrderflowIngress::builder_handler))
@@ -278,14 +255,10 @@ pub async fn run_with_listeners(
 
         tokio::try_join!(
             axum::serve(user_listener, user_router),
-            axum::serve(system_listener, system_router),
             axum::serve(builder_listener, builder_router)
         )?;
     } else {
-        tokio::try_join!(
-            axum::serve(user_listener, user_router),
-            axum::serve(system_listener, system_router),
-        )?;
+        tokio::try_join!(axum::serve(user_listener, user_router))?;
     }
 
     Ok(())

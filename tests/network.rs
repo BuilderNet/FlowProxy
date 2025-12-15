@@ -73,16 +73,18 @@ async fn network_e2e_mev_share_bundle_works() {
     let client2 = spawn_ingress(Some(builder2.url())).await;
 
     // Wait for the proxies to be ready and connected to each other.
-    tokio::time::sleep(Duration::from_secs(35)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let bundle = RawShareBundle::random(&mut rng);
     let response = client2.send_mev_share_bundle(&bundle).await;
     assert!(response.status().is_success());
 
     let received = builder2.recv::<RawShareBundle>().await.unwrap();
+    debug!("builder2 received bundle");
     assert_eq!(received, bundle);
 
     let received = builder1.recv::<RawShareBundle>().await.unwrap();
+    debug!("builder1 received bundle");
     assert_eq!(received, bundle);
 }
 
@@ -90,7 +92,7 @@ async fn network_e2e_mev_share_bundle_works() {
 /// makes this test fail).
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::{net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr as _, time::Duration};
+    use std::{net::SocketAddr, path::PathBuf, str::FromStr as _, time::Duration};
 
     use alloy_signer_local::PrivateKeySigner;
     use flowproxy::{
@@ -130,19 +132,17 @@ mod linux {
         let signer1 = PrivateKeySigner::random();
         let signer2 = PrivateKeySigner::random();
 
-        let mut args = OrderflowIngressArgs::default().disable_builder_hub();
-        args.private_key_pem_file = Some(cert_dir.join("default.key"));
-        args.certificate_pem_file = Some(cert_dir.join("default.crt"));
+        let mut args = OrderflowIngressArgs { peer_update_interval_s: 5, ..Default::default() }
+            .disable_builder_hub();
+        // args.private_key_pem_file = Some(cert_dir.join("default.key"));
+        // args.certificate_pem_file = Some(cert_dir.join("default.crt"));
         args.orderflow_signer = Some(signer1);
-        args.http_client_pool_size = NonZero::new(1).unwrap();
 
         let mut args2 = args.clone();
-        args2.private_key_pem_file = Some(cert_dir.join("default.key"));
-        args2.certificate_pem_file = Some(cert_dir.join("default.crt"));
+        // args2.private_key_pem_file = Some(cert_dir.join("default.key"));
+        // args2.certificate_pem_file = Some(cert_dir.join("default.crt"));
         args2.orderflow_signer = Some(signer2.clone());
-        // Listen on port 5552, the TCP receiver
-        args2.system_listen_addr_http = SocketAddr::from_str("127.0.0.1:5542").unwrap();
-        args2.system_listen_addr_tcp = SocketAddr::from_str("127.0.0.1:5552").unwrap();
+        args2.system_listen_addr = SocketAddr::from_str("127.0.0.1:5542").unwrap();
 
         let mut builder1 = BuilderReceiver::spawn().await;
         let mut builder2 = BuilderReceiver::spawn().await;
@@ -150,35 +150,51 @@ mod linux {
         args.builder_url = Some(builder1.url());
         args2.builder_url = Some(builder2.url());
 
-        let haproxy = spawn_haproxy(&testdata_dir.join("haproxy.cfg"), &cert_dir).await.unwrap();
-
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
         let client1 = spawn_ingress_with_args(args).await;
         let _client2 = spawn_ingress_with_args(args2).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
+        let haproxy = spawn_haproxy(&testdata_dir.join("haproxy.cfg"), &cert_dir).await.unwrap();
+        tracing::info!(ports = ?haproxy.ports().await, "spawned haproxy");
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
         // Override server instance data
         let ps = LOCAL_PEER_STORE.clone();
+        tracing::debug!(?ps, "peer store");
+
         ps.builders.entry(signer2.address().to_string()).and_modify(|entry| {
+            tracing::info!("overwriting signer2 peer with haproxy");
+
             // Overwrite the IP address to HAProxy system API
-            entry.ip = "127.0.0.1:5544".to_string();
+            entry.ip = "[::1]:5544".to_string();
             entry.dns_name = "localhost".to_string();
-            entry.instance.tls_cert =
-                std::fs::read_to_string(cert_dir.join("default.crt")).unwrap();
+            entry.instance.tls_cert = std::fs::read_to_string(cert_dir.join("cert.pem")).unwrap();
         });
+
+        tracing::debug!(?ps, "peer store after haproxy change");
+        // NOTE: wait for peer config to update, so peer 1 connects to peer 2 HAProxy.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+
+        let mut stdout = String::new();
+        haproxy.stdout(false).read_to_string(&mut stdout).await.unwrap();
+        let mut stderr = String::new();
+        haproxy.stderr(false).read_to_string(&mut stderr).await.unwrap();
+
+        tracing::info!("\n\nhaproxy stdout: {}\n\n", stdout);
+        tracing::info!("\n\nhaproxy stderr: {}\n\n", stderr);
 
         let mut rng = rand::rng();
 
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
         let bundle = RawBundle::random(&mut rng);
+
+        tracing::info!("sending bundle from client1");
         let response = client1.send_bundle(&bundle).await;
         assert!(response.status().is_success());
 
         let mut received = builder1.recv::<RawBundle>().await.unwrap();
-
+        tracing::info!("builder1 (local) received bundle from client1");
         assert!(received.metadata.signing_address.is_some());
         assert!(received.metadata.bundle_hash.is_some());
         // NOTE: This will have a signing address populated which we reset
@@ -187,6 +203,8 @@ mod linux {
         assert_eq!(received, bundle);
 
         let mut received = builder2.recv::<RawBundle>().await.unwrap();
+        tracing::info!("builder2 (remote) received bundle from client1");
+
         assert!(received.metadata.signing_address.is_some());
         assert!(received.metadata.bundle_hash.is_some());
         // NOTE: This will have a signing address populated which we reset
@@ -199,7 +217,7 @@ mod linux {
         let mut stderr = String::new();
         haproxy.stderr(false).read_to_string(&mut stderr).await.unwrap();
 
-        println!("{}", stdout);
-        println!("{}", stderr);
+        println!("haproxy stdout: {}", stdout);
+        println!("haproxy stderr: {}", stderr);
     }
 }
