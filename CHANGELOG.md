@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v2.0.1 - 2025-12-16
+
+- Bump `prometric` to `v0.2.1`.
+
 ## v2.0.0 - 2025-12-12
 
 This release drops the HTTP server used in FlowProxy for dealing with system
