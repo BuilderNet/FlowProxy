@@ -66,7 +66,8 @@ axum = { version = "0.8", default-features = false, features = [
   "http2",
   "json",
   "tokio",
-  "tracing"
+  "tracing",
+  "macros"
 ] }
 wyhash = "0.6.0"
 mime = "0.3"
@@ -91,10 +92,10 @@ serde_json = "1"
 bitcode = { version = "0.6.7", features = ["serde"] }
 
 # networking
-msg-transport = { git = "https://github.com/chainbound/msg-rs", tag = "v0.1.4", features = [
+msg-transport = { git = "https://github.com/chainbound/msg-rs", branch = "lore/feat/transport-control", features = [
   "tcp-tls"
 ] }
-msg-socket = { git = "https://github.com/chainbound/msg-rs", tag = "v0.1.4" }
+msg-socket = { git = "https://github.com/chainbound/msg-rs", branch = "lore/feat/transport-control" }
 openssl = { version = "0.10.75" }
 
 [dev-dependencies]

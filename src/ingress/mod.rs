@@ -1,9 +1,10 @@
 use crate::{
     cache::{OrderCache, SignerCache},
     consts::{
-        BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
-        DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD,
-        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, UNKNOWN, USE_LEGACY_SIGNATURE,
+        BUILDERNET_ADDRESS_HEADER, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
+        BUILDERNET_SIGNATURE_HEADER, DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS,
+        ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER,
+        UNKNOWN, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -11,10 +12,10 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
-        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
-        EthereumTransaction, RawBundleBitcode, Samplable, SystemBundle, SystemBundleDecoder,
-        SystemBundleMetadata, SystemTransaction, TcpResponse, TcpResponseStatus, UtcInstant,
-        WithHeaders,
+        decode_transaction, AcceptorBuilder, BundleHash as _, BundleReceipt, DecodedBundle,
+        EthResponse, EthereumTransaction, RawBundleBitcode, Samplable, SslAcceptorBuilderExt as _,
+        SystemBundle, SystemBundleDecoder, SystemBundleMetadata, SystemTransaction, TcpResponse,
+        TcpResponseStatus, UtcInstant, WithHeaders,
     },
     priority::{workers::PriorityWorkers, Priority},
     rate_limit::CounterOverTime,
@@ -35,7 +36,8 @@ use dashmap::DashMap;
 use flate2::read::GzDecoder;
 use futures::StreamExt;
 use msg_socket::RepSocket;
-use msg_transport::tcp::Tcp;
+use msg_transport::{tcp_tls::TcpTls, Transport};
+use openssl::x509::X509;
 use rbuilder_primitives::serialize::RawBundle;
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
@@ -49,6 +51,7 @@ use std::{
     time::{Duration, Instant},
 };
 use time::UtcDateTime;
+use tokio::sync::mpsc;
 use tracing::*;
 
 pub mod error;
@@ -345,13 +348,24 @@ impl OrderflowIngress {
         tracing::Span::current().record("method", tracing::field::display(method));
 
         // Before doing anything else, verify that the signature header is present.
-        let Some(signature_header) = headers.get(BUILDERNET_SIGNATURE_HEADER) else {
-            let msg = "no signature headers found";
+        let Some(address_str) = headers.get(BUILDERNET_ADDRESS_HEADER) else {
+            let msg = "no peer address headers found";
             tracing::error!(msg);
             return TcpResponse::error_message(
                 TcpResponseStatus::ErrorMissingArguments,
                 msg.to_string(),
             );
+        };
+        let address = match address_str.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                let msg = "invalid peer address";
+                tracing::error!(?e, msg);
+                return TcpResponse::error_message(
+                    TcpResponseStatus::ErrorDecoding,
+                    msg.to_string(),
+                );
+            }
         };
 
         let mut priority = Priority::Low;
@@ -363,27 +377,9 @@ impl OrderflowIngress {
             tracing::trace!("failed to retrieve priority from request, defaulting to {priority}");
         }
 
-        let peer = 'peer: {
-            let data_clone = data.clone();
-            let sig_clone = signature_header.clone();
-            if let Some(address) = ingress
-                .pqueues
-                .spawn_with_priority(priority, move || {
-                    maybe_verify_signature(&sig_clone, &data_clone, USE_LEGACY_SIGNATURE)
-                })
-                .await
-            {
-                if ingress.flashbots_signer.is_some_and(|addr| addr == address) {
-                    break 'peer "flashbots".to_string();
-                }
-
-                if let Some(peer) = ingress.forwarders.find_peer(address) {
-                    break 'peer peer;
-                }
-            }
-
-            tracing::error!(signature_header, "error verifying peer signature");
-            return TcpResponse::error_invalid_signature();
+        let Some(peer) = ingress.forwarders.find_peer(address) else {
+            tracing::error!(?address, "unknown peer");
+            return TcpResponse::error_unknown_argument(address_str.to_owned());
         };
         tracing::Span::current().record("peer", tracing::field::display(&peer));
 
@@ -768,32 +764,69 @@ impl OrderflowIngress {
     }
 }
 
+/// The TCP+TLS socket receiving orderflow.
 #[allow(missing_debug_implementations)]
 pub struct IngressSocket {
-    reply_socket: RepSocket<Tcp, SocketAddr>,
+    /// The underlying reply socket which acts as server.
+    reply_socket: RepSocket<TcpTls, SocketAddr>,
+    /// The channel which received the current peers certificates, to update the TLS acceptor of
+    /// the server.
+    certs_rx: mpsc::Receiver<Vec<X509>>,
+    /// Used to re-create the TLS acceptor.
+    acceptor_builder: Arc<AcceptorBuilder>,
+    /// The shared state between requests.
     ingress_state: Arc<OrderflowIngress>,
     task_executor: TaskExecutor,
 }
 
 impl IngressSocket {
     pub fn new(
-        socket: RepSocket<Tcp, SocketAddr>,
+        socket: RepSocket<TcpTls, SocketAddr>,
+        certs_rx: mpsc::Receiver<Vec<X509>>,
         ingress_state: Arc<OrderflowIngress>,
+        acceptor_builder: Arc<AcceptorBuilder>,
         task_executor: TaskExecutor,
     ) -> Self {
-        Self { reply_socket: socket, ingress_state, task_executor }
+        Self { reply_socket: socket, ingress_state, task_executor, certs_rx, acceptor_builder }
     }
 
     pub async fn listen(mut self) {
-        while let Some(req) = self.reply_socket.next().await {
-            let data = req.msg().clone();
-            let state = self.ingress_state.clone();
-            self.task_executor.spawn(async {
-                let response = OrderflowIngress::system_handler(state, data).await;
-                if let Err(e) = req.respond(bitcode::encode(&response).into()) {
-                    tracing::error!(?e, "failed to respond to request");
+        loop {
+            tokio::select! {
+                Some(certs) = self.certs_rx.recv() => {
+                    // NOTE: even if peers remain the same, we can't do a no-op because
+                    // [`openssl::x509::X509`] isn't [`Clone`], so we cannot hold them for
+                    // comparison.
+                    let acceptor = match self
+                        .acceptor_builder
+                        .ssl()
+                        .and_then(|b| b.add_trusted_certs(certs))
+                        .map(|b| b.build())
+                    {
+                        Ok(a) => <TcpTls as Transport<SocketAddr>>::Control::SwapAcceptor(a),
+                        Err(e) => {
+                            tracing::error!(?e, "failed to create tls acceptor");
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = self.reply_socket.control(acceptor).await {
+                        tracing::error!(?e, "failed to send acceptor update");
+                    }
+                },
+
+                Some(req) = self.reply_socket.next() => {
+                    let data = req.msg().clone();
+                    let state = self.ingress_state.clone();
+                    self.task_executor.spawn(async {
+                        let response = OrderflowIngress::system_handler(state, data).await;
+                        if let Err(e) = req.respond(bitcode::encode(&response).into()) {
+                            tracing::error!(?e, "failed to respond to request");
+                        }
+                    });
                 }
-            });
+
+            }
         }
     }
 }

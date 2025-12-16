@@ -1,4 +1,4 @@
-use std::{convert::Infallible, net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr};
+use std::{convert::Infallible, net::SocketAddr, num::NonZero, path::PathBuf};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -157,13 +157,13 @@ pub struct OrderflowIngressArgs {
     #[clap(long, env = "SYSTEM_LISTEN_ADDR", id = "SYSTEM_LISTEN_ADDR")]
     pub system_listen_addr: SocketAddr,
 
-    /// Private key PEM file for client authentication (mTLS)
-    #[clap(long, env = "PRIVATE_KEY_PEM_FILE", id = "PRIVATE_KEY_PEM_FILE")]
-    pub private_key_pem_file: Option<PathBuf>,
+    /// PEM file containing both certificate and private key, used for server authentication.
+    #[clap(long, env = "SERVER_CERTIFICATE_PEM_FILE", id = "SERVER_CERTIFICATE_PEM_FILE")]
+    pub server_certificate_pem_file: PathBuf,
 
-    /// Certificate PEM file for client authentication (mTLS)
-    #[clap(long, env = "CERTIFICATE_PEM_FILE", id = "CERTIFICATE_PEM_FILE")]
-    pub certificate_pem_file: Option<PathBuf>,
+    /// PEM file containing both certificate and private key, used for client authentication (mTLS)
+    #[clap(long, env = "CLIENT_CERTIFICATE_PEM_FILE", id = "CLIENT_CERTIFICATE_PEM_FILE")]
+    pub client_certificate_pem_file: PathBuf,
 
     /// Listen URL for receiving builder stats.
     #[clap(long, env = "BUILDER_LISTEN_ADDR", id = "BUILDER_LISTEN_ADDR")]
@@ -292,12 +292,20 @@ pub struct OrderflowIngressArgs {
 
 impl Default for OrderflowIngressArgs {
     fn default() -> Self {
+        use std::str::FromStr as _;
+
         Self {
             user_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap(),
-            system_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap(),
+            system_listen_addr: SocketAddr::from_str("[::1]:0").unwrap(),
             builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
-            private_key_pem_file: None,
-            certificate_pem_file: None,
+            client_certificate_pem_file: PathBuf::from_str(
+                "./tests/testdata/certificates/cert.pem",
+            )
+            .unwrap(),
+            server_certificate_pem_file: PathBuf::from_str(
+                "./tests/testdata/certificates/cert.pem",
+            )
+            .unwrap(),
             peer_update_interval_s: 30,
             builder_url: None,
             builder_ready_endpoint: None,
@@ -368,7 +376,7 @@ impl OrderflowIngressArgs {
         self
     }
 
-    /// Disable the builder hub.
+    /// Disable builderhub, running with a local peer store instead.
     pub fn disable_builder_hub(mut self) -> Self {
         self.builder_hub_url = None;
         self
@@ -404,9 +412,9 @@ mod tests {
             "0.0.0.0:9754",
             "--system-listen-addr",
             "0.0.0.0:9755",
-            "--private-key-pem-file",
+            "--server-certificate-pem-file",
             "./",
-            "--certificate-pem-file",
+            "--client-certificate-pem-file",
             "./",
             "--builder-listen-addr",
             "0.0.0.0:8756",
@@ -433,9 +441,9 @@ mod tests {
             "0.0.0.0:9754",
             "--system-listen-addr",
             "0.0.0.0:9755",
-            "--private-key-pem-file",
+            "--server-certificate-pem-file",
             "./",
-            "--certificate-pem-file",
+            "--client-certificate-pem-file",
             "./",
             "--builder-listen-addr",
             "0.0.0.0:8756",
@@ -465,9 +473,9 @@ mod tests {
             "0.0.0.0:9754",
             "--system-listen-addr",
             "0.0.0.0:9755",
-            "--private-key-pem-file",
+            "--server-certificate-pem-file",
             "./",
-            "--certificate-pem-file",
+            "--client-certificate-pem-file",
             "./",
             "--builder-listen-addr",
             "0.0.0.0:8756",
@@ -511,9 +519,9 @@ mod tests {
             "0.0.0.0:9754",
             "--system-listen-addr",
             "0.0.0.0:9755",
-            "--private-key-pem-file",
+            "--server-certificate-pem-file",
             "./",
-            "--certificate-pem-file",
+            "--client-certificate-pem-file",
             "./",
             "--builder-listen-addr",
             "0.0.0.0:8756",
@@ -545,9 +553,9 @@ mod tests {
             "0.0.0.0:9754",
             "--system-listen-addr",
             "0.0.0.0:9755",
-            "--private-key-pem-file",
+            "--server-certificate-pem-file",
             "./",
-            "--certificate-pem-file",
+            "--client-certificate-pem-file",
             "./",
             "--builder-listen-addr",
             "0.0.0.0:8756",

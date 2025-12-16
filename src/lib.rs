@@ -1,7 +1,9 @@
 //! Orderflow ingress for BuilderNet.
 
 use crate::{
-    builderhub::{PeersUpdater, PeersUpdaterConfig},
+    builderhub::{
+        InstanceData, Peer, PeerCredentials, PeerStore, PeersUpdater, PeersUpdaterConfig,
+    },
     cache::SignerCache,
     forwarder::{
         client::{default_http_builder, HttpClientPool},
@@ -9,7 +11,7 @@ use crate::{
     },
     ingress::IngressSocket,
     metrics::IngressMetrics,
-    primitives::SystemBundleDecoder,
+    primitives::{AcceptorBuilder, SslAcceptorBuilderExt, SystemBundleDecoder},
     priority::workers::PriorityWorkers,
     runner::CliContext,
     statics::LOCAL_PEER_STORE,
@@ -26,11 +28,11 @@ use dashmap::DashMap;
 use entity::SpamThresholds;
 use forwarder::{IngressForwarders, PeerHandle};
 use msg_socket::RepSocket;
-use msg_transport::tcp::Tcp;
+use msg_transport::tcp_tls::{self, TcpTls};
 use prometric::exporter::ExporterBuilder;
 use reqwest::Url;
 use std::{
-    net::SocketAddr,
+    fs,
     num::NonZero,
     str::FromStr as _,
     sync::Arc,
@@ -77,21 +79,18 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
-    let mut system_listener = RepSocket::new(Tcp::default());
-    system_listener.bind(args.system_listen_addr).await.expect("to bind tcp socket address");
 
     let builder_listener = if let Some(ref builder_listen_url) = args.builder_listen_addr {
         Some(TcpListener::bind(builder_listen_url).await?)
     } else {
         None
     };
-    run_with_listeners(args, user_listener, system_listener, builder_listener, ctx).await
+    run_with_listeners(args, user_listener, builder_listener, ctx).await
 }
 
 pub async fn run_with_listeners(
     args: OrderflowIngressArgs,
     user_listener: TcpListener,
-    system_listener: RepSocket<Tcp, SocketAddr>,
     builder_listener: Option<TcpListener>,
     ctx: CliContext,
 ) -> eyre::Result<()> {
@@ -128,16 +127,30 @@ pub async fn run_with_listeners(
         disable_forwarding: args.disable_forwarding,
         tcp_small_clients: args.tcp_small_clients,
         tcp_big_clients: args.tcp_big_clients,
-        certificate_pem_file: args.certificate_pem_file,
-        private_key_pem_file: args.private_key_pem_file,
+        certificate_pem_file: args.client_certificate_pem_file,
     };
 
-    if let Some(builder_hub_url) = args.builder_hub_url {
-        tracing::debug!(url = builder_hub_url, "Running with BuilderHub");
-        let builder_hub = builderhub::Client::new(builder_hub_url);
+    let acceptor_builder =
+        Arc::new(AcceptorBuilder::new(fs::read(&args.server_certificate_pem_file)?));
+
+    let (system_listener, certs_rx) = if let Some(url) = args.builder_hub_url {
+        tracing::debug!(?url, "running with builderhub");
+        let builder_hub = builderhub::Client::new(url);
+
+        let peer_list = builder_hub.get_peers().await?;
+        let certs = peer_list
+            .iter()
+            .filter_map(|p| p.openssl_tls_certificate().and_then(Result::ok))
+            .collect::<Vec<_>>();
+
+        let acceptor = acceptor_builder.ssl()?.add_trusted_certs(certs)?.build();
+        let tls = tcp_tls::Server::new(acceptor);
+        let mut socket = RepSocket::new(TcpTls::Server(tls));
+        socket.bind(args.system_listen_addr).await.expect("to bind system listener");
+
         builder_hub.register(local_signer).await?;
 
-        let peer_updater = PeersUpdater::new(
+        let (peer_updater, certs_rx) = PeersUpdater::new(
             peer_update_config,
             builder_hub,
             peers.clone(),
@@ -146,15 +159,38 @@ pub async fn run_with_listeners(
 
         ctx.task_executor
             .spawn_critical("run_update_peers", peer_updater.run(args.peer_update_interval_s));
+        (socket, certs_rx)
     } else {
-        tracing::warn!("No BuilderHub URL provided, running with local peer store");
-        let local_peer_store = LOCAL_PEER_STORE.clone();
+        let peer_store = LOCAL_PEER_STORE.clone();
 
-        let peer_store = local_peer_store
-            .register(local_signer, Some(system_listener.local_addr().expect("bound").port()));
+        let peer_list = peer_store.get_peers().await?;
+        let certs = peer_list
+            .iter()
+            .filter_map(|p| p.openssl_tls_certificate().and_then(Result::ok))
+            .collect::<Vec<_>>();
 
-        let peers = peers.clone();
-        let peer_updater = PeersUpdater::new(
+        let peer_cert =
+            fs::read_to_string(&peer_update_config.certificate_pem_file).unwrap_or_default();
+
+        let acceptor = acceptor_builder.ssl()?.add_trusted_certs(certs)?.build();
+        let tls = tcp_tls::Server::new(acceptor);
+        let mut socket = RepSocket::new(TcpTls::Server(tls));
+        socket.bind(args.system_listen_addr).await.expect("to bind system listener");
+        let port = socket.local_addr().expect("bound").port();
+
+        let peer = Peer {
+            name: local_signer.to_string(),
+            orderflow_proxy: PeerCredentials {
+                ecdsa_pubkey_address: local_signer,
+                ..Default::default()
+            },
+            ip: format!("127.0.0.1:{port}"),
+            dns_name: "localhost".to_owned(),
+            instance: InstanceData { tls_cert: peer_cert },
+        };
+        let peer_store = peer_store.register(peer);
+
+        let (peer_updater, certs_rx) = PeersUpdater::new(
             peer_update_config,
             peer_store,
             peers.clone(),
@@ -162,8 +198,9 @@ pub async fn run_with_listeners(
         );
 
         ctx.task_executor
-            .spawn_critical("local_update_peers", peer_updater.run(args.peer_update_interval_s));
-    }
+            .spawn_critical("run_update_peers", peer_updater.run(args.peer_update_interval_s));
+        (socket, certs_rx)
+    };
 
     // Configure the priority worker pool.
     let workers = PriorityWorkers::new_with_threads(args.compute_threads);
@@ -226,8 +263,13 @@ pub async fn run_with_listeners(
     });
 
     tracing::info!(addr = ?system_listener.local_addr(), "starting system tcp listener");
-    let ingress_socket =
-        IngressSocket::new(system_listener, ingress.clone(), ctx.task_executor.clone());
+    let ingress_socket = IngressSocket::new(
+        system_listener,
+        certs_rx,
+        ingress.clone(),
+        acceptor_builder,
+        ctx.task_executor.clone(),
+    );
     ctx.task_executor.spawn(ingress_socket.listen());
 
     // Spawn user facing HTTP server for accepting bundles and raw transactions.

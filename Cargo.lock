@@ -1355,6 +1355,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b098575ebe77cb6d14fc7f32749631a6e44edbef6b796f89b020e99ba20d425"
 dependencies = [
  "axum-core",
+ "axum-macros",
  "bytes",
  "futures-util",
  "http",
@@ -1396,6 +1397,17 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]
@@ -4156,8 +4168,8 @@ dependencies = [
 
 [[package]]
 name = "msg-common"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.4"
+source = "git+https://github.com/chainbound/msg-rs?branch=lore%2Ffeat%2Ftransport-control#3bd4c7604850c0cac19102879c7fcf46e09e1001"
 dependencies = [
  "derive_more 2.1.0",
  "futures",
@@ -4168,8 +4180,8 @@ dependencies = [
 
 [[package]]
 name = "msg-socket"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.4"
+source = "git+https://github.com/chainbound/msg-rs?branch=lore%2Ffeat%2Ftransport-control#3bd4c7604850c0cac19102879c7fcf46e09e1001"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -4189,8 +4201,8 @@ dependencies = [
 
 [[package]]
 name = "msg-transport"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.4"
+source = "git+https://github.com/chainbound/msg-rs?branch=lore%2Ffeat%2Ftransport-control#3bd4c7604850c0cac19102879c7fcf46e09e1001"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -4207,8 +4219,8 @@ dependencies = [
 
 [[package]]
 name = "msg-wire"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.4"
+source = "git+https://github.com/chainbound/msg-rs?branch=lore%2Ffeat%2Ftransport-control#3bd4c7604850c0cac19102879c7fcf46e09e1001"
 dependencies = [
  "bytes",
  "flate2",

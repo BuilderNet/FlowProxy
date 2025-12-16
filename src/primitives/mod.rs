@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fmt::Display,
-    hash::{Hash as _, Hasher as _},
+    hash::{Hash, Hasher as _},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -20,6 +20,11 @@ use alloy_eips::{
 use alloy_primitives::{Address, Bytes, U64};
 use bitcode::{Decode, Encode};
 use derive_more::{Deref, From};
+use openssl::{
+    pkey::PKey,
+    ssl::{SslAcceptor, SslAcceptorBuilder, SslMethod, SslVerifyMode, SslVersion},
+    x509::{store::X509StoreBuilder, X509},
+};
 use rbuilder_primitives::{
     serialize::{
         RawBundle, RawBundleConvertError, RawBundleDecodeResult, RawBundleMetadata, TxEncoding,
@@ -33,6 +38,7 @@ use strum::AsRefStr;
 use uuid::Uuid;
 
 use crate::{
+    builderhub::DEFAULT_TLS_CIPHERS,
     consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD},
     priority::Priority,
 };
@@ -830,8 +836,107 @@ impl TcpResponse {
         Self::error_message(TcpResponseStatus::ErrorDecoding, message)
     }
 
-    pub fn error_invalid_signature() -> Self {
-        Self::no_data(TcpResponseStatus::ErrorInvalidSignature)
+    pub fn error_unknown_argument(data: impl Into<TcpReponseType>) -> Self {
+        Self { status: TcpResponseStatus::ErrorUnknownArgument, data: data.into() }
+    }
+}
+
+/// Structure that holds raw PEM bytes of a key and cert pair, with utilities
+/// for easily creating a [`SslAcceptorBuilder`] with client authentication (mTLS).
+#[derive(Debug, Clone)]
+pub struct AcceptorBuilder {
+    raw_certificate: Vec<u8>,
+}
+
+impl AcceptorBuilder {
+    pub fn new(cert: impl Into<Vec<u8>>) -> Self {
+        Self { raw_certificate: cert.into() }
+    }
+
+    /// Creates a [`SslAcceptorBuilder`] with support for client authentication (mTLS).
+    pub fn ssl(&self) -> Result<SslAcceptorBuilder, openssl::error::ErrorStack> {
+        let mut acceptor_builder = SslAcceptor::mozilla_intermediate_v5(SslMethod::tls())?;
+        acceptor_builder.set_min_proto_version(Some(SslVersion::TLS1_3))?;
+        acceptor_builder.set_ciphersuites(DEFAULT_TLS_CIPHERS)?;
+
+        let cert = X509::from_pem(&self.raw_certificate)?;
+        acceptor_builder.set_certificate(&cert)?;
+
+        let key = PKey::private_key_from_pem(&self.raw_certificate)?;
+        acceptor_builder.set_private_key(&key)?;
+
+        acceptor_builder.set_verify_callback(
+            SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+            |success, store_ctx| {
+                if success {
+                    return true;
+                }
+
+                // TODO: uncomment this
+                // If we don't have enough verbosity, just propagate the error and don't log
+                // further.
+                // if !tracing::enabled!(tracing::Level::DEBUG) {
+                //     return false;
+                // }
+
+                let verify_result = store_ctx.error();
+
+                let error_code = verify_result.as_raw();
+                let error_string = verify_result.error_string();
+                let error_depth = store_ctx.error_depth();
+
+                // TODO: demote this to debug span
+                let _span = tracing::info_span!(
+                    "openssl_verify",
+                    ?error_code,
+                    ?error_string,
+                    ?error_depth,
+                    chain_len = tracing::field::Empty,
+                )
+                .entered();
+
+                // Get the certificate that caused the error
+                if let Some(cert) = store_ctx.current_cert() {
+                    let subject_name = cert.subject_name();
+                    tracing::error!(?subject_name, "failed");
+                } else {
+                    tracing::error!("failed and no certificate relevant to error");
+                }
+
+                if let Some(chain) = store_ctx.chain() {
+                    if chain.len() > 1 {
+                        _span.record("chain_len", chain.len());
+                        for (idx, cert) in chain.iter().enumerate() {
+                            let subject = cert.subject_name();
+                            tracing::debug!(?idx, ?subject, "certificate");
+                        }
+                    }
+                }
+
+                false
+            },
+        );
+
+        Ok(acceptor_builder)
+    }
+}
+
+/// Extension trait to override certificate store with the provided root certificates.
+pub trait SslAcceptorBuilderExt: Sized {
+    fn add_trusted_certs(self, certs: Vec<X509>) -> Result<Self, openssl::error::ErrorStack>;
+}
+
+impl SslAcceptorBuilderExt for SslAcceptorBuilder {
+    /// Replaces current [`X509StoreBuilder`] with one created using these trusted certificates.
+    fn add_trusted_certs(mut self, certs: Vec<X509>) -> Result<Self, openssl::error::ErrorStack> {
+        let mut store_builder = X509StoreBuilder::new()?;
+        for cert in certs.into_iter() {
+            if let Err(e) = store_builder.add_cert(cert) {
+                tracing::error!(?e, "failed to add trusted cert");
+            }
+        }
+        self.set_verify_cert_store(store_builder.build())?;
+        Ok(self)
     }
 }
 

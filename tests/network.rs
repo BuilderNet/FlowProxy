@@ -1,13 +1,16 @@
+use std::{path::PathBuf, str::FromStr as _, time::Duration};
+
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
 use common::{spawn_ingress, BuilderReceiver};
-use flowproxy::utils::testutils::Random as _;
-use rbuilder_primitives::serialize::RawBundle;
-use std::time::Duration;
 
 mod common;
+use flowproxy::{cli::OrderflowIngressArgs, utils::testutils::Random as _};
+use rbuilder_primitives::serialize::RawBundle;
 use tracing::{debug, info};
+
+use crate::common::spawn_ingress_with_args;
 
 /// This tests proper order propagation between 2 proxies.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -19,7 +22,14 @@ async fn network_e2e_bundle_tx_works() {
     let mut builder1 = BuilderReceiver::spawn().await;
     let mut builder2 = BuilderReceiver::spawn().await;
     let client1 = spawn_ingress(Some(builder1.url())).await;
-    let client2 = spawn_ingress(Some(builder2.url())).await;
+    let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
+    args.peer_update_interval_s = 5;
+    args.builder_url = Some(builder2.url());
+    args.server_certificate_pem_file =
+        PathBuf::from_str("./tests/testdata/certificates/cert_2.pem").unwrap();
+    args.client_certificate_pem_file =
+        PathBuf::from_str("./tests/testdata/certificates/cert_2.pem").unwrap();
+    let client2 = spawn_ingress_with_args(args).await;
 
     // Wait for the proxies to be ready and connected to each other.
     tokio::time::sleep(Duration::from_secs(10)).await;
