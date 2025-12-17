@@ -23,11 +23,6 @@ use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::{net::TcpListener, sync::mpsc};
 
-#[cfg(target_os = "linux")]
-use testcontainers::{
-    core::Mount, runners::AsyncRunner as _, ContainerAsync, GenericImage, ImageExt,
-};
-
 pub(crate) struct IngressClient<S: Signer> {
     pub(crate) url: String,
     pub(crate) client: reqwest::Client,
@@ -187,51 +182,4 @@ impl BuilderReceiver {
 
         JsonRpcResponse::result(request_id, ())
     }
-}
-
-/// Spawns an HAProxy container with the given configuration and certificate directory.
-///
-/// # Arguments
-/// * `testdata_dir` - Path to the directory containing haproxy.cfg
-/// * `cert_dir` - Path to the directory containing server certificates
-///
-/// # Returns
-/// A running HAProxy container that will be cleaned up when dropped.
-#[cfg(target_os = "linux")]
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-pub(crate) async fn spawn_haproxy(
-    haproxy_cfg: &std::path::Path,
-    cert_dir: &std::path::Path,
-) -> Result<ContainerAsync<GenericImage>, testcontainers::core::error::TestcontainersError> {
-    // Ensure the paths exist before mounting
-    if !haproxy_cfg.exists() {
-        panic!("haproxy.cfg not found at: {}", haproxy_cfg.display());
-    }
-    if !cert_dir.exists() {
-        panic!("Certificate directory not found at: {}", cert_dir.display());
-    }
-
-    let container = GenericImage::new("haproxy", "3.2.8")
-        // Wait for HAProxy to be ready
-        // .with_wait_for(WaitFor::message_on_stdout("Proxy started"))
-        // Mount the HAProxy configuration file
-        .with_mount(Mount::bind_mount(
-            haproxy_cfg.to_string_lossy().to_string(),
-            "/usr/local/etc/haproxy/haproxy.cfg",
-        ))
-        // Mount the certificates directory
-        .with_mount(Mount::bind_mount(
-            cert_dir.join("cert.pem").to_string_lossy().to_string(),
-            "/usr/local/etc/haproxy/certs/cert.pem",
-        ))
-        // Mount the certificates directory
-        .with_mount(Mount::bind_mount(
-            cert_dir.join("cert.pem.key").to_string_lossy().to_string(),
-            "/usr/local/etc/haproxy/certs/cert.pem.key",
-        ))
-        .with_network("host")
-        .start()
-        .await?;
-
-    Ok(container)
 }
