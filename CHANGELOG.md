@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v3.0.0 - 2025-12-18
+
+Breaking change release regarding mTLS and MEV-Share bundles support.
+
+### mTLS
+
+This release enforces mTLS for communication with other FlowProxy instances.
+As such, existing setups using HAProxy in front of the system API should be
+changed, removing such load balancer from the endpoint.
+
+Some CLI arguments have been changed to reflect these changes:
+
+- The optional flags `--private-key-pem-file` (`PRIVATE_KEY_PEM_FILE`) and
+  `--certificate-pem-file` (`CERTIFICATE_PEM_FILE`), originally intended for
+  client authentication only, have been **removed** in favour of dedicated
+  client/server variants.
+- The flag `--client-certificate-pem-file` (`CLIENT_CERTIFICATE_PEM_FILE`) has
+  been **added**. This will be used by clients' TLS connector to authenticate with
+  FlowProxy instances of version `v2.1.0` that require mTLS. The file **must
+  contain both certificate and private key, in PEM format**.
+- The flag `--server-certificate-pem-file` (`SERVER_CERTIFICATE_PEM_FILE`) has
+  been **added**. This will be to create the server TLS acceptor.
+  instances of version `v2.1.0` that require mTLS. The file **must
+  contain both certificate and private key, in PEM format**
+
+Notice that the newly added flags are **mandatory**. If the same certificate or
+key is used for both a client and a server, then the new flags can be set with
+the same values.
+
+Signature creation and recovery to / from system endpoint has been removed, saving
+on CPU cost for compute threads. This means new versions can't communicate with
+previous versions because of it.
+
+### MEV-Share bundles
+
+Support for MEV-Share bundles has officially been dropped, so they won't be
+accepted and processed starting from this release. On BuilderNet, they have
+been already deprecated by some weeks.
+
 ## v2.0.1 - 2025-12-16
 
 - Bump `prometric` to `v0.2.1`.
