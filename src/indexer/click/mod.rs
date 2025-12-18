@@ -2,20 +2,22 @@
 
 use std::{fmt::Debug, time::Duration};
 
-use rbuilder_utils::{
-    clickhouse::{
-        backup::{Backup, DiskBackup, DiskBackupConfig, MemoryBackupConfig},
-        indexer::{default_inserter, ClickhouseClientConfig, ClickhouseInserter, InserterRunner},
-        Quantities,
-    },
-    tasks::TaskExecutor,
-};
-use tokio::sync::mpsc;
-
 use crate::{
     cli::ClickhouseArgs,
-    indexer::{OrderReceivers, TARGET_BACKUP, TARGET_INDEXER},
+    indexer::{
+        click::models::{BundleReceiptRow, BundleRow},
+        OrderReceivers, TARGET_INDEXER,
+    },
     metrics::CLICKHOUSE_METRICS,
+    primitives::{BundleReceipt, SystemBundle},
+};
+use rbuilder_utils::{
+    clickhouse::{
+        backup::{DiskBackup, DiskBackupConfig},
+        indexer::ClickhouseClientConfig,
+        spawn_clickhouse_inserter_and_backup, Quantities,
+    },
+    tasks::TaskExecutor,
 };
 
 mod models;
@@ -87,12 +89,6 @@ impl rbuilder_utils::clickhouse::backup::metrics::Metrics for MetricsWrapper {
     }
 }
 
-/// Size of the channel buffer for the backup input channel.
-/// If we get more than this number of failed commits queued the inserter thread will block.
-const BACKUP_INPUT_CHANNEL_BUFFER_SIZE: usize = 128;
-const CLICKHOUSE_INSERT_TIMEOUT: Duration = Duration::from_secs(2);
-const CLICKHOUSE_END_TIMEOUT: Duration = Duration::from_secs(4);
-
 /// A namespace struct to spawn a Clickhouse indexer.
 #[derive(Debug, Clone)]
 pub(crate) struct ClickhouseIndexer;
@@ -120,47 +116,27 @@ impl ClickhouseIndexer {
         )
         .expect("could not create disk backup");
 
-        // BundleRow
-
-        let backup_table_name = args.bundles_table_name;
-        let (failed_commit_tx, failed_commit_rx) = mpsc::channel(BACKUP_INPUT_CHANNEL_BUFFER_SIZE);
-        let inserter = default_inserter(&client, &backup_table_name);
-        let inserter = ClickhouseInserter::<_, MetricsWrapper>::new(inserter, failed_commit_tx);
-        // Node name is not used for Blocks.
-        let inserter_runner =
-            InserterRunner::new(receivers.bundle_rx, inserter, builder_name.clone());
-
-        let backup = Backup::<_, MetricsWrapper>::new(
-            failed_commit_rx,
-            client
-                .inserter(&backup_table_name)
-                .with_timeouts(Some(CLICKHOUSE_INSERT_TIMEOUT), Some(CLICKHOUSE_END_TIMEOUT)),
+        spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
+            &client,
+            receivers.bundle_rx,
+            &task_executor,
+            args.bundles_table_name,
+            builder_name.clone(),
             disk_backup.clone(),
-        )
-        .with_memory_backup_config(MemoryBackupConfig::new(args.backup_memory_max_size_bytes));
-        inserter_runner.spawn(&task_executor, backup_table_name.clone(), TARGET_INDEXER);
-        backup.spawn(&task_executor, backup_table_name, TARGET_BACKUP);
+            args.backup_memory_max_size_bytes,
+            TARGET_INDEXER,
+        );
 
-        // BundleReceiptRow
-
-        let backup_table_name = args.bundle_receipts_table_name;
-        let (failed_commit_tx, failed_commit_rx) = mpsc::channel(BACKUP_INPUT_CHANNEL_BUFFER_SIZE);
-        let inserter = default_inserter(&client, &backup_table_name);
-        let inserter = ClickhouseInserter::<_, MetricsWrapper>::new(inserter, failed_commit_tx);
-        // Node name is not used for Blocks.
-        let inserter_runner =
-            InserterRunner::new(receivers.bundle_receipt_rx, inserter, builder_name);
-
-        let backup = Backup::<_, MetricsWrapper>::new(
-            failed_commit_rx,
-            client
-                .inserter(&backup_table_name)
-                .with_timeouts(Some(CLICKHOUSE_INSERT_TIMEOUT), Some(CLICKHOUSE_END_TIMEOUT)),
-            disk_backup,
-        )
-        .with_memory_backup_config(MemoryBackupConfig::new(args.backup_memory_max_size_bytes));
-        inserter_runner.spawn(&task_executor, backup_table_name.clone(), TARGET_INDEXER);
-        backup.spawn(&task_executor, backup_table_name, TARGET_BACKUP);
+        spawn_clickhouse_inserter_and_backup::<BundleReceipt, BundleReceiptRow, MetricsWrapper>(
+            &client,
+            receivers.bundle_receipt_rx,
+            &task_executor,
+            args.bundle_receipts_table_name,
+            builder_name.clone(),
+            disk_backup.clone(),
+            args.backup_memory_max_size_bytes,
+            TARGET_INDEXER,
+        );
     }
 }
 
