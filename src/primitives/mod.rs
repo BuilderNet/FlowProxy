@@ -8,14 +8,14 @@ use std::{
 
 use ::time::UtcDateTime;
 use alloy_consensus::{
+    EthereumTxEnvelope, TxEip4844Variant,
     crypto::RecoveryError,
     transaction::{Recovered, SignerRecoverable as _},
-    EthereumTxEnvelope, TxEip4844Variant,
 };
 use alloy_eips::{
+    Decodable2718 as _,
     eip2718::{Eip2718Error, Eip2718Result},
     eip7594::BlobTransactionSidecarVariant,
-    Decodable2718 as _,
 };
 use alloy_primitives::{Address, Bytes, U64};
 use bitcode::{Decode, Encode};
@@ -23,15 +23,15 @@ use derive_more::{Deref, From};
 use openssl::{
     pkey::PKey,
     ssl::{SslAcceptor, SslAcceptorBuilder, SslMethod, SslVerifyMode, SslVersion},
-    x509::{store::X509StoreBuilder, X509},
+    x509::{X509, store::X509StoreBuilder},
 };
 use rbuilder_primitives::{
+    Bundle, BundleReplacementData,
     serialize::{
         RawBundle, RawBundleConvertError, RawBundleDecodeResult, RawBundleMetadata, TxEncoding,
     },
-    Bundle, BundleReplacementData,
 };
-use revm_primitives::{hex, B256};
+use revm_primitives::{B256, hex};
 use serde::Serialize;
 use serde_json::json;
 use strum::AsRefStr;
@@ -153,7 +153,9 @@ impl BundleHash for RawBundle {
                     // endpoint.
                     replacement_nonce.hash(state);
                 } else {
-                    tracing::warn!("Expected replacement_nonce along with uuid/replacement_uuid for calculating bundle hash");
+                    tracing::warn!(
+                        "Expected replacement_nonce along with uuid/replacement_uuid for calculating bundle hash"
+                    );
                 }
             }
 
@@ -165,10 +167,10 @@ impl BundleHash for RawBundle {
                 refund_recipient.hash(state);
             }
 
-            if let Some(refund_tx_hashes) = refund_tx_hashes {
-                if !refund_tx_hashes.is_empty() {
-                    refund_tx_hashes.hash(state);
-                }
+            if let Some(refund_tx_hashes) = refund_tx_hashes
+                && !refund_tx_hashes.is_empty()
+            {
+                refund_tx_hashes.hash(state);
             }
 
             if let Some(refund_identity) = refund_identity {
@@ -903,13 +905,13 @@ impl AcceptorBuilder {
                     tracing::error!("failed and no certificate relevant to error");
                 }
 
-                if let Some(chain) = store_ctx.chain() {
-                    if chain.len() > 1 {
-                        _span.record("chain_len", chain.len());
-                        for (idx, cert) in chain.iter().enumerate() {
-                            let subject = cert.subject_name();
-                            tracing::debug!(?idx, ?subject, "certificate");
-                        }
+                if let Some(chain) = store_ctx.chain()
+                    && chain.len() > 1
+                {
+                    _span.record("chain_len", chain.len());
+                    for (idx, cert) in chain.iter().enumerate() {
+                        let subject = cert.subject_name();
+                        tracing::debug!(?idx, ?subject, "certificate");
                     }
                 }
 

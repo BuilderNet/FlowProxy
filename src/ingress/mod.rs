@@ -12,31 +12,31 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
-        decode_transaction, AcceptorBuilder, BundleHash as _, BundleReceipt, DecodedBundle,
-        EthResponse, EthereumTransaction, RawBundleBitcode, Samplable, SslAcceptorBuilderExt as _,
-        SystemBundle, SystemBundleDecoder, SystemBundleMetadata, SystemTransaction, TcpResponse,
-        TcpResponseStatus, UtcInstant, WithHeaders,
+        AcceptorBuilder, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
+        EthereumTransaction, RawBundleBitcode, Samplable, SslAcceptorBuilderExt as _, SystemBundle,
+        SystemBundleDecoder, SystemBundleMetadata, SystemTransaction, TcpResponse,
+        TcpResponseStatus, UtcInstant, WithHeaders, decode_transaction,
     },
-    priority::{workers::PriorityWorkers, Priority},
+    priority::{Priority, workers::PriorityWorkers},
     rate_limit::CounterOverTime,
-    utils::{short_uuid_v4, UtcDateTimeHeader as _},
+    utils::{UtcDateTimeHeader as _, short_uuid_v4},
     validation::validate_transaction,
 };
 use alloy_consensus::{crypto::secp256k1::recover_signer, transaction::SignerRecoverable};
-use alloy_primitives::{eip191_hash_message, keccak256, Address, Bytes, B256};
+use alloy_primitives::{Address, B256, Bytes, eip191_hash_message, keccak256};
 use alloy_signer::Signature;
 use axum::{
+    Json,
     body::Body,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::Response,
-    Json,
 };
 use dashmap::DashMap;
 use flate2::read::GzDecoder;
 use futures::StreamExt;
 use msg_socket::RepSocket;
-use msg_transport::{tcp_tls::TcpTls, Transport};
+use msg_transport::{Transport, tcp_tls::TcpTls};
 use openssl::x509::X509;
 use rbuilder_primitives::serialize::RawBundle;
 use rbuilder_utils::tasks::TaskExecutor;
@@ -183,15 +183,15 @@ impl OrderflowIngress {
 
         let entity = Entity::Signer(signer);
 
-        if ingress.rate_limiting_enabled {
-            if let Some(mut data) = ingress.entity_data(entity) {
-                if data.rate_limit.count() > ingress.rate_limit_count {
-                    tracing::trace!("rate limited request");
-                    ingress.user_metrics.requests_rate_limited().inc();
-                    return JsonRpcResponse::error(Value::Null, JsonRpcError::RateLimited);
-                }
-                data.rate_limit.inc();
+        if ingress.rate_limiting_enabled
+            && let Some(mut data) = ingress.entity_data(entity)
+        {
+            if data.rate_limit.count() > ingress.rate_limit_count {
+                tracing::trace!("rate limited request");
+                ingress.user_metrics.requests_rate_limited().inc();
+                return JsonRpcResponse::error(Value::Null, JsonRpcError::RateLimited);
             }
+            data.rate_limit.inc();
         }
 
         // Since this performs UTF-8 validation, only do it if tracing is enabled at trace level.
@@ -271,10 +271,10 @@ impl OrderflowIngress {
         let response = match result {
             Ok(eth) => JsonRpcResponse::result(request.id, eth),
             Err(error) => {
-                if error.is_validation() {
-                    if let Some(mut data) = ingress.entity_data(entity) {
-                        data.scores.score_mut(received_at.into()).invalid_requests += 1;
-                    }
+                if error.is_validation()
+                    && let Some(mut data) = ingress.entity_data(entity)
+                {
+                    data.scores.score_mut(received_at.into()).invalid_requests += 1;
                 }
                 JsonRpcResponse::error(request.id, error.into_jsonrpc_error())
             }

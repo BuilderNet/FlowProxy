@@ -1,18 +1,18 @@
 use crate::{
     builderhub,
     consts::{
-        BIG_REQUEST_SIZE_THRESHOLD, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        BUILDERNET_SIGNATURE_HEADER,
+        BIG_REQUEST_SIZE_THRESHOLD, BUILDERNET_ADDRESS_HEADER, BUILDERNET_PRIORITY_HEADER,
+        BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
     },
     metrics::SYSTEM_METRICS,
     primitives::{
         EncodedOrder, RawBundleBitcode, RawOrderMetadata, SystemOrder, UtcInstant, WithEncoding,
         WithHeaders,
     },
-    priority::{self, workers::PriorityWorkers, Priority},
+    priority::{self, Priority, workers::PriorityWorkers},
     utils::UtcDateTimeHeader as _,
 };
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{Address, B256, keccak256};
 use alloy_signer::SignerSync as _;
 use alloy_signer_local::PrivateKeySigner;
 use dashmap::DashMap;
@@ -99,17 +99,19 @@ impl IngressForwarders {
         let signature = {
             let signer = self.signer.clone();
             let bin = encoding_binary.clone();
-            let sig = self
-                .workers
+            self.workers
                 .spawn_with_priority(priority, move || {
                     build_signature_header(&signer, bin.as_ref())
                 })
-                .await;
-            sig
+                .await
         };
 
-        let mut headers =
-            ForwardingRequest::create_headers(priority, Some(signature), Some(UtcDateTime::now()));
+        let mut headers = ForwardingRequest::create_headers(
+            priority,
+            Some(signature),
+            Some(UtcDateTime::now()),
+            Some(self.signer.address()),
+        );
         headers.insert("method".to_owned(), method_name);
 
         let payload = WithHeaders { headers: headers.clone(), data: encoding_binary };
@@ -218,7 +220,7 @@ pub struct ForwardingRequest {
 impl ForwardingRequest {
     pub fn user_to_local(encoded_order: EncodedOrder) -> Self {
         let headers =
-            Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
+            Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()), None);
         Self {
             encoded_order,
             headers,
@@ -238,7 +240,7 @@ impl ForwardingRequest {
 
     pub fn system_to_local(encoded_order: EncodedOrder) -> Self {
         let headers =
-            Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()));
+            Self::create_headers(encoded_order.priority(), None, Some(UtcDateTime::now()), None);
         Self {
             encoded_order,
             headers,
@@ -257,6 +259,7 @@ impl ForwardingRequest {
         priority: Priority,
         signature_header: Option<String>,
         sent_at_header: Option<UtcDateTime>,
+        address: Option<Address>,
     ) -> Headers {
         let mut headers = HashMap::new();
         headers.insert(BUILDERNET_PRIORITY_HEADER.to_owned(), priority.to_string());
@@ -271,6 +274,10 @@ impl ForwardingRequest {
 
         if let Some(sent_at) = sent_at_header {
             headers.insert(BUILDERNET_SENT_AT_HEADER.to_owned(), sent_at.format_header());
+        }
+
+        if let Some(a) = address {
+            headers.insert(BUILDERNET_ADDRESS_HEADER.to_owned(), a.to_string());
         }
 
         headers

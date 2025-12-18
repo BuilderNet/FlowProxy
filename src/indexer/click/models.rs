@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
-use alloy_primitives::{Address, Keccak256, B256, U256};
+use alloy_primitives::{Address, B256, Keccak256, U256};
 use alloy_rlp::Encodable;
 use clickhouse::Row;
 use rbuilder_primitives::BundleVersion;
@@ -141,8 +141,8 @@ impl ClickhouseRowExt for BundleRow {
 /// Adapted from <https://github.com/scpresearch/bundles-forwarder-external/blob/4f13f737f856755df5c39e3e6307f36bff4dd3a9/src/lib.rs#L552-L692>
 impl From<(SystemBundle, String)> for BundleRow {
     fn from((bundle, builder_name): (SystemBundle, String)) -> Self {
-        let bundle_row = match bundle.decoded_bundle.as_ref() {
-            DecodedBundle::Bundle(ref decoded) => {
+        match bundle.decoded_bundle.as_ref() {
+            DecodedBundle::Bundle(decoded) => {
                 let micros = bundle.metadata.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle
@@ -198,11 +198,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .txs
                         .iter()
                         .map(|tx| {
-                            if tx.is_legacy() {
-                                None
-                            } else {
-                                Some(tx.as_ref().max_fee_per_gas())
-                            }
+                            if tx.is_legacy() { None } else { Some(tx.as_ref().max_fee_per_gas()) }
                         })
                         .collect(),
                     transactions_max_priority_fee_per_gas: decoded
@@ -275,7 +271,7 @@ impl From<(SystemBundle, String)> for BundleRow {
             }
             // This is in particular a cancellation bundle i.e. a replacement bundle with no
             // transactions.
-            DecodedBundle::EmptyReplacement(ref replacement) => {
+            DecodedBundle::EmptyReplacement(replacement) => {
                 let micros = bundle.metadata.received_at.utc.microsecond();
                 BundleRow {
                     received_at: bundle
@@ -326,9 +322,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                     version: 2,
                 }
             }
-        };
-
-        bundle_row
+        }
     }
 }
 
