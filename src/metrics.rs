@@ -113,9 +113,6 @@ pub(crate) struct IngressMetrics {
     /// The number of transactions per bundle.
     #[metric]
     txs_per_bundle: Summary,
-    /// The number of transactions per MEV-share bundle.
-    #[metric]
-    txs_per_mev_share_bundle: Summary,
     /// The total number of empty bundles.
     #[metric]
     total_empty_bundles: Counter,
@@ -207,9 +204,6 @@ pub(crate) struct SystemMetrics {
     /// End-to-end bundle processing time in seconds.
     #[metric(rename = "e2e_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
     bundle_processing_time: Summary,
-    /// End-to-end MEV-share bundle processing time in seconds.
-    #[metric(rename = "e2e_mev_share_bundle_processing_time", labels = ["priority", "direction", "big_request"])]
-    mev_share_bundle_processing_time: Summary,
     /// End-to-end transaction processing time in seconds.
     #[metric(rename = "e2e_transaction_processing_time", labels = ["priority", "direction", "big_request"])]
     transaction_processing_time: Summary,

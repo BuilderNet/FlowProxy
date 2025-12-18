@@ -259,7 +259,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
                     internal_uuid: decoded.uuid,
-                    replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
+                    replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.id),
                     replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
                     signer_address: Some(bundle.metadata.signer),
                     builder_name,
@@ -312,8 +312,8 @@ impl From<(SystemBundle, String)> for BundleRow {
                     refund_tx_hashes: Vec::new(),
                     // NOTE: For now, replacement bundles don't have a uuid, so we set the
                     // user-provided replacement-uuid instead.
-                    internal_uuid: replacement.key.key().id,
-                    replacement_uuid: Some(replacement.key.key().id),
+                    internal_uuid: replacement.key.id,
+                    replacement_uuid: Some(replacement.key.id),
                     replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
                     signer_address: Some(bundle.metadata.signer),
                     builder_name,

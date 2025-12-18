@@ -1,7 +1,6 @@
 use alloy_eips::eip2718::EIP4844_TX_TYPE_ID;
 use alloy_primitives::Bytes;
 use alloy_rlp::{Buf as _, Header};
-use axum::http::HeaderValue;
 use std::time::{Duration, Instant};
 use time::UtcDateTime;
 use uuid::Uuid;
@@ -42,14 +41,14 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
 /// A trait for types that can be formatted and parsed as a UNIX timestamp in microseconds header
 /// value.
 pub trait UtcDateTimeHeader: Sized {
-    fn format_header(&self) -> HeaderValue;
+    fn format_header(&self) -> String;
     fn parse_header(value: &str) -> Option<Self>;
 }
 
 impl UtcDateTimeHeader for UtcDateTime {
     /// Format a [`UtcDateTime`] as a UNIX timestamp in microseconds header value.
-    fn format_header(&self) -> HeaderValue {
-        (self.unix_timestamp_nanos() / 1_000).to_string().parse().unwrap()
+    fn format_header(&self) -> String {
+        (self.unix_timestamp_nanos() / 1_000).to_string()
     }
 
     /// Parse a [`UtcDateTime`] from a UNIX timestamp in microseconds header value.
@@ -90,13 +89,11 @@ pub mod testutils {
         TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::Encodable2718 as _;
-    use alloy_primitives::{Address, Bytes, TxKind, U256, U64};
+    use alloy_primitives::{Address, Bytes, TxKind, U256};
     use alloy_signer::SignerSync as _;
     use alloy_signer_local::PrivateKeySigner;
     use rand::Rng;
-    use rbuilder_primitives::serialize::{
-        RawBundle, RawBundleMetadata, RawShareBundle, RawShareBundleBody, RawShareBundleInclusion,
-    };
+    use rbuilder_primitives::serialize::{RawBundle, RawBundleMetadata};
 
     /// A trait for types that can be randomly generated.
     pub trait Random {
@@ -282,41 +279,6 @@ pub mod testutils {
                     delayed_refund: None,
                     bundle_hash: None,
                 },
-            }
-        }
-    }
-
-    impl Random for RawShareBundle {
-        fn random<R: Rng>(rng: &mut R) -> Self {
-            let txs_len = rng.random_range(1..=10);
-            // We only generate Eip1559 here.
-            let bodies = (0..txs_len)
-                .map(|_| {
-                    let signer = PrivateKeySigner::random();
-                    let tx = EthereumTypedTransaction::Eip1559(TxEip1559::random(rng));
-                    let sighash = tx.signature_hash();
-                    let signature = signer.sign_hash_sync(&sighash).unwrap();
-                    let bytes = TxEnvelope::new_unhashed(tx, signature).encoded_2718().into();
-
-                    RawShareBundleBody {
-                        tx: Some(bytes),
-                        can_revert: rng.random_range(0..=1) == 0,
-                        revert_mode: None,
-                        bundle: None,
-                    }
-                })
-                .collect();
-
-            Self {
-                version: "v0.1".to_string(),
-                inclusion: RawShareBundleInclusion {
-                    block: U64::random_with(rng),
-                    max_block: None,
-                },
-                body: bodies,
-                validity: None,
-                metadata: None,
-                replacement_uuid: None,
             }
         }
     }

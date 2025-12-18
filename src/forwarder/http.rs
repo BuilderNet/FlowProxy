@@ -5,13 +5,15 @@ use crate::{
     priority::{self},
 };
 use alloy_primitives::B256;
+use axum::http::HeaderName;
 use futures::{stream::FuturesUnordered, StreamExt};
-use hyper::StatusCode;
+use hyper::{HeaderMap, StatusCode};
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use std::{
     future::Future,
     pin::Pin,
+    str::FromStr,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -141,13 +143,25 @@ impl HttpForwarder {
 
             record_e2e_metrics(&order, &direction, is_big);
 
+            let mut header_map = HeaderMap::new();
+            for (k, v) in headers {
+                let (k, v) = match (HeaderName::from_str(k.as_str()), v.parse()) {
+                    (Ok(k), Ok(v)) => (k, v),
+                    _ => {
+                        tracing::error!("failed to parse header, skipping");
+                        continue;
+                    }
+                };
+                header_map.insert(k, v);
+            }
+
             let order_type = order.order_type();
             let start_time = Instant::now();
             let response = client_pool
                 .client()
                 .post(peer_url)
                 .body(order.encoding().to_vec())
-                .headers(headers)
+                .headers(header_map)
                 .send()
                 .await;
             tracing::trace!(elapsed = ?start_time.elapsed(), "received response");

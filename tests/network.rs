@@ -3,7 +3,7 @@ use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
 use common::{spawn_ingress, BuilderReceiver};
 use flowproxy::utils::testutils::Random as _;
-use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
+use rbuilder_primitives::serialize::RawBundle;
 use std::time::Duration;
 
 mod common;
@@ -62,30 +62,6 @@ async fn network_e2e_bundle_tx_works() {
     debug!("builder1 received tx from client2");
 
     tokio::time::sleep(Duration::from_secs(2)).await;
-}
-
-#[tokio::test]
-async fn network_e2e_mev_share_bundle_works() {
-    let mut rng = rand::rng();
-    let mut builder1 = BuilderReceiver::spawn().await;
-    let mut builder2 = BuilderReceiver::spawn().await;
-    let _client1 = spawn_ingress(Some(builder1.url())).await;
-    let client2 = spawn_ingress(Some(builder2.url())).await;
-
-    // Wait for the proxies to be ready and connected to each other.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let bundle = RawShareBundle::random(&mut rng);
-    let response = client2.send_mev_share_bundle(&bundle).await;
-    assert!(response.status().is_success());
-
-    let received = builder2.recv::<RawShareBundle>().await.unwrap();
-    debug!("builder2 received bundle");
-    assert_eq!(received, bundle);
-
-    let received = builder1.recv::<RawShareBundle>().await.unwrap();
-    debug!("builder1 received bundle");
-    assert_eq!(received, bundle);
 }
 
 /// NOTE: This only works on Linux, because OpenSSL behaves differently on macOS (in a way that
