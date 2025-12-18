@@ -138,8 +138,8 @@ impl EntityScores {
 
     pub fn calculate(&mut self) -> f64 {
         self.cleanup();
-        self.entries.values().map(|score| score.calculate()).sum::<f64>()
-            / self.entries.len() as f64
+        self.entries.values().map(|score| score.calculate()).sum::<f64>() /
+            self.entries.len() as f64
     }
 }
 

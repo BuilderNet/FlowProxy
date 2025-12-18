@@ -32,12 +32,12 @@ impl IngressError {
     /// Convert [`IngressError`] into [`JsonRpcError`].
     pub fn into_jsonrpc_error(self) -> JsonRpcError {
         match self {
-            Self::EmptyRawTransaction
-            | Self::Validation(_)
-            | Self::Decode2718(_)
-            | Self::SystemBundleDecoding(_)
-            | Self::TooManyTransactions
-            | Self::Recovery(_) => JsonRpcError::InvalidParams,
+            Self::EmptyRawTransaction |
+            Self::Validation(_) |
+            Self::Decode2718(_) |
+            Self::SystemBundleDecoding(_) |
+            Self::TooManyTransactions |
+            Self::Recovery(_) => JsonRpcError::InvalidParams,
             Self::Serde(_) => JsonRpcError::ParseError,
         }
     }
