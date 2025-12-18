@@ -24,7 +24,7 @@ use std::{
 
 use crate::{
     cli::ParquetArgs,
-    indexer::{OrderReceivers, TARGET},
+    indexer::{OrderReceivers, TARGET_INDEXER},
     metrics::ParquetMetrics,
     primitives::BundleReceipt,
 };
@@ -161,7 +161,7 @@ impl BundleReceiptWriter {
         writer.write(&record_batch)?;
         writer.flush()?;
 
-        tracing::debug!(target: TARGET, rows = record_batch.num_rows(), "Flushed bundle receipt writer to disk");
+        tracing::debug!(target: TARGET_INDEXER, rows = record_batch.num_rows(), "Flushed bundle receipt writer to disk");
 
         Ok(())
     }
@@ -207,10 +207,10 @@ impl ParquetIndexer {
             tokio::select! {
                 _ = runner.run_loop() => {
                     // runner finished (channel closed, etc.)
-                    tracing::info!(target: TARGET, "Runner exited");
+                    tracing::info!(target: TARGET_INDEXER, "Runner exited");
                 }
                 guard = &mut shutdown => {
-                    tracing::info!(target: TARGET, "Received shutdown, performing cleanup");
+                    tracing::info!(target: TARGET_INDEXER, "Received shutdown, performing cleanup");
                     drop(runner);
                     drop(guard);
                     return;
@@ -251,19 +251,19 @@ impl ParquetRunner {
                     });
 
                     let Some(receipt) = maybe_receipt else {
-                        tracing::error!(target: TARGET, "Bundle receipt channel closed, shutting down Parquet indexer");
+                        tracing::error!(target: TARGET_INDEXER, "Bundle receipt channel closed, shutting down Parquet indexer");
                         break;
                     };
 
-                    tracing::trace!(target: TARGET, hash = %receipt.bundle_hash, "Received bundle receipt to index");
+                    tracing::trace!(target: TARGET_INDEXER, hash = %receipt.bundle_hash, "Received bundle receipt to index");
                     self.receipt_writer.append(receipt);
                 },
 
                 _ = interval.tick() => {
-                    tracing::debug!(target: TARGET, "Flushing Parquet writer");
+                    tracing::debug!(target: TARGET_INDEXER, "Flushing Parquet writer");
 
                     if let Err(e) = self.receipt_writer.flush() {
-                        tracing::error!(target: TARGET, ?e, "Failed to flush Parquet writer");
+                        tracing::error!(target: TARGET_INDEXER, ?e, "Failed to flush Parquet writer");
                     }
                 },
 
