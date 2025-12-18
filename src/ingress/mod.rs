@@ -183,8 +183,8 @@ impl OrderflowIngress {
 
         let entity = Entity::Signer(signer);
 
-        if ingress.rate_limiting_enabled &&
-            let Some(mut data) = ingress.entity_data(entity)
+        if ingress.rate_limiting_enabled
+            && let Some(mut data) = ingress.entity_data(entity)
         {
             if data.rate_limit.count() > ingress.rate_limit_count {
                 tracing::trace!("rate limited request");
@@ -271,8 +271,8 @@ impl OrderflowIngress {
         let response = match result {
             Ok(eth) => JsonRpcResponse::result(request.id, eth),
             Err(error) => {
-                if error.is_validation() &&
-                    let Some(mut data) = ingress.entity_data(entity)
+                if error.is_validation()
+                    && let Some(mut data) = ingress.entity_data(entity)
                 {
                     data.scores.score_mut(received_at.into()).invalid_requests += 1;
                 }
@@ -794,6 +794,7 @@ impl IngressSocket {
         loop {
             tokio::select! {
                 Some(certs) = self.certs_rx.recv() => {
+
                     // NOTE: even if peers remain the same, we can't do a no-op because
                     // [`openssl::x509::X509`] isn't [`Clone`], so we cannot hold them for
                     // comparison.
@@ -803,7 +804,7 @@ impl IngressSocket {
                         .and_then(|b| b.add_trusted_certs(certs))
                         .map(|b| b.build())
                     {
-                        Ok(a) => <TcpTls as Transport<SocketAddr>>::Control::SwapAcceptor(a),
+                        Ok(a) => <TcpTls as Transport<SocketAddr>>::Control::SwapAcceptor(a.into()),
                         Err(e) => {
                             tracing::error!(?e, "failed to create tls acceptor");
                             continue;

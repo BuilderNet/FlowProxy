@@ -144,7 +144,7 @@ pub async fn run_with_listeners(
             .collect::<Vec<_>>();
 
         let acceptor = acceptor_builder.ssl()?.add_trusted_certs(certs)?.build();
-        let tls = tcp_tls::Server::new(acceptor);
+        let tls = tcp_tls::Server::new(acceptor.into());
         let mut socket = RepSocket::new(TcpTls::Server(tls));
         socket.bind(args.system_listen_addr).await.expect("to bind system listener");
 
@@ -173,7 +173,7 @@ pub async fn run_with_listeners(
             fs::read_to_string(&peer_update_config.certificate_pem_file).unwrap_or_default();
 
         let acceptor = acceptor_builder.ssl()?.add_trusted_certs(certs)?.build();
-        let tls = tcp_tls::Server::new(acceptor);
+        let tls = tcp_tls::Server::new(acceptor.into());
         let mut socket = RepSocket::new(TcpTls::Server(tls));
         socket.bind(args.system_listen_addr).await.expect("to bind system listener");
         let port = socket.local_addr().expect("bound").port();
