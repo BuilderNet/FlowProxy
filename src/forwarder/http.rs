@@ -1,12 +1,12 @@
 use crate::{
-    forwarder::{client::HttpClientPool, record_e2e_metrics, ForwardingRequest, LogRateLimiter},
+    forwarder::{ForwardingRequest, LogRateLimiter, client::HttpClientPool, record_e2e_metrics},
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
     priority::{self},
 };
 use alloy_primitives::B256;
 use axum::http::HeaderName;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use hyper::{HeaderMap, StatusCode};
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;

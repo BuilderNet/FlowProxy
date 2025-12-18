@@ -1,14 +1,14 @@
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use flowproxy::{
     consts::FLASHBOTS_SIGNATURE_HEADER,
-    jsonrpc::{JsonRpcError, JSONRPC_VERSION_2},
+    jsonrpc::{JSONRPC_VERSION_2, JsonRpcError},
     utils::testutils::Random,
 };
 use rbuilder_primitives::serialize::RawBundle;
-use reqwest::{header, StatusCode};
+use reqwest::{StatusCode, header};
 use serde_json::json;
 use std::io::Write;
 

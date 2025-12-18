@@ -1,7 +1,7 @@
 //! FlowProxy metrics with [`prometric_derive`].
 use std::{sync::LazyLock, time::Duration};
 
-use prometric::{process::ProcessCollector, Counter, Gauge, Summary};
+use prometric::{Counter, Gauge, Summary, process::ProcessCollector};
 use prometric_derive::metrics;
 
 /// The system metrics. We use a lazy lock here to make sure they're globally accessible and

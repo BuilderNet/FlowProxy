@@ -1,7 +1,8 @@
 use crate::{
     forwarder::{
+        ForwardingRequest, LogRateLimiter,
         client::{ReqSocketIpBucketPool, TcpTransport},
-        record_e2e_metrics, ForwardingRequest, LogRateLimiter,
+        record_e2e_metrics,
     },
     jsonrpc::{JsonRpcResponse, JsonRpcResponseTy},
     metrics::ForwarderMetrics,
@@ -10,7 +11,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use alloy_rlp::Bytes;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use msg_socket::ReqError;
 use rbuilder_utils::tasks::TaskExecutor;
 use std::{

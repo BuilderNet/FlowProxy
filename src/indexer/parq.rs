@@ -6,7 +6,7 @@ use alloy_primitives::Keccak256;
 use arrow::{
     array::{
         ArrayBuilder, FixedSizeBinaryBuilder, RecordBatch, StringBuilder,
-        TimestampMicrosecondBuilder, UInt32Builder, UInt8Builder,
+        TimestampMicrosecondBuilder, UInt8Builder, UInt32Builder,
     },
     datatypes::{DataType, Field, Schema, TimeUnit},
     error::Result as ArrowResult,
@@ -294,8 +294,8 @@ mod tests {
 
     use arrow::{
         array::{
-            Array as _, FixedSizeBinaryArray, StringArray, TimestampMicrosecondArray, UInt32Array,
-            UInt8Array,
+            Array as _, FixedSizeBinaryArray, StringArray, TimestampMicrosecondArray, UInt8Array,
+            UInt32Array,
         },
         record_batch::RecordBatch,
     };

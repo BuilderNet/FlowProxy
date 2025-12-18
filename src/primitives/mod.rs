@@ -167,8 +167,8 @@ impl BundleHash for RawBundle {
                 refund_recipient.hash(state);
             }
 
-            if let Some(refund_tx_hashes) = refund_tx_hashes
-                && !refund_tx_hashes.is_empty()
+            if let Some(refund_tx_hashes) = refund_tx_hashes &&
+                !refund_tx_hashes.is_empty()
             {
                 refund_tx_hashes.hash(state);
             }
@@ -905,8 +905,8 @@ impl AcceptorBuilder {
                     tracing::error!("failed and no certificate relevant to error");
                 }
 
-                if let Some(chain) = store_ctx.chain()
-                    && chain.len() > 1
+                if let Some(chain) = store_ctx.chain() &&
+                    chain.len() > 1
                 {
                     _span.record("chain_len", chain.len());
                     for (idx, cert) in chain.iter().enumerate() {

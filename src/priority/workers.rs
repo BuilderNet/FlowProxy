@@ -3,7 +3,7 @@ use crate::metrics::WorkerMetrics;
 use super::Priority;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::{sync::Arc, time::Instant};
-use tokio::sync::{oneshot, Semaphore};
+use tokio::sync::{Semaphore, oneshot};
 
 const DEFAULT_HIGH_QUEUE_SIZE: usize = Semaphore::MAX_PERMITS;
 const DEFAULT_MEDIUM_QUEUE_SIZE: usize = 50_000;

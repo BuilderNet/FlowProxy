@@ -54,8 +54,8 @@ pub fn validate_transaction(
     }
 
     // Checks for chainid
-    if let Some(chain_id) = transaction.chain_id()
-        && chain_id != MAINNET_CHAIN_ID
+    if let Some(chain_id) = transaction.chain_id() &&
+        chain_id != MAINNET_CHAIN_ID
     {
         return Err(ValidationError::ChainIdMismatch);
     }

@@ -6,7 +6,7 @@ use crate::{
     },
     cache::SignerCache,
     forwarder::{
-        client::{default_http_builder, HttpClientPool},
+        client::{HttpClientPool, default_http_builder},
         http::spawn_http_forwarder,
     },
     ingress::IngressSocket,
@@ -18,11 +18,11 @@ use crate::{
 };
 use alloy_signer_local::PrivateKeySigner;
 use axum::{
+    Router,
     extract::{DefaultBodyLimit, Request, State},
     middleware::Next,
     response::Response,
     routing::{get, post},
-    Router,
 };
 use dashmap::DashMap;
 use entity::SpamThresholds;
@@ -40,7 +40,7 @@ use std::{
 };
 use tokio::net::TcpListener;
 use tracing::level_filters::LevelFilter;
-use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt};
 
 pub mod cli;
 use cli::OrderflowIngressArgs;

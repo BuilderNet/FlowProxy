@@ -3,7 +3,7 @@ use std::{path::PathBuf, str::FromStr as _, time::Duration};
 use alloy_consensus::TxEnvelope;
 use alloy_eips::Encodable2718 as _;
 use alloy_primitives::Bytes;
-use common::{spawn_ingress, BuilderReceiver};
+use common::{BuilderReceiver, spawn_ingress};
 
 mod common;
 use flowproxy::{cli::OrderflowIngressArgs, utils::testutils::Random as _};

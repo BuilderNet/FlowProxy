@@ -1,8 +1,8 @@
 use crate::{
     forwarder::{
-        client::{tcp_clients_buckets, ReqSocketIpBucketPool, TcpTransport},
-        tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
+        client::{ReqSocketIpBucketPool, TcpTransport, tcp_clients_buckets},
+        tcp::spawn_tcp_forwarder,
     },
     metrics::BuilderHubMetrics,
     priority,
@@ -23,7 +23,7 @@ use std::{
     path::PathBuf, sync::Arc, time::Duration,
 };
 use tokio::{
-    net::{lookup_host, ToSocketAddrs},
+    net::{ToSocketAddrs, lookup_host},
     sync::mpsc,
 };
 
@@ -87,11 +87,7 @@ impl Peer {
             self.ip.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_SYSTEM_PORT);
 
         let host_with_port = if self.dns_name.is_empty() {
-            if self.ip.contains(":") {
-                self.ip.clone()
-            } else {
-                format!("{}:{}", self.ip, port)
-            }
+            if self.ip.contains(":") { self.ip.clone() } else { format!("{}:{}", self.ip, port) }
         } else {
             format!("{}:{}", self.dns_name, port)
         };
@@ -410,7 +406,7 @@ fn tls_connector(
 
 #[cfg(test)]
 mod tests {
-    use crate::builderhub::{Peer, DEFAULT_SYSTEM_PORT};
+    use crate::builderhub::{DEFAULT_SYSTEM_PORT, Peer};
     use tokio::net::lookup_host;
 
     #[tokio::test]
