@@ -238,7 +238,19 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let certs = self
             .peers
             .iter()
-            .filter_map(|p| p.info.openssl_tls_certificate()?.ok())
+            .filter_map(|p| {
+                let Some(c_res) = p.info.openssl_tls_certificate() else {
+                    tracing::warn!(peer = ?p.info, "received peer update without certificate");
+                    return None;
+                };
+                match c_res {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        tracing::warn!(?e, peer = ?p.info, "received invalid tls certificate");
+                        None
+                    }
+                }
+            })
             .collect::<Vec<_>>();
         if let Err(e) = self.certs_tx.send(certs).await {
             tracing::error!(?e, "failed to send certificates update");
