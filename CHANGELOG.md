@@ -43,6 +43,11 @@ Support for MEV-Share bundles has officially been dropped, so they won't be
 accepted and processed starting from this release. On BuilderNet, they have
 been already deprecated by some weeks.
 
+### Miscellaneous
+
+- Now the codebase features Rust 2024 edition
+- Formatter both inside `justfile` and CI have been bumped to nightly-2025-12-18
+
 ## v2.0.1 - 2025-12-16
 
 - Bump `prometric` to `v0.2.1`.
