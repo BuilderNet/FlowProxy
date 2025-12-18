@@ -3,7 +3,6 @@ use crate::{
 };
 use alloy_consensus::crypto::RecoveryError;
 use alloy_eips::eip2718::Eip2718Error;
-use rbuilder_primitives::serialize::RawShareBundleConvertError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IngressError {
@@ -19,9 +18,6 @@ pub enum IngressError {
     /// Bundle decoding error.
     #[error(transparent)]
     SystemBundleDecoding(#[from] SystemBundleDecodingError),
-    /// MEV Share bundle decoding error.
-    #[error(transparent)]
-    ShareBundleDecode(#[from] RawShareBundleConvertError),
     /// ECDSA signature recovery error.
     #[error(transparent)]
     Recovery(#[from] RecoveryError),
@@ -40,7 +36,6 @@ impl IngressError {
             Self::Validation(_) |
             Self::Decode2718(_) |
             Self::SystemBundleDecoding(_) |
-            Self::ShareBundleDecode(_) |
             Self::TooManyTransactions |
             Self::Recovery(_) => JsonRpcError::InvalidParams,
             Self::Serde(_) => JsonRpcError::ParseError,

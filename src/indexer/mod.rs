@@ -39,7 +39,10 @@ pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
 pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-backup.db";
 
 /// The tracing target for this indexer crate.
-const TARGET: &str = "indexer";
+const TARGET_INDEXER: &str = "indexer";
+
+/// The tracing target for this indexer crate.
+const TARGET_BACKUP: &str = "backup";
 
 /// Trait for adding order indexing functionality.
 pub(crate) trait OrderIndexer: Sync + Send {
@@ -130,11 +133,11 @@ impl OrderIndexer for IndexerHandle {
         if let Err(e) = self.senders.bundle_tx.try_send(system_bundle) {
             match e {
                 mpsc::error::TrySendError::Full(bundle) => {
-                    tracing::error!(target: TARGET, bundle_hash = ?bundle.bundle_hash(), "CRITICAL: Failed to send bundle to index, channel is full");
+                    tracing::error!(target: TARGET_INDEXER, bundle_hash = ?bundle.bundle_hash(), "CRITICAL: Failed to send bundle to index, channel is full");
                     self.metrics.bundle_indexing_failures("Full").inc();
                 }
                 mpsc::error::TrySendError::Closed(_) => {
-                    tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle to index, indexer task is closed");
+                    tracing::error!(target: TARGET_INDEXER, "CRITICAL: Failed to send bundle to index, indexer task is closed");
                     self.metrics.bundle_indexing_failures("Closed").inc();
                 }
             }
@@ -145,11 +148,11 @@ impl OrderIndexer for IndexerHandle {
         if let Err(e) = self.senders.bundle_receipt_tx.try_send(bundle_receipt) {
             match e {
                 mpsc::error::TrySendError::Full(_) => {
-                    tracing::error!(target: TARGET,  "Failed to send bundle receipt to index, channel is full");
+                    tracing::error!(target: TARGET_INDEXER,  "Failed to send bundle receipt to index, channel is full");
                     self.metrics.bundle_receipt_indexing_failures("Full").inc();
                 }
                 mpsc::error::TrySendError::Closed(_) => {
-                    tracing::error!(target: TARGET, "CRITICAL: Failed to send bundle receipt to index, indexer task is closed");
+                    tracing::error!(target: TARGET_INDEXER, "CRITICAL: Failed to send bundle receipt to index, indexer task is closed");
                     self.metrics.bundle_receipt_indexing_failures("Closed").inc();
                 }
             }
@@ -162,7 +165,7 @@ struct MockIndexer;
 
 impl MockIndexer {
     fn run(self, receivers: OrderReceivers, task_executor: TaskExecutor) {
-        tracing::info!(target: TARGET, "Running with mocked indexer");
+        tracing::info!(target: TARGET_INDEXER, "Running with mocked indexer");
 
         let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx } = receivers;
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });

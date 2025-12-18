@@ -2,7 +2,7 @@ use crate::{
     builderhub,
     consts::{
         BIG_REQUEST_SIZE_THRESHOLD, BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER,
-        BUILDERNET_SIGNATURE_HEADER, FLASHBOTS_SIGNATURE_HEADER,
+        BUILDERNET_SIGNATURE_HEADER,
     },
     metrics::SYSTEM_METRICS,
     primitives::{
@@ -15,9 +15,7 @@ use crate::{
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_signer::SignerSync as _;
 use alloy_signer_local::PrivateKeySigner;
-use axum::http::HeaderValue;
 use dashmap::DashMap;
-use hyper::{header::CONTENT_TYPE, HeaderMap};
 use serde_json::json;
 use std::{
     collections::HashMap,
@@ -31,6 +29,8 @@ use tracing::*;
 pub mod client;
 pub mod http;
 pub mod tcp;
+
+pub type Headers = HashMap<String, String>;
 
 /// Sign and build the signature header in the form of `signer_address:signature`.
 fn build_signature_header(signer: &PrivateKeySigner, body: &[u8]) -> String {
@@ -75,8 +75,6 @@ impl IngressForwarders {
         // NOTE: this code is fairly complex and unoptimized due to keeping backwards
         // compability with:
         // 1. Local builder only accepting JSON-RPC encoded orders.
-        // 2. Some peers still on HTTP/2 and not TCP sockets.
-        // 3. Only bundles support binary encoding for TCP forwarder
 
         let priority = order.priority();
         let method_name = order.method_name().to_string();
@@ -84,69 +82,37 @@ impl IngressForwarders {
         // Start with JSON-RPC encoding, that's needed for the local builder anyway.
         let mut encoded_order = order.clone().encode();
 
-        // If it's a bundle, create bitcode encoding for TCP forwarder
-        let encoding_binary = match &order {
-            SystemOrder::Bundle(bundle) => {
-                let bundle = RawBundleBitcode::from(bundle.raw_bundle.as_ref());
-                Some(bitcode::encode(&bundle))
-            }
-            // Raw txs are forwarded as is, no need to re-encode raw bytes.
-            SystemOrder::Transaction(tx) => Some(tx.raw.to_vec()),
-            _ => None,
-        }
-        .map(Arc::new);
-
         // Create local request first
         let local = Arc::new(ForwardingRequest::user_to_local(encoded_order.clone().into()));
         let _ = self.local.send(local.priority(), local);
 
-        let signer = self.signer.clone();
-        let encoding = encoded_order.encoding.clone();
-        let signature_header = self
-            .workers
-            .spawn_with_priority(priority, move || {
-                build_signature_header(&signer, encoding.as_ref())
-            })
-            .await;
+        let encoding_binary = match &order {
+            SystemOrder::Bundle(bundle) => {
+                let bundle = RawBundleBitcode::from(bundle.raw_bundle.as_ref());
+                bitcode::encode(&bundle)
+            }
+            // Raw txs are forwarded as is, no need to re-encode raw bytes.
+            SystemOrder::Transaction(tx) => tx.raw.to_vec(),
+        };
+        let encoding_binary = Arc::new(encoding_binary);
 
-        // If we have TCP encoding, sign that as well
-        let maybe_signature_header_tcp = if let Some(encoding) = encoding_binary.clone() {
+        let signature = {
             let signer = self.signer.clone();
+            let bin = encoding_binary.clone();
             let sig = self
                 .workers
                 .spawn_with_priority(priority, move || {
-                    build_signature_header(&signer, encoding.as_ref())
+                    build_signature_header(&signer, bin.as_ref())
                 })
                 .await;
-            Some(sig)
-        } else {
-            None
+            sig
         };
 
-        let headers = ForwardingRequest::create_headers(
-            priority,
-            Some(signature_header),
-            Some(UtcDateTime::now()),
-        );
+        let mut headers =
+            ForwardingRequest::create_headers(priority, Some(signature), Some(UtcDateTime::now()));
+        headers.insert("method".to_owned(), method_name);
 
-        // Create headers for TCP forwarder
-        // FIX: remove unwrap
-        let mut headers_strings = headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect::<HashMap<String, String>>();
-        headers_strings.insert("method".to_string(), method_name);
-        // In case we have binary encoding, we have to overwrite the signature header
-        if let Some(sig) = maybe_signature_header_tcp {
-            tracing::debug!(?sig, "built TCP signature header for order");
-            headers_strings.insert(BUILDERNET_SIGNATURE_HEADER.to_string().to_lowercase(), sig);
-        }
-
-        // Now we can finally create the payload sent to TCP forwarder
-        let payload = WithHeaders {
-            headers: headers_strings,
-            data: encoding_binary.unwrap_or(encoded_order.encoding.clone()),
-        };
+        let payload = WithHeaders { headers: headers.clone(), data: encoding_binary };
         let data = bitcode::encode(&payload);
 
         encoded_order.encoding_tcp_forwarder = Some(data);
@@ -240,7 +206,7 @@ pub struct ForwardingRequest {
     /// The data to be forwarded.
     pub encoded_order: EncodedOrder,
     /// The headers of the request.
-    pub headers: reqwest::header::HeaderMap,
+    pub headers: Headers,
 
     /// The direction of the forwarding request.
     pub direction: ForwardingDirection,
@@ -261,7 +227,7 @@ impl ForwardingRequest {
         }
     }
 
-    pub fn user_to_system(encoded_order: EncodedOrder, headers: HeaderMap) -> Self {
+    pub fn user_to_system(encoded_order: EncodedOrder, headers: Headers) -> Self {
         Self {
             encoded_order,
             headers,
@@ -291,23 +257,20 @@ impl ForwardingRequest {
         priority: Priority,
         signature_header: Option<String>,
         sent_at_header: Option<UtcDateTime>,
-    ) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            BUILDERNET_PRIORITY_HEADER,
-            priority.to_string().parse().expect("to parse priority string"),
-        );
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    ) -> Headers {
+        let mut headers = HashMap::new();
+        headers.insert(BUILDERNET_PRIORITY_HEADER.to_owned(), priority.to_string());
+        headers.insert("content-type".to_owned(), "application/json".to_owned());
 
         if let Some(signature_header) = signature_header {
             headers.insert(
-                FLASHBOTS_SIGNATURE_HEADER,
+                BUILDERNET_SIGNATURE_HEADER.to_owned(),
                 signature_header.parse().expect("to parse signature header"),
             );
         }
 
         if let Some(sent_at) = sent_at_header {
-            headers.insert(BUILDERNET_SENT_AT_HEADER, sent_at.format_header());
+            headers.insert(BUILDERNET_SENT_AT_HEADER.to_owned(), sent_at.format_header());
         }
 
         headers
@@ -337,15 +300,6 @@ fn record_e2e_metrics(order: &EncodedOrder, direction: &ForwardingDirection, is_
         EncodedOrder::Bundle(_) => {
             SYSTEM_METRICS
                 .bundle_processing_time(
-                    order.priority().as_str(),
-                    direction.as_str(),
-                    is_big.to_string(),
-                )
-                .observe(order.received_at().elapsed().as_secs_f64());
-        }
-        EncodedOrder::MevShareBundle(_) => {
-            SYSTEM_METRICS
-                .mev_share_bundle_processing_time(
                     order.priority().as_str(),
                     direction.as_str(),
                     is_big.to_string(),
