@@ -167,8 +167,8 @@ impl BundleHash for RawBundle {
                 refund_recipient.hash(state);
             }
 
-            if let Some(refund_tx_hashes) = refund_tx_hashes &&
-                !refund_tx_hashes.is_empty()
+            if let Some(refund_tx_hashes) = refund_tx_hashes
+                && !refund_tx_hashes.is_empty()
             {
                 refund_tx_hashes.hash(state);
             }
@@ -867,6 +867,9 @@ impl AcceptorBuilder {
         let key = PKey::private_key_from_pem(&self.raw_certificate)?;
         acceptor_builder.set_private_key(&key)?;
 
+        // acceptor_builder.verify_param_mut().clear_flags(X509VerifyFlags::X509_STRICT)?;
+        // acceptor_builder.verify_param_mut().set_flags(X509VerifyFlags::X509_STRICT)?;
+
         acceptor_builder.set_verify_callback(
             SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT,
             |success, store_ctx| {
@@ -905,8 +908,8 @@ impl AcceptorBuilder {
                     tracing::error!("failed and no certificate relevant to error");
                 }
 
-                if let Some(chain) = store_ctx.chain() &&
-                    chain.len() > 1
+                if let Some(chain) = store_ctx.chain()
+                    && chain.len() > 1
                 {
                     _span.record("chain_len", chain.len());
                     for (idx, cert) in chain.iter().enumerate() {
@@ -931,13 +934,17 @@ pub trait SslAcceptorBuilderExt: Sized {
 impl SslAcceptorBuilderExt for SslAcceptorBuilder {
     /// Replaces current [`X509StoreBuilder`] with one created using these trusted certificates.
     fn add_trusted_certs(mut self, certs: Vec<X509>) -> Result<Self, openssl::error::ErrorStack> {
+        let mut i = 0;
+        let len = certs.len();
         let mut store_builder = X509StoreBuilder::new()?;
         for cert in certs.into_iter() {
             if let Err(e) = store_builder.add_cert(cert) {
                 tracing::error!(?e, "failed to add trusted cert");
             }
+            i += 1;
         }
         self.set_verify_cert_store(store_builder.build())?;
+        tracing::info!(certs = len, added = i, "added certs to store");
         Ok(self)
     }
 }
