@@ -41,9 +41,6 @@ pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-
 /// The tracing target for this indexer crate.
 const TARGET_INDEXER: &str = "indexer";
 
-/// The tracing target for this indexer crate.
-const TARGET_BACKUP: &str = "backup";
-
 /// Trait for adding order indexing functionality.
 pub(crate) trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
