@@ -299,11 +299,11 @@ impl Default for OrderflowIngressArgs {
             system_listen_addr: SocketAddr::from_str("[::1]:0").unwrap(),
             builder_listen_addr: SocketAddr::from_str("127.0.0.1:0").unwrap().into(),
             client_certificate_pem_file: PathBuf::from_str(
-                "./tests/testdata/certificates/cert.pem",
+                "./tests/testdata/certificates/cert_1.pem",
             )
             .unwrap(),
             server_certificate_pem_file: PathBuf::from_str(
-                "./tests/testdata/certificates/cert.pem",
+                "./tests/testdata/certificates/cert_1.pem",
             )
             .unwrap(),
             peer_update_interval_s: 30,
@@ -324,7 +324,7 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            tcp_small_clients: NonZero::new(4).expect("non-zero"),
+            tcp_small_clients: NonZero::new(1).expect("non-zero"),
             tcp_big_clients: 0,
             io_threads: 4,
             compute_threads: 4,

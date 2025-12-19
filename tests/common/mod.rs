@@ -54,6 +54,7 @@ pub(crate) async fn spawn_ingress_with_args(
     }
 }
 
+#[allow(dead_code)]
 pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
     args.peer_update_interval_s = 5;

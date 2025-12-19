@@ -92,10 +92,10 @@ serde_json = "1"
 bitcode = { version = "0.6.7", features = ["serde"] }
 
 # networking
-msg-transport = { git = "https://github.com/chainbound/msg-rs", branch = "lore/feat/transport-control", features = [
+msg-transport = { git = "https://github.com/chainbound/msg-rs", tag = "v0.1.5", features = [
   "tcp-tls"
 ] }
-msg-socket = { git = "https://github.com/chainbound/msg-rs", branch = "lore/feat/transport-control" }
+msg-socket = { git = "https://github.com/chainbound/msg-rs", tag = "v0.1.5" }
 openssl = { version = "0.10.75" }
 
 [dev-dependencies]

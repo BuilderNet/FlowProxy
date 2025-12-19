@@ -238,6 +238,11 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         let certs = builders
             .iter()
             .filter_map(|p| {
+                // Skip self.
+                if p.orderflow_proxy.ecdsa_pubkey_address == self.config.local_signer {
+                    return None;
+                }
+
                 let Some(c_res) = p.openssl_tls_certificate() else {
                     tracing::warn!(peer = ?p, "received peer update without certificate");
                     return None;
@@ -251,11 +256,14 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
                 }
             })
             .collect::<Vec<_>>();
-        tracing::info!(
+
+        tracing::debug!(
             len = certs.len(),
             builders = builders.len(),
+            peers = self.peers.len(),
             "sending certificates for acceptor update"
         );
+
         if let Err(e) = self.certs_tx.send(certs).await {
             tracing::error!(?e, "failed to send certificates update");
         }
