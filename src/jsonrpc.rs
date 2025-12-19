@@ -1,11 +1,11 @@
 use alloy_primitives::bytes::{BufMut as _, BytesMut};
 use axum::{
-    extract::{FromRequest, Request},
-    http::{header, HeaderValue, StatusCode},
-    response::{IntoResponse, Response},
     Json,
+    extract::{FromRequest, Request},
+    http::{HeaderValue, StatusCode, header},
+    response::{IntoResponse, Response},
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::str::FromStr;
 
 /// Supported JSON-RPC version 2.0.

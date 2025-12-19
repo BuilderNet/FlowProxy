@@ -54,16 +54,16 @@ pub fn validate_transaction(
     }
 
     // Checks for chainid
-    if let Some(chain_id) = transaction.chain_id() {
-        if chain_id != MAINNET_CHAIN_ID {
-            return Err(ValidationError::ChainIdMismatch);
-        }
+    if let Some(chain_id) = transaction.chain_id() &&
+        chain_id != MAINNET_CHAIN_ID
+    {
+        return Err(ValidationError::ChainIdMismatch);
     }
 
     let spec_id = spec_by_timestamp(timestamp);
     let gas_limit = transaction.gas_limit();
     if spec_id >= SpecId::OSAKA && gas_limit > MAX_TX_GAS_LIMIT_OSAKA {
-        return Err(ValidationError::ExceedsTxGasLimitCap(gas_limit, MAX_TX_GAS_LIMIT_OSAKA))
+        return Err(ValidationError::ExceedsTxGasLimitCap(gas_limit, MAX_TX_GAS_LIMIT_OSAKA));
     }
 
     let gas = revm_interpreter::gas::calculate_initial_tx_gas(
@@ -99,9 +99,5 @@ pub fn validate_transaction(
 /// Determine revm's [`SpecId`] based on the current timestamp.
 /// Earliest spec supported by the proxy is [`SpecId::PRAGUE`].
 pub fn spec_by_timestamp(timestamp: u64) -> SpecId {
-    if timestamp >= MAINNET_OSAKA_TIMESTAMP {
-        SpecId::OSAKA
-    } else {
-        SpecId::PRAGUE
-    }
+    if timestamp >= MAINNET_OSAKA_TIMESTAMP { SpecId::OSAKA } else { SpecId::PRAGUE }
 }

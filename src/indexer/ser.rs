@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 pub(super) mod u256 {
     use alloy_primitives::U256;
-    use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};
+    use serde::{Deserialize, Serialize as _, de::Deserializer, ser::Serializer};
 
     /// EVM U256 is represented in big-endian, but ClickHouse expects little-endian.
     pub(crate) fn serialize<S: Serializer>(u256: &U256, serializer: S) -> Result<S::Ok, S::Error> {
@@ -50,9 +50,9 @@ pub(super) mod u256 {
 pub(super) mod u256es {
     use alloy_primitives::U256;
     use serde::{
+        Deserialize,
         de::Deserializer,
         ser::{SerializeSeq, Serializer},
-        Deserialize,
     };
 
     /// Serialize Vec<U256> following ClickHouse RowBinary format.
@@ -89,9 +89,9 @@ pub(super) mod u256es {
 pub(super) mod hashes {
     use alloy_primitives::B256;
     use serde::{
+        Deserialize,
         de::Deserializer,
         ser::{SerializeSeq, Serializer},
-        Deserialize,
     };
 
     pub(crate) fn serialize<S: Serializer>(vec: &[B256], serializer: S) -> Result<S::Ok, S::Error> {
@@ -115,9 +115,9 @@ pub(super) mod hashes {
 pub(super) mod hash {
     use alloy_primitives::B256;
     use serde::{
+        Deserialize,
         de::Deserializer,
         ser::{SerializeTuple as _, Serializer},
-        Deserialize,
     };
 
     pub(crate) fn serialize<S: Serializer>(hash: &B256, serializer: S) -> Result<S::Ok, S::Error> {
@@ -142,13 +142,13 @@ pub(super) mod hash {
 #[allow(dead_code)]
 pub(super) mod address {
     use alloy_primitives::Address;
-    use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize as _};
+    use serde::{Deserialize, Serialize as _, de::Deserializer, ser::Serializer};
 
     pub(crate) fn serialize<S: Serializer>(
         address: &Address,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        let address_bytes = &address.0 .0;
+        let address_bytes = &address.0.0;
         address_bytes.serialize(serializer)
     }
 
@@ -168,7 +168,7 @@ pub(super) mod address {
             serializer: S,
         ) -> Result<S::Ok, S::Error> {
             if let Some(address) = address {
-                let address_bytes = &address.0 .0;
+                let address_bytes = &address.0.0;
                 serializer.serialize_some(address_bytes)
             } else {
                 serializer.serialize_none()
@@ -188,9 +188,9 @@ pub(super) mod address {
 pub(super) mod addresses {
     use alloy_primitives::Address;
     use serde::{
+        Deserialize,
         de::Deserializer,
         ser::{SerializeSeq, Serializer},
-        Deserialize,
     };
 
     pub(crate) mod option {
@@ -202,7 +202,7 @@ pub(super) mod addresses {
         ) -> Result<S::Ok, S::Error> {
             let mut seq = serializer.serialize_seq(Some(vec.len()))?;
             for address in vec {
-                let address_bytes = address.map(|a| a.0 .0);
+                let address_bytes = address.map(|a| a.0.0);
                 seq.serialize_element(&address_bytes)?;
             }
             seq.end()
@@ -223,7 +223,7 @@ pub(super) mod addresses {
     ) -> Result<S::Ok, S::Error> {
         let mut seq = serializer.serialize_seq(Some(vec.len()))?;
         for address in vec {
-            let address_bytes = &address.0 .0;
+            let address_bytes = &address.0.0;
             seq.serialize_element(address_bytes)?;
         }
 

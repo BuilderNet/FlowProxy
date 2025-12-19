@@ -20,9 +20,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Install nightly-2025-09-21 --component rustfmt
-        run: rustup toolchain install nightly-2025-09-21 --component rustfmt
-      - run: cargo +nightly-2025-09-21 fmt --all --check
+      - name: Install nightly-2025-12-18 --component rustfmt
+        run: rustup toolchain install nightly-2025-12-18 --component rustfmt
+      - run: cargo +nightly-2025-12-18 fmt --all --check
       - run: cargo clippy --examples --tests --benches --all-features --locked
         env:
           RUSTFLAGS: -D warnings

@@ -13,6 +13,9 @@ pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 512;
 /// Header name for BuilderNet signature.
 pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
 
+/// Header name for BuilderNet peer public key.
+pub const BUILDERNET_ADDRESS_HEADER: &str = "X-BuilderNet-Address";
+
 /// Header name for Flashbots signature.
 /// NOTE: this header is used for backwards compatibility.
 pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";

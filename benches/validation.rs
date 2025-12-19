@@ -1,9 +1,9 @@
 use std::hint::black_box;
 
-use alloy_primitives::{keccak256, Address};
+use alloy_primitives::{Address, keccak256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use flowproxy::{
     consts::{BUILDERNET_SIGNATURE_HEADER, FLASHBOTS_SIGNATURE_HEADER},
     ingress::maybe_verify_signature,
@@ -12,7 +12,7 @@ use flowproxy::{
     utils::testutils::Random,
 };
 use hyper::HeaderMap;
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use rbuilder_primitives::serialize::RawBundle;
 use serde_json::json;
 

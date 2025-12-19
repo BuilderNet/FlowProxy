@@ -23,16 +23,15 @@ pub fn looks_like_canonical_blob_tx(raw_tx: &Bytes) -> bool {
     // For full check we could call TransactionSigned::decode_enveloped and fully try to decode it
     // is way more expensive. We expect EIP4844_TX_TYPE_ID + rlp(chainId = 01,.....)
     let mut tx_slice = raw_tx.as_ref();
-    if let Some(tx_type) = tx_slice.first() {
-        if *tx_type == EIP4844_TX_TYPE_ID {
-            tx_slice.advance(1);
-            if let Ok(outer_header) = Header::decode(&mut tx_slice) {
-                if outer_header.list {
-                    if let Some(chain_id) = tx_slice.first() {
-                        return (*chain_id as u64) == MAINNET_CHAIN_ID;
-                    }
-                }
-            }
+    if let Some(tx_type) = tx_slice.first() &&
+        *tx_type == EIP4844_TX_TYPE_ID
+    {
+        tx_slice.advance(1);
+        if let Ok(outer_header) = Header::decode(&mut tx_slice) &&
+            outer_header.list &&
+            let Some(chain_id) = tx_slice.first()
+        {
+            return (*chain_id as u64) == MAINNET_CHAIN_ID;
         }
     }
     false

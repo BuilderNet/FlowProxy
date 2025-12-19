@@ -1,8 +1,8 @@
 use crate::{
     forwarder::{
-        client::{tcp_clients_buckets, ReqSocketIpBucketPool, TcpTransport},
-        tcp::spawn_tcp_forwarder,
         ForwardingRequest, PeerHandle,
+        client::{ReqSocketIpBucketPool, TcpTransport, tcp_clients_buckets},
+        tcp::spawn_tcp_forwarder,
     },
     metrics::BuilderHubMetrics,
     priority,
@@ -22,7 +22,10 @@ use std::{
     convert::Infallible, fmt::Debug, future::Future, io, net::SocketAddr, num::NonZero,
     path::PathBuf, sync::Arc, time::Duration,
 };
-use tokio::net::{lookup_host, ToSocketAddrs};
+use tokio::{
+    net::{ToSocketAddrs, lookup_host},
+    sync::mpsc,
+};
 
 use rbuilder_utils::tasks::TaskExecutor;
 use serde::{Deserialize, Serialize};
@@ -35,22 +38,20 @@ pub use client::Client;
 /// CPU instructions present in both Intel and AMD CPUs.
 ///
 /// <https://en.wikipedia.org/wiki/AES_instruction_set>
-const DEFAULT_TLS_CIPHERS: &str =
+pub const DEFAULT_TLS_CIPHERS: &str =
     "TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256";
 
 /// Default system port for proxy instances.
 const DEFAULT_SYSTEM_PORT: u16 = 5544;
 
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default))]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct InstanceData {
     /// TLS certificate of the instance in UTF-8 encoded PEM format.
     pub tls_cert: String,
 }
 
 /// The credentials of the running overflow proxy of a BuilderHub peer.
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default))]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PeerCredentials {
     /// TLS certificate of the orderflow proxy in UTF-8 encoded PEM format.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,8 +62,7 @@ pub struct PeerCredentials {
 
 /// A [`Peer`] is a builder inside Builderhub. This holds informations about a builder peer, as
 /// returned by the `api/l1-builder/v1/builders` endpoint of BuilderHub.
-#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Default))]
+#[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Peer {
     /// Builder name.
     pub name: String,
@@ -81,14 +81,15 @@ impl Peer {
     ///
     /// Reference: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
     pub async fn system_api(&self) -> io::Result<Option<SocketAddr>> {
+        // NOTE: Needed for integration tests where port is not known upfront. This is also more
+        // flexible in the case some instances won't run with that default port.
+        let port =
+            self.ip.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_SYSTEM_PORT);
+
         let host_with_port = if self.dns_name.is_empty() {
-            if self.ip.contains(":") {
-                self.ip.clone()
-            } else {
-                format!("{}:{}", self.ip, DEFAULT_SYSTEM_PORT)
-            }
+            if self.ip.contains(":") { self.ip.clone() } else { format!("{}:{}", self.ip, port) }
         } else {
-            format!("{}:{}", self.dns_name, DEFAULT_SYSTEM_PORT)
+            format!("{}:{}", self.dns_name, port)
         };
 
         Ok(lookup_host(host_with_port).await?.next())
@@ -135,22 +136,8 @@ impl LocalPeerStore {
         Self { builders: Arc::new(DashMap::new()) }
     }
 
-    pub fn register(&self, signer_address: Address, port: Option<u16>) -> LocalPeerStore {
-        self.builders.insert(
-            signer_address.to_string(),
-            Peer {
-                name: signer_address.to_string(),
-                ip: format!("127.0.0.1:{}", port.unwrap()),
-                // Don't set the DNS name for local peer store or it will try to connect to
-                // {dns_name}:5544
-                dns_name: "".to_string(),
-                orderflow_proxy: PeerCredentials {
-                    tls_cert: None,
-                    ecdsa_pubkey_address: signer_address,
-                },
-                instance: InstanceData { tls_cert: "".to_string() },
-            },
-        );
+    pub fn register(&self, peer: Peer) -> LocalPeerStore {
+        self.builders.insert(peer.orderflow_proxy.ecdsa_pubkey_address.to_string(), peer);
 
         LocalPeerStore { builders: self.builders.clone() }
     }
@@ -174,10 +161,8 @@ pub struct PeersUpdaterConfig {
     pub tcp_small_clients: NonZero<usize>,
     /// Number of TCP clients to use per peer for big messages.
     pub tcp_big_clients: usize,
-    /// Private key PEM file for client authentication (mTLS)
-    pub private_key_pem_file: Option<PathBuf>,
-    /// Certificate PEM file for client authentication (mTLS)
-    pub certificate_pem_file: Option<PathBuf>,
+    /// PEM file containing both certificate and private key, used for client authentication (mTLS)
+    pub certificate_pem_file: PathBuf,
 }
 
 /// A [`PeerUpdater`] periodically fetches the list of peers from a BuilderHub peer store,
@@ -194,6 +179,8 @@ pub struct PeersUpdater<P: PeerStore> {
     task_executor: TaskExecutor,
     /// The metrics for the peer updater.
     metrics: Arc<BuilderHubMetrics>,
+    /// Channel to send current peers certificates, to update TLS acceptor on the server.
+    certs_tx: mpsc::Sender<Vec<X509>>,
 }
 
 impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
@@ -203,14 +190,19 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
         peer_store: P,
         peers: Arc<DashMap<String, PeerHandle>>,
         task_executor: TaskExecutor,
-    ) -> Self {
-        Self {
-            peer_store,
-            peers,
-            config,
-            task_executor,
-            metrics: Arc::new(BuilderHubMetrics::default()),
-        }
+    ) -> (Self, mpsc::Receiver<Vec<X509>>) {
+        let (tx, rx) = mpsc::channel(8);
+        (
+            Self {
+                peer_store,
+                peers,
+                config,
+                task_executor,
+                metrics: Arc::new(BuilderHubMetrics::default()),
+                certs_tx: tx,
+            },
+            rx,
+        )
     }
 
     /// Run the peer updater loop.
@@ -242,6 +234,39 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
             }
             is_present
         });
+
+        let certs = builders
+            .iter()
+            .filter_map(|p| {
+                // Skip self.
+                if p.orderflow_proxy.ecdsa_pubkey_address == self.config.local_signer {
+                    return None;
+                }
+
+                let Some(c_res) = p.openssl_tls_certificate() else {
+                    tracing::warn!(peer = ?p, "received peer update without certificate");
+                    return None;
+                };
+                match c_res {
+                    Ok(c) => Some(c),
+                    Err(e) => {
+                        tracing::warn!(?e, peer = ?p, "received invalid tls certificate");
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
+        tracing::debug!(
+            len = certs.len(),
+            builders = builders.len(),
+            peers = self.peers.len(),
+            "sending certificates for acceptor update"
+        );
+
+        if let Err(e) = self.certs_tx.send(certs).await {
+            tracing::error!(?e, "failed to send certificates update");
+        }
 
         for builder in builders {
             self.process_peer(builder).await;
@@ -305,11 +330,7 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 
             tracing::debug!("using tls connector");
 
-            let connector = match tls_connector(
-                certificate,
-                &self.config.private_key_pem_file,
-                &self.config.certificate_pem_file,
-            ) {
+            let connector = match tls_connector(certificate, &self.config.certificate_pem_file) {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::error!(?e, "failed to create tls connector");
@@ -388,21 +409,15 @@ impl<P: PeerStore + Send + Sync + 'static> PeersUpdater<P> {
 ///
 /// 1. The peer root certificate, added to the certificate store. This is to establish connections
 ///    with peer acting as a server.
-/// 2. Private key and certificate files for client authentication (mTLS), if provided.
+/// 2. Private key and certificate file for client authentication (mTLS).
 fn tls_connector(
     peer_root_certificate: X509,
-    private_key_pem_file: &Option<PathBuf>,
-    certificate_pem_file: &Option<PathBuf>,
+    certificate_pem_file: &PathBuf,
 ) -> Result<SslConnector, openssl::error::ErrorStack> {
     let mut builder = SslConnector::builder(SslMethod::tls())?;
 
-    if let Some(key) = private_key_pem_file {
-        builder.set_private_key_file(key, SslFiletype::PEM)?;
-    }
-
-    if let Some(certificate) = certificate_pem_file {
-        builder.set_certificate_file(certificate, SslFiletype::PEM)?;
-    }
+    builder.set_private_key_file(certificate_pem_file, SslFiletype::PEM)?;
+    builder.set_certificate_file(certificate_pem_file, SslFiletype::PEM)?;
 
     let certificate_store = builder.cert_store_mut();
     certificate_store.add_cert(peer_root_certificate)?;
@@ -415,11 +430,8 @@ fn tls_connector(
 
 #[cfg(test)]
 mod tests {
+    use crate::builderhub::{DEFAULT_SYSTEM_PORT, Peer};
     use tokio::net::lookup_host;
-
-    use crate::builderhub::DEFAULT_SYSTEM_PORT;
-
-    use crate::builderhub::Peer;
 
     #[tokio::test]
     async fn system_api_host_and_port_works() {

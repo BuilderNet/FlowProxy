@@ -5,17 +5,18 @@ use std::{fmt::Debug, time::Duration};
 use crate::{
     cli::ClickhouseArgs,
     indexer::{
-        click::models::{BundleReceiptRow, BundleRow},
         OrderReceivers, TARGET_INDEXER,
+        click::models::{BundleReceiptRow, BundleRow},
     },
     metrics::CLICKHOUSE_METRICS,
     primitives::{BundleReceipt, SystemBundle},
 };
 use rbuilder_utils::{
     clickhouse::{
+        Quantities,
         backup::{DiskBackup, DiskBackupConfig},
         indexer::ClickhouseClientConfig,
-        spawn_clickhouse_inserter_and_backup, Quantities,
+        spawn_clickhouse_inserter_and_backup,
     },
     tasks::TaskExecutor,
 };
@@ -147,29 +148,29 @@ pub(crate) mod tests {
     use crate::{
         cli::ClickhouseArgs,
         indexer::{
+            BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, OrderSenders, TARGET_INDEXER,
             click::{
-                models::{BundleReceiptRow, BundleRow},
                 ClickhouseClientConfig, ClickhouseIndexer,
+                models::{BundleReceiptRow, BundleRow},
             },
             tests::{bundle_receipt_example, system_bundle_example},
-            OrderSenders, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET_INDEXER,
         },
     };
-    use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
+    use clickhouse::{Client as ClickhouseClient, error::Result as ClickhouseResult};
     use rbuilder_utils::{
         clickhouse::{
-            backup::{metrics::NullMetrics, Backup, DiskBackup, DiskBackupConfig, FailedCommit},
-            indexer::default_disk_backup_database_path,
             Quantities,
+            backup::{Backup, DiskBackup, DiskBackupConfig, FailedCommit, metrics::NullMetrics},
+            indexer::default_disk_backup_database_path,
         },
         tasks::TaskManager,
     };
     use testcontainers::{
+        ContainerAsync, Image,
         core::{
-            error::Result as TestcontainersResult, wait::HttpWaitStrategy, ContainerPort, WaitFor,
+            ContainerPort, WaitFor, error::Result as TestcontainersResult, wait::HttpWaitStrategy,
         },
         runners::AsyncRunner as _,
-        ContainerAsync, Image,
     };
     use tokio::{runtime::Handle, sync::mpsc};
 

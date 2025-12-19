@@ -5,8 +5,8 @@ use std::{
     num::NonZero,
     ops::Range,
     sync::{
-        atomic::{AtomicU8, Ordering},
         Arc,
+        atomic::{AtomicU8, Ordering},
     },
     time::Duration,
 };
@@ -14,9 +14,9 @@ use std::{
 use derive_more::{Deref, DerefMut};
 use msg_socket::ReqSocket;
 use msg_transport::{
+    Transport,
     tcp::{Tcp, TcpStats},
     tcp_tls::TcpTls,
-    Transport,
 };
 
 use crate::metrics::SocketMetrics;

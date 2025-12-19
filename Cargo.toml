@@ -1,7 +1,7 @@
 [package]
 name = "flowproxy"
-version = "2.0.2"
-edition = "2021"
+version = "3.0.0"
+edition = "2024"
 publish = false
 build = "build.rs"
 
@@ -20,8 +20,8 @@ revm-primitives = { version = "21.0.2", default-features = false }
 revm-interpreter = { version = "29.0.1", default-features = false }
 
 # rbuilder
-rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder",  rev = "95323c0c6b1ac742a5716aba1942f3e06b8b5241" }
-rbuilder-utils = { git = "https://github.com/flashbots/rbuilder",  rev = "95323c0c6b1ac742a5716aba1942f3e06b8b5241" , features = [
+rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder", rev = "95323c0c6b1ac742a5716aba1942f3e06b8b5241" }
+rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", rev = "95323c0c6b1ac742a5716aba1942f3e06b8b5241", features = [
   "test-utils"
 ] }
 
