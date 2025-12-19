@@ -365,7 +365,7 @@ req_extensions = v3_req
 prompt = no
 
 [req_distinguished_name]
-CN = localhost
+CN = \${PRIVATE_IP}
 
 [v3_req]
 subjectAltName = @alt_names
