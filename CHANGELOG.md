@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## v3.0.0 - 2025-12-18
+## v3.0.0 - 2025-12-19
 
 Breaking change release regarding mTLS and MEV-Share bundles support.
 
@@ -56,6 +56,11 @@ been already deprecated by some weeks.
 
 - Now the codebase features Rust 2024 edition
 - Formatter both inside `justfile` and CI have been bumped to nightly-2025-12-18
+
+## v2.0.2 - 2025-12-19
+
+- Bump `msg-socket` and `msg-transport` to `v0.1.5`, which features less
+  verbose logs by default.
 
 ## v2.0.1 - 2025-12-16
 
