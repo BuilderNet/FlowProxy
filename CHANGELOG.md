@@ -14,6 +14,19 @@ This release enforces mTLS for communication with other FlowProxy instances.
 As such, existing setups using HAProxy in front of the system API should be
 changed, removing such load balancer from the endpoint.
 
+Signature creation and recovery to / from system endpoint has been removed, saving
+on CPU cost for compute threads. This means new versions can't communicate with
+previous versions because of it.
+
+**WARNING**
+
+Currently, **client authentication works correctly only if all peers have
+certificates with different Common Name (CN) field**. Otherwise, OpenSSL TLS
+acceptor might pick up the first certificate matching a CN, which may well not
+be what the client is presenting.
+
+### CLI changes
+
 Some CLI arguments have been changed to reflect these changes:
 
 - The optional flags `--private-key-pem-file` (`PRIVATE_KEY_PEM_FILE`) and
@@ -32,10 +45,6 @@ Some CLI arguments have been changed to reflect these changes:
 Notice that the newly added flags are **mandatory**. If the same certificate or
 key is used for both a client and a server, then the new flags can be set with
 the same values.
-
-Signature creation and recovery to / from system endpoint has been removed, saving
-on CPU cost for compute threads. This means new versions can't communicate with
-previous versions because of it.
 
 ### MEV-Share bundles
 
