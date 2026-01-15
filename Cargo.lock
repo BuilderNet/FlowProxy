@@ -2906,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "flowproxy"
-version = "2.0.1"
+version = "2.0.2"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -4226,8 +4226,8 @@ dependencies = [
 
 [[package]]
 name = "msg-common"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.5"
+source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.5#97ae1f029b44b06571660ee60b7917958b662d5f"
 dependencies = [
  "derive_more 2.1.0",
  "futures",
@@ -4238,8 +4238,8 @@ dependencies = [
 
 [[package]]
 name = "msg-socket"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.5"
+source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.5#97ae1f029b44b06571660ee60b7917958b662d5f"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -4259,8 +4259,8 @@ dependencies = [
 
 [[package]]
 name = "msg-transport"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.5"
+source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.5#97ae1f029b44b06571660ee60b7917958b662d5f"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -4277,8 +4277,8 @@ dependencies = [
 
 [[package]]
 name = "msg-wire"
-version = "0.1.3"
-source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.4#7f351aa1f06d88dea4f7e31acfe211cee2390146"
+version = "0.1.5"
+source = "git+https://github.com/chainbound/msg-rs?tag=v0.1.5#97ae1f029b44b06571660ee60b7917958b662d5f"
 dependencies = [
  "bytes",
  "flate2",
