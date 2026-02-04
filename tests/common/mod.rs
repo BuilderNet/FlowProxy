@@ -16,6 +16,7 @@ use flowproxy::{
 };
 use hyper::{HeaderMap, header};
 use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_utils::tasks::TaskManager;
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -30,15 +31,13 @@ pub(crate) struct IngressClient<S: Signer> {
 
 pub(crate) async fn spawn_ingress_with_args(
     args: OrderflowIngressArgs,
+    task_manager: &TaskManager,
 ) -> IngressClient<PrivateKeySigner> {
     let user_listener = TcpListener::bind(&args.user_listen_addr).await.unwrap();
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
-
-    let task_manager = rbuilder_utils::tasks::TaskManager::current();
-
+    let task_executor = task_manager.executor();
     tokio::spawn(async move {
-        let task_executor = task_manager.executor();
         let (indexer_handle, _indexer_join_handles) =
             Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
         let cancellation_token = CancellationToken::new();
@@ -63,11 +62,14 @@ pub(crate) async fn spawn_ingress_with_args(
 }
 
 #[allow(dead_code)]
-pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
+pub(crate) async fn spawn_ingress(
+    builder_url: Option<String>,
+    task_manager: &TaskManager,
+) -> IngressClient<PrivateKeySigner> {
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
     args.peer_update_interval_s = 5;
     args.builder_url = builder_url;
-    spawn_ingress_with_args(args).await
+    spawn_ingress_with_args(args, task_manager).await
 }
 
 impl<S: Signer + Sync> IngressClient<S> {

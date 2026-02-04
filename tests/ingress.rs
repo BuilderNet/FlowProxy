@@ -34,7 +34,8 @@ mod assert {
 async fn ingress_http_e2e() {
     let mut rng = rand::rng();
     let mut builder = BuilderReceiver::spawn().await;
-    let client = spawn_ingress(Some(builder.url())).await;
+    let task_manager = rbuilder_utils::tasks::TaskManager::current();
+    let client = spawn_ingress(Some(builder.url()), &task_manager).await;
 
     let empty = json!({});
     let response =

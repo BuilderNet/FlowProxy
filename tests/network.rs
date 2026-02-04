@@ -17,7 +17,7 @@ use crate::common::spawn_ingress_with_args;
 async fn network_e2e_bundle_tx_works() {
     let _ = tracing_subscriber::fmt::try_init();
     info!("starting network e2e tcp test");
-
+    let task_manager = rbuilder_utils::tasks::TaskManager::current();
     let mut rng = rand::rng();
     let builder1 = BuilderReceiver::spawn().await;
     let builder2 = BuilderReceiver::spawn().await;
@@ -32,7 +32,7 @@ async fn network_e2e_bundle_tx_works() {
     args.client_certificate_pem_file =
         PathBuf::from_str("./tests/testdata/certificates/cert_1.pem").unwrap();
     args.system_listen_addr = "127.0.0.1:0".parse().unwrap();
-    let client1 = spawn_ingress_with_args(args.clone()).await;
+    let client1 = spawn_ingress_with_args(args.clone(), &task_manager).await;
 
     args.builder_url = Some(builder2.url());
     args.server_certificate_pem_file =
@@ -40,7 +40,7 @@ async fn network_e2e_bundle_tx_works() {
     args.client_certificate_pem_file =
         PathBuf::from_str("./tests/testdata/certificates/cert_2.pem").unwrap();
     args.system_listen_addr = "127.0.0.1:0".parse().unwrap();
-    let client2 = spawn_ingress_with_args(args.clone()).await;
+    let client2 = spawn_ingress_with_args(args.clone(), &task_manager).await;
 
     args.builder_url = Some(builder3.url());
     args.server_certificate_pem_file =
@@ -48,7 +48,7 @@ async fn network_e2e_bundle_tx_works() {
     args.client_certificate_pem_file =
         PathBuf::from_str("./tests/testdata/certificates/cert_3.pem").unwrap();
     args.system_listen_addr = "127.0.0.1:0".parse().unwrap();
-    let _client3 = spawn_ingress_with_args(args.clone()).await;
+    let _client3 = spawn_ingress_with_args(args.clone(), &task_manager).await;
 
     // args.builder_url = Some(builder4.url());
     // args.server_certificate_pem_file =
