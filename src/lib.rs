@@ -102,7 +102,8 @@ pub async fn run(
     .await
 }
 
-/// Cancellation is a little ugly, just added enough to make it drop indexer_handle but it's a mix of cancellation_token + task_executor which also has a shutdown method.
+/// Cancellation is a little ugly, just added enough to make it drop indexer_handle but it's a mix
+/// of cancellation_token + task_executor which also has a shutdown method.
 pub async fn run_with_listeners(
     args: OrderflowIngressArgs,
     user_listener: TcpListener,

@@ -10,9 +10,9 @@ use axum::{Router, extract::State, routing::post};
 use flowproxy::{
     cli::OrderflowIngressArgs,
     consts::FLASHBOTS_SIGNATURE_HEADER,
+    indexer::Indexer,
     ingress::maybe_decompress,
     jsonrpc::{JSONRPC_VERSION_2, JsonRpcError, JsonRpcRequest, JsonRpcResponse},
-    runner::CliContext,
 };
 use hyper::{HeaderMap, header};
 use rbuilder_primitives::serialize::RawBundle;
@@ -20,6 +20,7 @@ use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use tokio::{net::TcpListener, sync::mpsc};
+use tokio_util::sync::CancellationToken;
 
 pub(crate) struct IngressClient<S: Signer> {
     pub(crate) url: String,
@@ -36,12 +37,19 @@ pub(crate) async fn spawn_ingress_with_args(
 
     let task_manager = rbuilder_utils::tasks::TaskManager::current();
 
+    let task_executor = task_manager.executor();
+    let (indexer_handle, _indexer_join_handles) =
+        Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
+    let cancellation_token = CancellationToken::new();
+
     tokio::spawn(async move {
         flowproxy::run_with_listeners(
             args,
             user_listener,
             builder_listener,
-            CliContext { task_executor: task_manager.executor() },
+            task_executor,
+            indexer_handle,
+            cancellation_token,
         )
         .await
         .unwrap();

@@ -78,7 +78,8 @@ impl OrderSenders {
 pub struct Indexer;
 
 impl Indexer {
-    /// Returns the IndexerHandle to send dada and a vector of join handles to the indexer tasks so we can wait for them to finish on shutdown.
+    /// Returns the IndexerHandle to send data and a vector of join handles to the indexer tasks so
+    /// we can wait for them to finish on shutdown.
     pub fn run(
         args: IndexerArgs,
         builder_name: String,

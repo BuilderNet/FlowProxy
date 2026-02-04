@@ -169,6 +169,7 @@ pub(crate) mod tests {
             },
             tests::{bundle_receipt_example, system_bundle_example},
         },
+        utils::{SHUTDOWN_TIMEOUT, wait_for_critical_tasks},
     };
     use clickhouse::{Client as ClickhouseClient, error::Result as ClickhouseResult};
     use rbuilder_utils::{
@@ -385,7 +386,7 @@ pub(crate) mod tests {
         let (senders, receivers) = OrderSenders::new();
 
         let validation = false;
-        ClickhouseIndexer::run(
+        let indexer_join_handles = ClickhouseIndexer::run(
             config.into(),
             builder_name.clone(),
             receivers,
@@ -397,6 +398,8 @@ pub(crate) mod tests {
         let system_bundle = system_bundle_example();
         let system_bundle_row = (system_bundle.clone(), builder_name.clone()).into();
         senders.bundle_tx.send(system_bundle.clone()).await.unwrap();
+        drop(senders);
+        wait_for_critical_tasks(indexer_join_handles, SHUTDOWN_TIMEOUT).await;
 
         // Wait a bit for bundle to be actually processed before shutting down.
         tokio::time::sleep(Duration::from_secs(1)).await;

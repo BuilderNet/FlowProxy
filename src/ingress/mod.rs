@@ -184,8 +184,8 @@ impl OrderflowIngress {
 
         let entity = Entity::Signer(signer);
 
-        if ingress.rate_limiting_enabled
-            && let Some(mut data) = ingress.entity_data(entity)
+        if ingress.rate_limiting_enabled &&
+            let Some(mut data) = ingress.entity_data(entity)
         {
             if data.rate_limit.count() > ingress.rate_limit_count {
                 tracing::trace!("rate limited request");
@@ -272,8 +272,8 @@ impl OrderflowIngress {
         let response = match result {
             Ok(eth) => JsonRpcResponse::result(request.id, eth),
             Err(error) => {
-                if error.is_validation()
-                    && let Some(mut data) = ingress.entity_data(entity)
+                if error.is_validation() &&
+                    let Some(mut data) = ingress.entity_data(entity)
                 {
                     data.scores.score_mut(received_at.into()).invalid_requests += 1;
                 }

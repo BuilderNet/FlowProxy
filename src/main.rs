@@ -1,7 +1,12 @@
 use std::time::Duration;
 
 use clap::Parser;
-use flowproxy::{cli::OrderflowIngressArgs, indexer::Indexer, trace::init_tracing};
+use flowproxy::{
+    cli::OrderflowIngressArgs,
+    indexer::Indexer,
+    trace::init_tracing,
+    utils::{SHUTDOWN_TIMEOUT, wait_for_critical_tasks},
+};
 use futures::{StreamExt, stream::FuturesUnordered};
 use rbuilder_utils::tasks::{PanickedTaskError, TaskManager};
 use tokio::task::JoinHandle;
@@ -40,8 +45,8 @@ fn main() {
     info!("Main task started");
 
     // Executes the main task command until it finished or ctrl-c was fired.
-    // IMPORTANT: flowproxy::run has no nice cancellation and will be stopped being polled abruptly so
-    // it must not contain any critical tasks that need proper shutdown.
+    // IMPORTANT: flowproxy::run has no nice cancellation and will be stopped being polled abruptly
+    // so it must not contain any critical tasks that need proper shutdown.
     tokio_runtime.block_on(run_with_shutdown(args, task_manager));
 
     info!("Main task finished. Shutting down tokio runtime");
@@ -51,8 +56,6 @@ fn main() {
     }
 }
 
-/// This time out should be enough for the inserter to flush all pending clickhouse data (timeout is clickhouse usually a few secs) and local DB data (disk flush time).
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 async fn run_with_shutdown(args: OrderflowIngressArgs, mut task_manager: TaskManager) {
     warn!("starting blocking");
     let task_executor = task_manager.executor();
@@ -68,40 +71,15 @@ async fn run_with_shutdown(args: OrderflowIngressArgs, mut task_manager: TaskMan
             tracing::error!(?err, target = "cli", "shutting down due to error");
         }
     }
-    // This kills some tasks launched by flowproxy::run that release the last references to the indexer_handle.
+    // This kills some tasks launched by flowproxy::run that release the last references to the
+    // indexer_handle.
     cancellation_token.cancel();
-    // At this point all the rpc was abruptly dropped which dropped the indexer_handle and that will allow the indexer core
-    // to process all pending data and start shutting down.
+    // At this point all the rpc was abruptly dropped which dropped the indexer_handle and that will
+    // allow the indexer core to process all pending data and start shutting down.
     wait_for_critical_tasks(indexer_join_handles, SHUTDOWN_TIMEOUT).await;
-    // We already have a chance to critical tasks to finish by themselves, so we can now call the graceful shutdown.
+    // We already have a chance to critical tasks to finish by themselves, so we can now call the
+    // graceful shutdown.
     task_manager.graceful_shutdown_with_timeout(SHUTDOWN_TIMEOUT);
-}
-
-/// Consider move this to rbuilder-utils.
-/// Waits for critical_tasks to finish by themselves up to grateful_timeout.
-/// After they finish or grateful_timeout is reached, we call task_manager.graceful_shutdown_with_timeout(abort_timeout) and
-async fn wait_for_critical_tasks(critical_tasks: Vec<JoinHandle<()>>, grateful_timeout: Duration) {
-    let mut critical_tasks: FuturesUnordered<_> = critical_tasks.into_iter().collect();
-    let critical_deadline = tokio::time::Instant::now() + grateful_timeout;
-    loop {
-        tokio::select! {
-            biased;
-            result = critical_tasks.next() => {
-                match result {
-                    Some(Err(err)) => error!(?err, "Critical task handle await error"),
-                    Some(Ok(())) => {}
-                    None => {
-                        info!("All critical tasks finished ok");
-                        break;
-                    }
-                }
-            }
-            _ = tokio::time::sleep_until(critical_deadline) => {
-                error!(pendig_task_count = critical_tasks.len(), "Critical tasks shutdown timeout reached");
-                break;
-            }
-        }
-    }
 }
 
 fn wait_tokio_runtime_shutdown(

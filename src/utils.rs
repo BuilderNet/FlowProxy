@@ -1,8 +1,11 @@
 use alloy_eips::eip2718::EIP4844_TX_TYPE_ID;
 use alloy_primitives::Bytes;
 use alloy_rlp::{Buf as _, Header};
+use futures::{StreamExt, stream::FuturesUnordered};
 use std::time::{Duration, Instant};
 use time::UtcDateTime;
+use tokio::task::JoinHandle;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{statics::START, validation::MAINNET_CHAIN_ID};
@@ -278,6 +281,39 @@ pub mod testutils {
                     delayed_refund: None,
                     bundle_hash: None,
                 },
+            }
+        }
+    }
+}
+
+/// This time out should be enough for the inserter to flush all pending clickhouse data (timeout is
+/// clickhouse usually a few secs) and local DB data (disk flush time).
+pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Consider move this to rbuilder-utils.
+/// Waits for critical_tasks to finish by themselves up to grateful_timeout.
+pub async fn wait_for_critical_tasks(
+    critical_tasks: Vec<JoinHandle<()>>,
+    grateful_timeout: Duration,
+) {
+    let mut critical_tasks: FuturesUnordered<_> = critical_tasks.into_iter().collect();
+    let critical_deadline = tokio::time::Instant::now() + grateful_timeout;
+    loop {
+        tokio::select! {
+            biased;
+            result = critical_tasks.next() => {
+                match result {
+                    Some(Err(err)) => error!(?err, "Critical task handle await error"),
+                    Some(Ok(())) => {}
+                    None => {
+                        info!("All critical tasks finished ok");
+                        break;
+                    }
+                }
+            }
+            _ = tokio::time::sleep_until(critical_deadline) => {
+                error!(pendig_task_count = critical_tasks.len(), "Critical tasks shutdown timeout reached");
+                break;
             }
         }
     }
