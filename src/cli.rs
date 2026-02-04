@@ -98,6 +98,24 @@ pub struct ClickhouseArgs {
         default_value_t = MAX_DISK_BACKUP_SIZE_BYTES
     )]
     pub backup_disk_max_size_bytes: u64,
+
+    /// Send timeout in milliseconds for ClickHouse HTTP requests. Defaults to 2_000.
+    #[arg(
+        long = "indexer.clickhouse.send-timeout-ms",
+        env = "CLICKHOUSE_SEND_TIMEOUT_MS",
+        id = "CLICKHOUSE_SEND_TIMEOUT_MS",
+        default_value_t = 2_000
+    )]
+    pub send_timeout_ms: u64,
+
+    /// End-to-end timeout in milliseconds for ClickHouse HTTP requests. Defaults to 3_000.
+    #[arg(
+        long = "indexer.clickhouse.end-timeout-ms",
+        env = "CLICKHOUSE_END_TIMEOUT_MS",
+        id = "CLICKHOUSE_END_TIMEOUT_MS",
+        default_value_t = 3_000
+    )]
+    pub end_timeout_ms: u64,
 }
 
 /// Arguments required to setup file-based parquet indexing.

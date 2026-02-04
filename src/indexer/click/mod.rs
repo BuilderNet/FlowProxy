@@ -20,6 +20,7 @@ use rbuilder_utils::{
     },
     tasks::TaskExecutor,
 };
+use tokio::task::JoinHandle;
 
 mod models;
 
@@ -105,7 +106,7 @@ impl ClickhouseIndexer {
         receivers: OrderReceivers,
         task_executor: TaskExecutor,
         validation: bool,
-    ) {
+    ) -> Vec<JoinHandle<()>> {
         let client = config_from_clickhouse_args(&args, validation).into();
         tracing::info!("Running with clickhouse indexer");
 
@@ -117,18 +118,28 @@ impl ClickhouseIndexer {
         )
         .expect("could not create disk backup");
 
-        spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
-            &client,
-            receivers.bundle_rx,
-            &task_executor,
-            args.bundles_table_name,
-            builder_name.clone(),
-            disk_backup.clone(),
-            args.backup_memory_max_size_bytes,
-            TARGET_INDEXER,
-        );
+        let send_timeout = Duration::from_millis(args.send_timeout_ms);
+        let end_timeout = Duration::from_millis(args.end_timeout_ms);
 
-        spawn_clickhouse_inserter_and_backup::<BundleReceipt, BundleReceiptRow, MetricsWrapper>(
+        let bundle_inserter_join_handle =
+            spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
+                &client,
+                receivers.bundle_rx,
+                &task_executor,
+                args.bundles_table_name,
+                builder_name.clone(),
+                disk_backup.clone(),
+                args.backup_memory_max_size_bytes,
+                send_timeout,
+                end_timeout,
+                TARGET_INDEXER,
+            );
+
+        let bundle_receipt_inserter_join_handle = spawn_clickhouse_inserter_and_backup::<
+            BundleReceipt,
+            BundleReceiptRow,
+            MetricsWrapper,
+        >(
             &client,
             receivers.bundle_receipt_rx,
             &task_executor,
@@ -136,8 +147,11 @@ impl ClickhouseIndexer {
             builder_name.clone(),
             disk_backup.clone(),
             args.backup_memory_max_size_bytes,
+            send_timeout,
+            end_timeout,
             TARGET_INDEXER,
         );
+        vec![bundle_inserter_join_handle, bundle_receipt_inserter_join_handle]
     }
 }
 
@@ -240,6 +254,7 @@ pub(crate) mod tests {
         }
     }
 
+    ///Only for testing purposes.
     impl From<ClickhouseClientConfig> for ClickhouseArgs {
         fn from(config: ClickhouseClientConfig) -> Self {
             Self {
@@ -252,6 +267,8 @@ pub(crate) mod tests {
                 backup_memory_max_size_bytes: 1024 * 1024 * 10, // 10MiB
                 backup_disk_database_path: default_disk_backup_database_path(),
                 backup_disk_max_size_bytes: 1024 * 1024 * 100, // 100MiB
+                send_timeout_ms: 2_000,
+                end_timeout_ms: 3_000,
             }
         }
     }

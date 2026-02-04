@@ -52,6 +52,7 @@ use std::{
 };
 use time::UtcDateTime;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 pub mod error;
@@ -132,7 +133,7 @@ impl OrderflowIngress {
 
     /// Perform maintenance task for internal orderflow ingress state.
     #[tracing::instrument(skip_all, name = "ingress_maintanance")]
-    pub async fn maintenance(&self) {
+    pub fn maintenance(&self) {
         let len_before = self.entities.len();
         tracing::info!(entries = len_before, "starting state maintenance");
 
@@ -183,8 +184,8 @@ impl OrderflowIngress {
 
         let entity = Entity::Signer(signer);
 
-        if ingress.rate_limiting_enabled &&
-            let Some(mut data) = ingress.entity_data(entity)
+        if ingress.rate_limiting_enabled
+            && let Some(mut data) = ingress.entity_data(entity)
         {
             if data.rate_limit.count() > ingress.rate_limit_count {
                 tracing::trace!("rate limited request");
@@ -271,8 +272,8 @@ impl OrderflowIngress {
         let response = match result {
             Ok(eth) => JsonRpcResponse::result(request.id, eth),
             Err(error) => {
-                if error.is_validation() &&
-                    let Some(mut data) = ingress.entity_data(entity)
+                if error.is_validation()
+                    && let Some(mut data) = ingress.entity_data(entity)
                 {
                     data.scores.score_mut(received_at.into()).invalid_requests += 1;
                 }
@@ -664,7 +665,7 @@ impl OrderflowIngress {
         }
 
         self.indexer_handle.index_bundle(bundle.clone());
-
+        info!(id = ?bundle.uuid(), "DX bundle sent");
         self.send_bundle(bundle).await
     }
 
@@ -790,7 +791,7 @@ impl IngressSocket {
         Self { reply_socket: socket, ingress_state, task_executor, certs_rx, acceptor_builder }
     }
 
-    pub async fn listen(mut self) {
+    pub async fn listen(mut self, cancellation_token: CancellationToken) {
         loop {
             tokio::select! {
                 Some(certs) = self.certs_rx.recv() => {
@@ -825,6 +826,10 @@ impl IngressSocket {
                             tracing::error!(?e, "failed to respond to request");
                         }
                     });
+                }
+                _ = cancellation_token.cancelled() => {
+                    info!("Cancellation token cancelled, stopping ingress socket listener");
+                    break;
                 }
 
             }
