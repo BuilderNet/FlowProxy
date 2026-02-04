@@ -7,9 +7,7 @@ use flowproxy::{
     trace::init_tracing,
     utils::{SHUTDOWN_TIMEOUT, wait_for_critical_tasks},
 };
-use futures::{StreamExt, stream::FuturesUnordered};
 use rbuilder_utils::tasks::{PanickedTaskError, TaskManager};
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
