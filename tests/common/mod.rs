@@ -37,12 +37,12 @@ pub(crate) async fn spawn_ingress_with_args(
 
     let task_manager = rbuilder_utils::tasks::TaskManager::current();
 
-    let task_executor = task_manager.executor();
-    let (indexer_handle, _indexer_join_handles) =
-        Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
-    let cancellation_token = CancellationToken::new();
-
     tokio::spawn(async move {
+        let task_executor = task_manager.executor();
+        let (indexer_handle, _indexer_join_handles) =
+            Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
+        let cancellation_token = CancellationToken::new();
+
         flowproxy::run_with_listeners(
             args,
             user_listener,
