@@ -665,7 +665,7 @@ impl OrderflowIngress {
         }
 
         self.indexer_handle.index_bundle(bundle.clone());
-        info!(id = ?bundle.uuid(), "DX bundle sent");
+
         self.send_bundle(bundle).await
     }
 

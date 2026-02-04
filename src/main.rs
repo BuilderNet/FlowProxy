@@ -51,6 +51,8 @@ fn main() {
     }
 }
 
+/// This time out should be enough for the inserter to flush all pending clickhouse data (timeout is clickhouse usually a few secs) and local DB data (disk flush time).
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 async fn run_with_shutdown(args: OrderflowIngressArgs, mut task_manager: TaskManager) {
     warn!("starting blocking");
     let task_executor = task_manager.executor();
@@ -70,9 +72,9 @@ async fn run_with_shutdown(args: OrderflowIngressArgs, mut task_manager: TaskMan
     cancellation_token.cancel();
     // At this point all the rpc was abruptly dropped which dropped the indexer_handle and that will allow the indexer core
     // to process all pending data and start shutting down.
-    wait_for_critical_tasks(indexer_join_handles, Duration::from_secs(20)).await;
+    wait_for_critical_tasks(indexer_join_handles, SHUTDOWN_TIMEOUT).await;
     // We already have a chance to critical tasks to finish by themselves, so we can now call the graceful shutdown.
-    task_manager.graceful_shutdown_with_timeout(Duration::from_secs(20));
+    task_manager.graceful_shutdown_with_timeout(SHUTDOWN_TIMEOUT);
 }
 
 /// Consider move this to rbuilder-utils.
