@@ -192,7 +192,7 @@ pub async fn run_with_listeners(
         let tls = tcp_tls::Server::new(acceptor.into());
         let mut socket = RepSocket::new(TcpTls::Server(tls));
         socket.bind(args.system_listen_addr).await.expect("to bind system listener");
-        let port = socket.local_addr().expect("bound").port();
+        let local = socket.local_addr().unwrap();
 
         let peer = Peer {
             name: local_signer.to_string(),
@@ -200,8 +200,8 @@ pub async fn run_with_listeners(
                 ecdsa_pubkey_address: local_signer,
                 ..Default::default()
             },
-            ip: format!("127.0.0.1:{port}"),
-            dns_name: "localhost".to_owned(),
+            ip: format!("{}:{}", local.ip(), local.port()),
+            dns_name: "localhost".to_string(),
             instance: InstanceData { tls_cert: peer_cert },
         };
         let peer_store = peer_store.register(peer);

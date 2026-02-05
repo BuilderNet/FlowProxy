@@ -81,8 +81,15 @@ impl Peer {
     ///
     /// Reference: <https://github.com/flashbots/buildernet-orderflow-proxy/blob/main/proxy/confighub.go>
     pub async fn system_api(&self) -> io::Result<Option<SocketAddr>> {
-        // NOTE: Needed for integration tests where port is not known upfront. This is also more
-        // flexible in the case some instances won't run with that default port.
+        // If `ip` is a valid loopback socket address, use it directly. This is the case in
+        // integration tests.
+        if let Ok(addr) = self.ip.parse::<SocketAddr>() &&
+            addr.ip().is_loopback()
+        {
+            return Ok(Some(addr));
+        }
+
+        // Parse the provided port, set to DEFAULT_SYSTEM_PORT if not provided.
         let port =
             self.ip.split(':').nth(1).and_then(|p| p.parse().ok()).unwrap_or(DEFAULT_SYSTEM_PORT);
 

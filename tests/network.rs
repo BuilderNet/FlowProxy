@@ -8,7 +8,7 @@ use common::BuilderReceiver;
 mod common;
 use flowproxy::{cli::OrderflowIngressArgs, utils::testutils::Random as _};
 use rbuilder_primitives::serialize::RawBundle;
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::common::spawn_ingress_with_args;
 
@@ -71,7 +71,7 @@ async fn network_e2e_bundle_tx_works() {
     for (i, b) in builders.iter_mut().enumerate() {
         let received = b.recv::<Bytes>().await.unwrap();
         assert_eq!(received, raw_tx);
-        debug!(?i, "builder received tx from client1");
+        info!(?i, "builder received tx from client1");
     }
 
     let bundle = RawBundle::random(&mut rng);
@@ -81,7 +81,7 @@ async fn network_e2e_bundle_tx_works() {
 
     for (i, b) in builders.iter_mut().enumerate() {
         let mut received = b.recv::<RawBundle>().await.unwrap();
-        debug!(?i, "builder received raw bundle from client2");
+        info!(?i, "builder received raw bundle from client2");
 
         assert!(received.metadata.signing_address.is_some());
         assert!(received.metadata.bundle_hash.is_some());
