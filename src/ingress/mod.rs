@@ -8,7 +8,7 @@ use crate::{
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
-    indexer::{IndexerHandle, OrderIndexer as _},
+    indexer::{IndexerHandle, OrderIndexer as _, click::CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
@@ -79,6 +79,8 @@ pub struct OrderflowIngress {
     pub local_builder_url: Option<Url>,
     pub builder_ready_endpoint: Option<Url>,
     pub indexer_handle: IndexerHandle,
+    /// Maximum local ClickHouse backup disk size in bytes above which user RPC is rejected.
+    pub disk_max_size_to_accept_user_rpc: u64,
 
     // Metrics
     pub(crate) user_metrics: IngressMetrics,
@@ -156,6 +158,11 @@ impl OrderflowIngress {
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
+        if CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.lock().disk_size() >
+            ingress.disk_max_size_to_accept_user_rpc
+        {
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::DiskFull);
+        }
         let received_at = UtcInstant::now();
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {

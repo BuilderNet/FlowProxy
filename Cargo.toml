@@ -85,6 +85,7 @@ rand = "0.9.2"
 derive_more = { version = "2", features = ["deref", "from", "into"] }
 fdlimit = "0.3.0"
 rayon = "1.11.0"
+parking_lot = { version = "0.12.3" }
 
 # serialization
 serde = { version = "1", features = ["derive"] }

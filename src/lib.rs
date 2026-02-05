@@ -259,6 +259,7 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        disk_max_size_to_accept_user_rpc: args.disk_max_size_to_accept_user_rpc_mb * 1024 * 1024,
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });

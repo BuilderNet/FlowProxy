@@ -1,6 +1,6 @@
 //! Indexing functionality powered by Clickhouse.
 
-use std::{fmt::Debug, time::Duration};
+use std::{fmt::Debug, marker::PhantomData, sync::LazyLock, time::Duration};
 
 use crate::{
     cli::ClickhouseArgs,
@@ -11,6 +11,7 @@ use crate::{
     metrics::CLICKHOUSE_METRICS,
     primitives::{BundleReceipt, SystemBundle},
 };
+use parking_lot::Mutex;
 use rbuilder_utils::{
     clickhouse::{
         Quantities,
@@ -34,9 +35,59 @@ fn config_from_clickhouse_args(args: &ClickhouseArgs, validation: bool) -> Click
     }
 }
 
-struct MetricsWrapper;
+/// little global (puaj) info to easily get the current clickhouse disk size.
+#[derive(Default)]
+pub(crate) struct ClickhouseLocalBackupDiskSize {
+    bundles_size: u64,
+    bundle_receipts_size: u64,
+}
 
-impl rbuilder_utils::clickhouse::backup::metrics::Metrics for MetricsWrapper {
+impl ClickhouseLocalBackupDiskSize {
+    pub(crate) fn set_bundles_size(&mut self, size: u64) {
+        self.bundles_size = size;
+    }
+    pub(crate) fn set_bundle_receipts_size(&mut self, size: u64) {
+        self.bundle_receipts_size = size;
+    }
+    pub(crate) fn disk_size(&self) -> u64 {
+        self.bundles_size + self.bundle_receipts_size
+    }
+}
+
+/// We store here the current disk size of the backup database to avoid querying the metrics since
+/// that would include a string map access.
+pub(crate) static CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE: LazyLock<
+    Mutex<ClickhouseLocalBackupDiskSize>,
+> = LazyLock::new(|| Mutex::new(ClickhouseLocalBackupDiskSize::default()));
+
+/// Callback invoked when disk backup size is set. Implement this trait to observe size updates.
+pub(crate) trait DiskBackupSizeCallback: Send + Sync {
+    fn on_disk_backup_size(size_bytes: u64);
+}
+
+struct UpdateBundleSizeCallback;
+
+impl DiskBackupSizeCallback for UpdateBundleSizeCallback {
+    fn on_disk_backup_size(size_bytes: u64) {
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.lock().set_bundles_size(size_bytes);
+    }
+}
+
+struct UpdateBundleReceiptsSizeCallback;
+
+impl DiskBackupSizeCallback for UpdateBundleReceiptsSizeCallback {
+    fn on_disk_backup_size(size_bytes: u64) {
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.lock().set_bundle_receipts_size(size_bytes);
+    }
+}
+
+struct MetricsWrapper<F>(PhantomData<F>)
+where
+    F: DiskBackupSizeCallback;
+
+impl<F: DiskBackupSizeCallback> rbuilder_utils::clickhouse::backup::metrics::Metrics
+    for MetricsWrapper<F>
+{
     fn increment_write_failures(err: String) {
         CLICKHOUSE_METRICS.write_failures(err).inc();
     }
@@ -60,6 +111,7 @@ impl rbuilder_utils::clickhouse::backup::metrics::Metrics for MetricsWrapper {
     }
 
     fn set_disk_backup_size(size_bytes: u64, batches: usize, order: &'static str) {
+        F::on_disk_backup_size(size_bytes);
         CLICKHOUSE_METRICS.backup_size_bytes(order, "disk").set(size_bytes);
         CLICKHOUSE_METRICS.backup_size_batches(order, "disk").set(batches);
     }
@@ -121,24 +173,27 @@ impl ClickhouseIndexer {
         let send_timeout = Duration::from_millis(args.send_timeout_ms);
         let end_timeout = Duration::from_millis(args.end_timeout_ms);
 
-        let bundle_inserter_join_handle =
-            spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
-                &client,
-                receivers.bundle_rx,
-                &task_executor,
-                args.bundles_table_name,
-                builder_name.clone(),
-                disk_backup.clone(),
-                args.backup_memory_max_size_bytes,
-                send_timeout,
-                end_timeout,
-                TARGET_INDEXER,
-            );
+        let bundle_inserter_join_handle = spawn_clickhouse_inserter_and_backup::<
+            SystemBundle,
+            BundleRow,
+            MetricsWrapper<UpdateBundleSizeCallback>,
+        >(
+            &client,
+            receivers.bundle_rx,
+            &task_executor,
+            args.bundles_table_name,
+            builder_name.clone(),
+            disk_backup.clone(),
+            args.backup_memory_max_size_bytes,
+            send_timeout,
+            end_timeout,
+            TARGET_INDEXER,
+        );
 
         let bundle_receipt_inserter_join_handle = spawn_clickhouse_inserter_and_backup::<
             BundleReceipt,
             BundleReceiptRow,
-            MetricsWrapper,
+            MetricsWrapper<UpdateBundleReceiptsSizeCallback>,
         >(
             &client,
             receivers.bundle_receipt_rx,

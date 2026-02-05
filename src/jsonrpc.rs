@@ -177,6 +177,8 @@ pub enum JsonRpcError {
     RateLimited,
     #[error("Internal error")]
     Internal,
+    #[error("Disk full")]
+    DiskFull,
     #[error("{0}")]
     Unknown(String),
 }
@@ -239,9 +241,11 @@ impl JsonRpcError {
             Self::InvalidRequest => -32600,
             Self::MethodNotFound(_) => -32601,
             Self::InvalidParams => -32602,
-            Self::RateLimited | Self::Internal | Self::Unknown(_) | Self::InvalidSignature => {
-                -32603
-            }
+            Self::RateLimited |
+            Self::Internal |
+            Self::Unknown(_) |
+            Self::InvalidSignature |
+            Self::DiskFull => -32603,
         }
     }
 
@@ -254,7 +258,7 @@ impl JsonRpcError {
             Self::InvalidSignature => StatusCode::BAD_REQUEST,
             Self::MethodNotFound(_) => StatusCode::NOT_FOUND,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
-            Self::Internal | Self::Unknown(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Internal | Self::Unknown(_) | Self::DiskFull => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
