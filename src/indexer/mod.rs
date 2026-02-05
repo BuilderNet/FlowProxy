@@ -4,7 +4,8 @@
 use std::fmt::Debug;
 
 use rbuilder_utils::tasks::TaskExecutor;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinHandle};
+use tracing::error;
 
 use crate::{
     cli::IndexerArgs,
@@ -77,33 +78,38 @@ impl OrderSenders {
 pub struct Indexer;
 
 impl Indexer {
+    /// Returns the IndexerHandle to send data and a vector of join handles to the indexer tasks so
+    /// we can wait for them to finish on shutdown.
     pub fn run(
         args: IndexerArgs,
         builder_name: String,
         task_executor: TaskExecutor,
-    ) -> IndexerHandle {
+    ) -> (IndexerHandle, Vec<JoinHandle<()>>) {
         let (senders, receivers) = OrderSenders::new();
 
         match (args.clickhouse, args.parquet) {
             (None, None) => {
                 MockIndexer.run(receivers, task_executor);
-                IndexerHandle::new(senders)
+                (IndexerHandle::new(senders), vec![])
             }
             (Some(clickhouse), None) => {
                 let validation = false;
-                ClickhouseIndexer::run(
+                let join_handles = ClickhouseIndexer::run(
                     clickhouse,
                     builder_name,
                     receivers,
                     task_executor,
                     validation,
                 );
-                IndexerHandle::new(senders)
+                (IndexerHandle::new(senders), join_handles)
             }
             (None, Some(parquet)) => {
                 ParquetIndexer::run(parquet, builder_name, receivers, task_executor)
                     .expect("failed to start parquet indexer");
-                IndexerHandle::new(senders)
+                error!(
+                    "Parquet indexer does not support proper shutdown, returning empty join handles"
+                );
+                (IndexerHandle::new(senders), vec![])
             }
             (Some(_), Some(_)) => {
                 unreachable!("Cannot specify both clickhouse and parquet indexer");

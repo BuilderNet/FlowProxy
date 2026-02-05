@@ -255,7 +255,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
                     internal_uuid: decoded.uuid,
-                    replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.id),
+                    replacement_uuid: decoded.replacement_data.map(|r| r.key.id),
                     replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
                     signer_address: Some(bundle.metadata.signer),
                     builder_name,

@@ -20,6 +20,7 @@ use rbuilder_utils::{
     },
     tasks::TaskExecutor,
 };
+use tokio::task::JoinHandle;
 
 mod models;
 
@@ -105,7 +106,7 @@ impl ClickhouseIndexer {
         receivers: OrderReceivers,
         task_executor: TaskExecutor,
         validation: bool,
-    ) {
+    ) -> Vec<JoinHandle<()>> {
         let client = config_from_clickhouse_args(&args, validation).into();
         tracing::info!("Running with clickhouse indexer");
 
@@ -117,18 +118,28 @@ impl ClickhouseIndexer {
         )
         .expect("could not create disk backup");
 
-        spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
-            &client,
-            receivers.bundle_rx,
-            &task_executor,
-            args.bundles_table_name,
-            builder_name.clone(),
-            disk_backup.clone(),
-            args.backup_memory_max_size_bytes,
-            TARGET_INDEXER,
-        );
+        let send_timeout = Duration::from_millis(args.send_timeout_ms);
+        let end_timeout = Duration::from_millis(args.end_timeout_ms);
 
-        spawn_clickhouse_inserter_and_backup::<BundleReceipt, BundleReceiptRow, MetricsWrapper>(
+        let bundle_inserter_join_handle =
+            spawn_clickhouse_inserter_and_backup::<SystemBundle, BundleRow, MetricsWrapper>(
+                &client,
+                receivers.bundle_rx,
+                &task_executor,
+                args.bundles_table_name,
+                builder_name.clone(),
+                disk_backup.clone(),
+                args.backup_memory_max_size_bytes,
+                send_timeout,
+                end_timeout,
+                TARGET_INDEXER,
+            );
+
+        let bundle_receipt_inserter_join_handle = spawn_clickhouse_inserter_and_backup::<
+            BundleReceipt,
+            BundleReceiptRow,
+            MetricsWrapper,
+        >(
             &client,
             receivers.bundle_receipt_rx,
             &task_executor,
@@ -136,8 +147,11 @@ impl ClickhouseIndexer {
             builder_name.clone(),
             disk_backup.clone(),
             args.backup_memory_max_size_bytes,
+            send_timeout,
+            end_timeout,
             TARGET_INDEXER,
         );
+        vec![bundle_inserter_join_handle, bundle_receipt_inserter_join_handle]
     }
 }
 
@@ -155,6 +169,7 @@ pub(crate) mod tests {
             },
             tests::{bundle_receipt_example, system_bundle_example},
         },
+        utils::{SHUTDOWN_TIMEOUT, wait_for_critical_tasks},
     };
     use clickhouse::{Client as ClickhouseClient, error::Result as ClickhouseResult};
     use rbuilder_utils::{
@@ -240,6 +255,7 @@ pub(crate) mod tests {
         }
     }
 
+    ///Only for testing purposes.
     impl From<ClickhouseClientConfig> for ClickhouseArgs {
         fn from(config: ClickhouseClientConfig) -> Self {
             Self {
@@ -252,6 +268,8 @@ pub(crate) mod tests {
                 backup_memory_max_size_bytes: 1024 * 1024 * 10, // 10MiB
                 backup_disk_database_path: default_disk_backup_database_path(),
                 backup_disk_max_size_bytes: 1024 * 1024 * 100, // 100MiB
+                send_timeout_ms: 2_000,
+                end_timeout_ms: 3_000,
             }
         }
     }
@@ -368,7 +386,7 @@ pub(crate) mod tests {
         let (senders, receivers) = OrderSenders::new();
 
         let validation = false;
-        ClickhouseIndexer::run(
+        let indexer_join_handles = ClickhouseIndexer::run(
             config.into(),
             builder_name.clone(),
             receivers,
@@ -380,6 +398,8 @@ pub(crate) mod tests {
         let system_bundle = system_bundle_example();
         let system_bundle_row = (system_bundle.clone(), builder_name.clone()).into();
         senders.bundle_tx.send(system_bundle.clone()).await.unwrap();
+        drop(senders);
+        wait_for_critical_tasks(indexer_join_handles, SHUTDOWN_TIMEOUT).await;
 
         // Wait a bit for bundle to be actually processed before shutting down.
         tokio::time::sleep(Duration::from_secs(1)).await;
