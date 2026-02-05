@@ -82,6 +82,9 @@ pub async fn run(
 
         // Set build info metric
         metrics::BUILD_INFO_METRICS.info(env!("CARGO_PKG_VERSION"), env!("GIT_HASH")).set(1);
+        metrics::CLICKHOUSE_METRICS
+            .disk_max_size_to_accept_user_rpc_bytes()
+            .set(args.disk_max_size_to_accept_user_rpc_mb * 1024 * 1024);
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
