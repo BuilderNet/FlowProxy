@@ -172,7 +172,6 @@ impl ClickhouseIndexer {
 
         let send_timeout = Duration::from_millis(args.send_timeout_ms);
         let end_timeout = Duration::from_millis(args.end_timeout_ms);
-
         let bundle_inserter_join_handle = spawn_clickhouse_inserter_and_backup::<
             SystemBundle,
             BundleRow,
