@@ -194,6 +194,7 @@ impl FromStr for JsonRpcError {
             "Invalid params" => Self::InvalidParams,
             "Rate limited" => Self::RateLimited,
             "Internal error" => Self::Internal,
+            "Disk full" => Self::DiskFull,
             s => {
                 if s.starts_with("Method not found: ") {
                     Self::MethodNotFound(
