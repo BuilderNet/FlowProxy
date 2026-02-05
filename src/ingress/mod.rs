@@ -49,6 +49,7 @@ use std::{
     time::{Duration, Instant},
 };
 use time::UtcDateTime;
+use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 pub mod error;
@@ -129,7 +130,7 @@ impl OrderflowIngress {
 
     /// Perform maintenance task for internal orderflow ingress state.
     #[tracing::instrument(skip_all, name = "ingress_maintanance")]
-    pub async fn maintenance(&self) {
+    pub fn maintenance(&self) {
         let len_before = self.entities.len();
         tracing::info!(entries = len_before, "starting state maintenance");
 
@@ -784,16 +785,25 @@ impl IngressSocket {
         Self { reply_socket: socket, ingress_state, task_executor }
     }
 
-    pub async fn listen(mut self) {
-        while let Some(req) = self.reply_socket.next().await {
-            let data = req.msg().clone();
-            let state = self.ingress_state.clone();
-            self.task_executor.spawn(async {
-                let response = OrderflowIngress::system_handler(state, data).await;
-                if let Err(e) = req.respond(bitcode::encode(&response).into()) {
-                    tracing::error!(?e, "failed to respond to request");
+    pub async fn listen(mut self, cancellation_token: CancellationToken) {
+        loop {
+            tokio::select! {
+                Some(req) = self.reply_socket.next() => {
+                    let data = req.msg().clone();
+                    let state = self.ingress_state.clone();
+                    self.task_executor.spawn(async {
+                        let response = OrderflowIngress::system_handler(state, data).await;
+                        if let Err(e) = req.respond(bitcode::encode(&response).into()) {
+                            tracing::error!(?e, "failed to respond to request");
+                        }
+                    });
                 }
-            });
+                _ = cancellation_token.cancelled() => {
+                    info!("Cancellation token cancelled, stopping ingress socket listener");
+                    break;
+                }
+
+            }
         }
     }
 }
