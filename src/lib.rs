@@ -279,7 +279,6 @@ pub async fn run_with_listeners(
                         ingress.maintenance();
                     }
                 }
-                ingress.maintenance();
             }
         }
     });

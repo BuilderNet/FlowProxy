@@ -312,7 +312,7 @@ pub async fn wait_for_critical_tasks(
                 }
             }
             _ = tokio::time::sleep_until(critical_deadline) => {
-                error!(pendig_task_count = critical_tasks.len(), "Critical tasks shutdown timeout reached");
+                error!(pending_task_count = critical_tasks.len(), "Critical tasks shutdown timeout reached");
                 break;
             }
         }

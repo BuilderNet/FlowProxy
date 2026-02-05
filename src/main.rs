@@ -9,7 +9,7 @@ use flowproxy::{
 };
 use rbuilder_utils::tasks::{PanickedTaskError, TaskManager};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[cfg(all(feature = "jemalloc", unix))]
 type AllocatorInner = tikv_jemallocator::Jemalloc;
@@ -55,7 +55,6 @@ fn main() {
 }
 
 async fn run_with_shutdown(args: OrderflowIngressArgs, mut task_manager: TaskManager) {
-    warn!("starting blocking");
     let task_executor = task_manager.executor();
     let (indexer_handle, indexer_join_handles) =
         Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
