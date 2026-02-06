@@ -62,6 +62,15 @@ struct ForwarderResponse<Ok, Err> {
     span: tracing::Span,
 }
 
+impl<Ok> ForwarderResponse<Ok, ReqError> {
+    /// Returns true if the response error is fatal, i.e. [`ReqError::SocketClosed`]
+    fn is_fatal(&self) -> bool {
+        let Err(ref err) = self.response else { return false };
+
+        matches!(err, ReqError::SocketClosed)
+    }
+}
+
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
 
 /// An TCP forwarder that forwards requests to a peer.
@@ -208,7 +217,16 @@ impl<T: TcpTransport> Future for TcpForwarder<T> {
         loop {
             // First poll for completed work.
             if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
+                // Check if the response is fatal. If so, exit the forwarder.
+                let fatal = response.is_fatal();
+
                 this.on_response(response);
+
+                if fatal {
+                    tracing::error!(peer_name = %this.peer_name, peer_addr = %this.peer_address, "fatal response, terminating forwarder");
+                    return Poll::Ready(());
+                }
+
                 continue;
             }
 
