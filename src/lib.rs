@@ -82,6 +82,9 @@ pub async fn run(
 
         // Set build info metric
         metrics::BUILD_INFO_METRICS.info(env!("CARGO_PKG_VERSION"), env!("GIT_HASH")).set(1);
+        metrics::CLICKHOUSE_METRICS
+            .disk_max_size_to_accept_user_rpc_bytes()
+            .set(args.disk_max_size_to_accept_user_rpc_mb * 1024 * 1024);
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
@@ -259,6 +262,7 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        disk_max_size_to_accept_user_rpc: args.disk_max_size_to_accept_user_rpc_mb * 1024 * 1024,
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
