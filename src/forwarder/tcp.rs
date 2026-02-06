@@ -25,6 +25,9 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::Instrument as _;
 
+/// Default timeout for TCP calls.
+const TCP_CALL_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub fn spawn_tcp_forwarder<T: TcpTransport>(
     name: String,
     address: SocketAddr,
@@ -128,7 +131,13 @@ impl<T: TcpTransport> TcpForwarder<T> {
 
             let start_time = Instant::now();
             let socket = client_pool.socket(size);
-            let response = socket.request(bytes.into()).await;
+
+            // NOTE: Add timeout here so we don't EVER block indefinitely.
+            let response = tokio::time::timeout(TCP_CALL_TIMEOUT, socket.request(bytes.into()))
+                .await
+                .map_err(|_| ReqError::Timeout)
+                .flatten();
+
             let elapsed = start_time.elapsed();
 
             let stats = socket.transport_stats();
