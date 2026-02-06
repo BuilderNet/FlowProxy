@@ -159,12 +159,16 @@ impl IngressForwarders {
 
     /// Broadcast request to all peers.
     fn broadcast_inner(&self, forward: Arc<ForwardingRequest>) {
-        for entry in self.peers.iter() {
-            let handle = entry.value();
+        self.peers.retain(|peer, handle| {
             if let Err(e) = handle.sender.send(forward.priority(), forward.clone()) {
-                error!(?e, peer = %handle.info.name,  "failed to send forwarding request to peer");
+                error!(?e, %peer,  "peer channel closed, removing peer");
+
+                // Remove the peer from the list if sending fails
+                false
+            } else {
+                true
             }
-        }
+        });
     }
 
     /// Send request only to local forwarder.

@@ -24,6 +24,9 @@ use std::{
 use tokio::sync::mpsc;
 use tracing::Instrument as _;
 
+/// Default timeout for TCP calls.
+const TCP_CALL_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub fn spawn_tcp_forwarder<T: TcpTransport>(
     name: String,
     address: SocketAddr,
@@ -56,6 +59,15 @@ struct ForwarderResponse<Ok, Err> {
 
     /// The parent span associated with this response.
     span: tracing::Span,
+}
+
+impl<Ok> ForwarderResponse<Ok, ReqError> {
+    /// Returns true if the response error is fatal, i.e. [`ReqError::SocketClosed`]
+    fn is_fatal(&self) -> bool {
+        let Err(ref err) = self.response else { return false };
+
+        matches!(err, ReqError::SocketClosed)
+    }
 }
 
 type RequestFut<Ok, Err> = Pin<Box<dyn Future<Output = ForwarderResponse<Ok, Err>> + Send>>;
@@ -127,7 +139,13 @@ impl<T: TcpTransport> TcpForwarder<T> {
 
             let start_time = Instant::now();
             let socket = client_pool.socket(size);
-            let response = socket.request(bytes.into()).await;
+
+            // NOTE: Add timeout here so we don't EVER block indefinitely.
+            let response = tokio::time::timeout(TCP_CALL_TIMEOUT, socket.request(bytes.into()))
+                .await
+                .map_err(|_| ReqError::Timeout)
+                .flatten();
+
             let elapsed = start_time.elapsed();
 
             let stats = socket.transport_stats();
@@ -198,7 +216,16 @@ impl<T: TcpTransport> Future for TcpForwarder<T> {
         loop {
             // First poll for completed work.
             if let Poll::Ready(Some(response)) = this.pending.poll_next_unpin(cx) {
+                // Check if the response is fatal. If so, exit the forwarder.
+                let fatal = response.is_fatal();
+
                 this.on_response(response);
+
+                if fatal {
+                    tracing::error!(peer_name = %this.peer_name, peer_addr = %this.peer_address, "fatal response, terminating forwarder");
+                    return Poll::Ready(());
+                }
+
                 continue;
             }
 
