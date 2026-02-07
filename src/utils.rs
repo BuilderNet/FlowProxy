@@ -249,11 +249,13 @@ pub mod testutils {
     impl Random for RawBundle {
         /// Generate a random bundle with transactions of type Eip1559.
         fn random<R: Rng>(rng: &mut R) -> Self {
-            let txs_len = rng.random_range(1..=10);
+            let txs_len = rng.random_range(1..=2);
             // We only generate Eip1559 here.
             let txs = (0..txs_len)
                 .map(|_| {
-                    let signer = PrivateKeySigner::random();
+                    let signer =
+                        PrivateKeySigner::from_bytes(&alloy_primitives::B256::random_with(rng))
+                            .unwrap();
                     let tx = EthereumTypedTransaction::Eip1559(TxEip1559::random(rng));
                     let sighash = tx.signature_hash();
                     let signature = signer.sign_hash_sync(&sighash).unwrap();

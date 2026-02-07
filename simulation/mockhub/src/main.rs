@@ -2,11 +2,11 @@ use std::{net::SocketAddr, sync::Arc};
 
 use alloy_primitives::Address;
 use axum::{
+    Json, Router,
     extract::{ConnectInfo, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -19,9 +19,12 @@ async fn main() {
         .parse()
         .expect("SYSTEM_PORT must be a valid port number");
 
+    let enable_tls: bool =
+        std::env::var("ENABLE_TLS").map_or(false, |v| v.parse().unwrap_or(false));
+
     let _ = tracing_subscriber::fmt().try_init();
 
-    let registry = Registry::new(system_port);
+    let registry = Registry::new(system_port, enable_tls);
 
     let router = Router::new()
         .route(
@@ -33,7 +36,7 @@ async fn main() {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
     let listener = TcpListener::bind(addr).await.unwrap();
-    tracing::info!("Listening on {}", addr);
+    tracing::info!(tls_enabled = enable_tls, "Listening on {}", addr);
     axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
@@ -48,15 +51,32 @@ async fn register_credentials(
     tracing::info!("Registering credentials for builder: {:?}", creds.ecdsa_pubkey_address);
 
     let signer = creds.ecdsa_pubkey_address;
+    let cert = creds.tls_cert.clone().unwrap_or_default();
+
+    let name = if let Some(name) = dns_lookup::lookup_addr(&addr.ip())
+        .ok()
+        .and_then(|dns| dns.split('.').next().map(|s| s.to_string()))
+    {
+        name
+    } else {
+        signer.to_string()
+    };
 
     let builder = BuilderHubBuilder {
-        name: format!("{:?}", signer),
+        name: name.to_string(),
         ip: format!("{}:{}", addr.ip(), registry.system_port),
         dns_name: addr.ip().to_string(),
         orderflow_proxy: creds,
         // NOTE: Empty TLS certificate to ensure proxies use plain HTTP.
-        instance: BuilderHubInstanceData { tls_cert: String::new() },
+        // If TLS is enabled, proxies will use the TLS certificate.
+        instance: BuilderHubInstanceData {
+            tls_cert: if registry.enable_tls { cert } else { String::new() },
+        },
     };
+
+    if registry.builders.contains_key(&signer) {
+        return StatusCode::OK;
+    }
 
     registry.builders.insert(signer, builder);
 
@@ -83,12 +103,13 @@ async fn get_builders(
 #[derive(Debug, Clone)]
 struct Registry {
     system_port: u16,
+    enable_tls: bool,
     builders: Arc<DashMap<Address, BuilderHubBuilder>>,
 }
 
 impl Registry {
-    pub fn new(system_port: u16) -> Self {
-        Self { builders: Arc::new(DashMap::new()), system_port }
+    pub fn new(system_port: u16, enable_tls: bool) -> Self {
+        Self { builders: Arc::new(DashMap::new()), system_port, enable_tls }
     }
 }
 

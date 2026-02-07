@@ -1,0 +1,81 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # FlowProxy metrics (eastus)
+  - job_name: 'flowproxy-eastus'
+    static_configs:
+      - targets: ['vm-eastus.flowproxy.internal:8090']
+        labels:
+          region: 'eastus'
+          instance: 'flowproxy-eastus'
+
+  # FlowProxy metrics (westeurope)
+  - job_name: 'flowproxy-westeurope'
+    static_configs:
+      - targets: ['vm-westeurope.flowproxy.internal:8090']
+        labels:
+          region: 'westeurope'
+          instance: 'flowproxy-westeurope'
+
+  # HAProxy metrics (eastus)
+  - job_name: 'haproxy-eastus'
+    static_configs:
+      - targets: ['vm-eastus.flowproxy.internal:8405']
+        labels:
+          region: 'eastus'
+          instance: 'flowproxy-eastus'
+    params:
+      extra-counters: ["on"]
+
+  # HAProxy metrics (westeurope)
+  - job_name: 'haproxy-westeurope'
+    static_configs:
+      - targets: ['vm-westeurope.flowproxy.internal:8405']
+        labels:
+          region: 'westeurope'
+          instance: 'flowproxy-westeurope'
+    params:
+      extra-counters: ["on"]
+
+  # FlowProxy metrics (eastus-2)
+  - job_name: 'flowproxy-eastus-2'
+    static_configs:
+      - targets: ['vm-eastus-2.flowproxy.internal:8090']
+        labels:
+          region: 'eastus'
+          instance: 'flowproxy-eastus-2'
+
+  # FlowProxy metrics (westeurope-2)
+  - job_name: 'flowproxy-westeurope-2'
+    static_configs:
+      - targets: ['vm-westeurope-2.flowproxy.internal:8090']
+        labels:
+          region: 'westeurope'
+          instance: 'flowproxy-westeurope-2'
+
+  # HAProxy metrics (eastus-2)
+  - job_name: 'haproxy-eastus-2'
+    static_configs:
+      - targets: ['vm-eastus-2.flowproxy.internal:8405']
+        labels:
+          region: 'eastus'
+          instance: 'flowproxy-eastus-2'
+    params:
+      extra-counters: ["on"]
+
+  # HAProxy metrics (westeurope-2)
+  - job_name: 'haproxy-westeurope-2'
+    static_configs:
+      - targets: ['vm-westeurope-2.flowproxy.internal:8405']
+        labels:
+          region: 'westeurope'
+          instance: 'flowproxy-westeurope-2'
+    params:
+      extra-counters: ["on"]
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
