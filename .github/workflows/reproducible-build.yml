@@ -18,21 +18,26 @@ jobs:
             machine: machine-2
     steps:
       - uses: actions/checkout@v5
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Install rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
       - name: Build reproducible binary with Docker
         run: |
-          docker build -f Dockerfile.reproducible -t flowproxy:reproducible .
-      - name: Extract binary from Docker image
-        run: |
-          # Create a temporary container and copy the binary
-          docker create --name temp-container flowproxy:reproducible
-          docker cp temp-container:/flowproxy ./flowproxy
-          docker rm temp-container
+          RUST_TOOLCHAIN=$(rustc --version | cut -d' ' -f2)
+          docker build -f Dockerfile.reproducible \
+          --build-arg "RUST_TOOLCHAIN=${RUST_TOOLCHAIN}" \
+          -t flowproxy:reproducible \
+          --output type=local,dest=./target .
+
       - name: Calculate SHA256
         id: sha256
         run: |
-          sha256sum flowproxy > flowproxy.sha256
+          sha256sum ./target/flowproxy > flowproxy.sha256
           echo "hash=$(cat flowproxy.sha256 | cut -d' ' -f1)" >> $GITHUB_OUTPUT
           echo "Binary SHA256 on ${{ matrix.machine }}: $(cat flowproxy.sha256)"
       - name: Upload the hash
