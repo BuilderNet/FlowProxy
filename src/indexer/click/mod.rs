@@ -1,6 +1,14 @@
 //! Indexing functionality powered by Clickhouse.
 
-use std::{fmt::Debug, marker::PhantomData, sync::LazyLock, time::Duration};
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    sync::{
+        LazyLock,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 
 use crate::{
     cli::ClickhouseArgs,
@@ -11,7 +19,6 @@ use crate::{
     metrics::CLICKHOUSE_METRICS,
     primitives::{BundleReceipt, SystemBundle},
 };
-use parking_lot::Mutex;
 use rbuilder_utils::{
     clickhouse::{
         Quantities,
@@ -38,27 +45,27 @@ fn config_from_clickhouse_args(args: &ClickhouseArgs, validation: bool) -> Click
 /// little global (puaj) info to easily get the current clickhouse disk size.
 #[derive(Default)]
 pub(crate) struct ClickhouseLocalBackupDiskSize {
-    bundles_size: u64,
-    bundle_receipts_size: u64,
+    bundles_size: AtomicU64,
+    bundle_receipts_size: AtomicU64,
 }
 
 impl ClickhouseLocalBackupDiskSize {
-    pub(crate) fn set_bundles_size(&mut self, size: u64) {
-        self.bundles_size = size;
+    pub(crate) fn set_bundles_size(&self, size: u64) {
+        self.bundles_size.store(size, Ordering::Relaxed);
     }
-    pub(crate) fn set_bundle_receipts_size(&mut self, size: u64) {
-        self.bundle_receipts_size = size;
+    pub(crate) fn set_bundle_receipts_size(&self, size: u64) {
+        self.bundle_receipts_size.store(size, Ordering::Relaxed);
     }
     pub(crate) fn disk_size(&self) -> u64 {
-        self.bundles_size + self.bundle_receipts_size
+        self.bundles_size.load(Ordering::Relaxed) +
+            self.bundle_receipts_size.load(Ordering::Relaxed)
     }
 }
 
 /// We store here the current disk size of the backup database to avoid querying the metrics since
 /// that would include a string map access.
-pub(crate) static CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE: LazyLock<
-    Mutex<ClickhouseLocalBackupDiskSize>,
-> = LazyLock::new(|| Mutex::new(ClickhouseLocalBackupDiskSize::default()));
+pub(crate) static CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE: LazyLock<ClickhouseLocalBackupDiskSize> =
+    LazyLock::new(|| ClickhouseLocalBackupDiskSize::default());
 
 /// Callback invoked when disk backup size is set. Implement this trait to observe size updates.
 pub(crate) trait DiskBackupSizeCallback: Send + Sync {
@@ -69,7 +76,7 @@ struct UpdateBundleSizeCallback;
 
 impl DiskBackupSizeCallback for UpdateBundleSizeCallback {
     fn on_disk_backup_size(size_bytes: u64) {
-        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.lock().set_bundles_size(size_bytes);
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.set_bundles_size(size_bytes);
     }
 }
 
@@ -77,7 +84,7 @@ struct UpdateBundleReceiptsSizeCallback;
 
 impl DiskBackupSizeCallback for UpdateBundleReceiptsSizeCallback {
     fn on_disk_backup_size(size_bytes: u64) {
-        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.lock().set_bundle_receipts_size(size_bytes);
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.set_bundle_receipts_size(size_bytes);
     }
 }
 

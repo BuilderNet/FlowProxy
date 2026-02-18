@@ -148,8 +148,7 @@ impl OrderflowIngress {
     }
 
     fn clickhouse_backup_disk_size_is_ok(&self) -> bool {
-        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.lock().disk_size() <=
-            self.disk_max_size_to_accept_user_rpc
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.disk_size() <= self.disk_max_size_to_accept_user_rpc
     }
 
     #[tracing::instrument(skip_all, name = "ingress",
