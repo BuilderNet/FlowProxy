@@ -636,7 +636,7 @@ pub(crate) mod tests {
             (BUNDLE_TX_COUNT * BUNDLE_TX_INPUT_SIZE);
 
         const FLOWPROXY_START_DELAY_MS: Duration = Duration::from_millis(800);
-        // Asume 100ms per bundle to clickhouse (it's a LOT)
+        // Assume 100ms per bundle to clickhouse (it's a LOT)
         const DRAIN_TIMEOUT: Duration =
             Duration::from_millis(100 * BUNDLE_COUNT_TO_FILL_DISK as u64);
 
