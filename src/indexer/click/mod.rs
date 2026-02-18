@@ -65,7 +65,7 @@ impl ClickhouseLocalBackupDiskSize {
 /// We store here the current disk size of the backup database to avoid querying the metrics since
 /// that would include a string map access.
 pub(crate) static CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE: LazyLock<ClickhouseLocalBackupDiskSize> =
-    LazyLock::new(|| ClickhouseLocalBackupDiskSize::default());
+    LazyLock::new(ClickhouseLocalBackupDiskSize::default);
 
 /// Callback invoked when disk backup size is set. Implement this trait to observe size updates.
 pub(crate) trait DiskBackupSizeCallback: Send + Sync {

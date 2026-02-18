@@ -2909,7 +2909,6 @@ dependencies = [
  "msg-socket",
  "msg-transport",
  "openssl",
- "parking_lot",
  "parquet",
  "prometheus",
  "prometric",
