@@ -142,20 +142,26 @@ pub mod testutils {
 
     impl Random for TxEip1559 {
         fn random<R: Rng>(rng: &mut R) -> Self {
-            let max_fee_per_gas = rng.random();
-            let max_priority_fee_per_gas = rng.random_range(0..max_fee_per_gas);
+            let input_len = rng.random_range(0..=1024);
+            create_tx_eip1559_with_input_size(rng, input_len)
+        }
+    }
 
-            Self {
-                chain_id: 1,
-                nonce: 0,
-                gas_limit: 100_000,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                to: TxKind::Call(Address::random_with(rng)),
-                value: U256::random_with(rng),
-                access_list: Default::default(),
-                input: Bytes::random(rng),
-            }
+    pub fn create_tx_eip1559_with_input_size<R: Rng>(rng: &mut R, data_size: usize) -> TxEip1559 {
+        let max_fee_per_gas = rng.random();
+        let max_priority_fee_per_gas = rng.random_range(0..max_fee_per_gas);
+        let mut bytes = vec![0u8; data_size];
+        rng.fill_bytes(&mut bytes);
+        TxEip1559 {
+            chain_id: 1,
+            nonce: 0,
+            gas_limit: 100_000,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            to: TxKind::Call(Address::random_with(rng)),
+            value: U256::random_with(rng),
+            access_list: Default::default(),
+            input: bytes.into(),
         }
     }
 
@@ -246,42 +252,56 @@ pub mod testutils {
         }
     }
 
+    /// Create a random [`RawBundle`] with a fixed number of EIP-1559 transactions.
+    /// When `input_size` is `Some(n)`, each transaction's input has exactly `n` bytes (via
+    /// [`create_tx_eip1559_with_input_size`]). When `None`, each transaction uses random input
+    /// size (same as [`TxEip1559::random`]).
+    pub fn random_raw_bundle_with_tx_count_and_input_size<R: Rng>(
+        rng: &mut R,
+        tx_count: usize,
+        input_size: Option<usize>,
+    ) -> RawBundle {
+        let txs = (0..tx_count)
+            .map(|_| {
+                let signer = PrivateKeySigner::random();
+                let tx = EthereumTypedTransaction::Eip1559(match input_size {
+                    Some(n) => create_tx_eip1559_with_input_size(rng, n),
+                    None => TxEip1559::random(rng),
+                });
+                let sighash = tx.signature_hash();
+                let signature = signer.sign_hash_sync(&sighash).unwrap();
+                TxEnvelope::new_unhashed(tx, signature).encoded_2718().into()
+            })
+            .collect();
+
+        RawBundle {
+            txs,
+            metadata: RawBundleMetadata {
+                reverting_tx_hashes: vec![],
+                dropping_tx_hashes: vec![],
+                refund_tx_hashes: None,
+                signing_address: None,
+                version: Some("v2".to_string()),
+                block_number: None,
+                replacement_uuid: None,
+                refund_identity: None,
+                uuid: None,
+                min_timestamp: None,
+                max_timestamp: None,
+                replacement_nonce: Some(rng.random()),
+                refund_percent: Some(rng.random_range(0..100)),
+                refund_recipient: Some(Address::random_with(rng)),
+                delayed_refund: None,
+                bundle_hash: None,
+            },
+        }
+    }
+
     impl Random for RawBundle {
         /// Generate a random bundle with transactions of type Eip1559.
         fn random<R: Rng>(rng: &mut R) -> Self {
             let txs_len = rng.random_range(1..=10);
-            // We only generate Eip1559 here.
-            let txs = (0..txs_len)
-                .map(|_| {
-                    let signer = PrivateKeySigner::random();
-                    let tx = EthereumTypedTransaction::Eip1559(TxEip1559::random(rng));
-                    let sighash = tx.signature_hash();
-                    let signature = signer.sign_hash_sync(&sighash).unwrap();
-                    TxEnvelope::new_unhashed(tx, signature).encoded_2718().into()
-                })
-                .collect();
-
-            Self {
-                txs,
-                metadata: RawBundleMetadata {
-                    reverting_tx_hashes: vec![],
-                    dropping_tx_hashes: vec![],
-                    refund_tx_hashes: None,
-                    signing_address: None,
-                    version: Some("v2".to_string()),
-                    block_number: None,
-                    replacement_uuid: None,
-                    refund_identity: None,
-                    uuid: None,
-                    min_timestamp: None,
-                    max_timestamp: None,
-                    replacement_nonce: Some(rng.random()),
-                    refund_percent: Some(rng.random_range(0..100)),
-                    refund_recipient: Some(Address::random_with(rng)),
-                    delayed_refund: None,
-                    bundle_hash: None,
-                },
-            }
+            random_raw_bundle_with_tx_count_and_input_size(rng, txs_len, None)
         }
     }
 }

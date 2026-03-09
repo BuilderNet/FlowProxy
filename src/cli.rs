@@ -266,6 +266,16 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
+    /// Maximum local ClickHouse backup disk size in MB above which user RPC (e.g. eth_sendBundle)
+    /// is rejected with disk full. Defaults to 1024 MB (1 GiB).
+    #[clap(
+        long = "disk-max-size-to-accept-user-rpc-mb",
+        default_value_t = 1024,
+        env = "DISK_MAX_SIZE_TO_ACCEPT_USER_RPC",
+        id = "DISK_MAX_SIZE_TO_ACCEPT_USER_RPC"
+    )]
+    pub disk_max_size_to_accept_user_rpc_mb: u64,
+
     /// The interval in seconds to update the peer list from BuilderHub.
     #[clap(
         long = "peer.update-interval-s",
@@ -342,6 +352,7 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
+            disk_max_size_to_accept_user_rpc_mb: 1024,
             tcp_small_clients: NonZero::new(1).expect("non-zero"),
             tcp_big_clients: 0,
             io_threads: 4,

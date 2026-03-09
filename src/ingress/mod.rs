@@ -8,7 +8,7 @@ use crate::{
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
-    indexer::{IndexerHandle, OrderIndexer as _},
+    indexer::{IndexerHandle, OrderIndexer as _, click::CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
@@ -79,6 +79,8 @@ pub struct OrderflowIngress {
     pub local_builder_url: Option<Url>,
     pub builder_ready_endpoint: Option<Url>,
     pub indexer_handle: IndexerHandle,
+    /// Maximum local ClickHouse backup disk size in bytes above which user RPC is rejected.
+    pub disk_max_size_to_accept_user_rpc: u64,
 
     // Metrics
     pub(crate) user_metrics: IngressMetrics,
@@ -145,6 +147,10 @@ impl OrderflowIngress {
         tracing::info!(entries = len_after, num_removed, "finished state maintenance");
     }
 
+    fn clickhouse_backup_disk_size_is_ok(&self) -> bool {
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.disk_size() <= self.disk_max_size_to_accept_user_rpc
+    }
+
     #[tracing::instrument(skip_all, name = "ingress",
         fields(
             handler = "user",
@@ -156,6 +162,9 @@ impl OrderflowIngress {
         headers: HeaderMap,
         body: axum::body::Bytes,
     ) -> JsonRpcResponse<EthResponse> {
+        if !ingress.clickhouse_backup_disk_size_is_ok() {
+            return JsonRpcResponse::error(Value::Null, JsonRpcError::DiskFull);
+        }
         let received_at = UtcInstant::now();
 
         let body = match maybe_decompress(ingress.gzip_enabled, &headers, body) {
@@ -289,6 +298,13 @@ impl OrderflowIngress {
     /// returns 200 if the local builder is not configured.
     #[tracing::instrument(skip_all, name = "ingress_readyz")]
     pub async fn ready_handler(State(ingress): State<Arc<Self>>) -> Response {
+        if !ingress.clickhouse_backup_disk_size_is_ok() {
+            return Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .body(Body::from("clickhouse backup too big"))
+                .unwrap();
+        }
+
         if let Some(ref url) = ingress.builder_ready_endpoint {
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(DEFAULT_HTTP_TIMEOUT_SECS))
@@ -300,7 +316,7 @@ impl OrderflowIngress {
                 tracing::error!(%url, "error sending readyz request");
                 return Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .body(Body::from("not ready"))
+                    .body(Body::from("builder not answering readyz request"))
                     .unwrap();
             };
 
@@ -311,7 +327,7 @@ impl OrderflowIngress {
                 tracing::error!(%url, status = %response.status(), "local builder is not ready");
                 return Response::builder()
                     .status(StatusCode::SERVICE_UNAVAILABLE)
-                    .body(Body::from("not ready"))
+                    .body(Body::from("builder not ready"))
                     .unwrap();
             }
         }
