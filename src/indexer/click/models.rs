@@ -10,7 +10,7 @@ use alloy_primitives::{Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use clickhouse::Row;
 use rbuilder_primitives::BundleVersion;
-use rbuilder_utils::clickhouse::backup::primitives::{ClickhouseIndexableOrder, ClickhouseRowExt};
+use rbuilder_utils::clickhouse::backup::primitives::{ClickhouseIndexableData, ClickhouseRowExt};
 use time::{OffsetDateTime, UtcDateTime};
 use uuid::Uuid;
 
@@ -126,9 +126,10 @@ pub struct BundleRow {
 }
 
 impl ClickhouseRowExt for BundleRow {
-    const ORDER: &'static str = "bundle";
+    type TraceId = B256;
+    const TABLE_NAME: &'static str = "bundle";
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> Self::TraceId {
         self.hash
     }
 
@@ -258,7 +259,7 @@ impl From<(SystemBundle, String)> for BundleRow {
                         .unwrap_or_default(),
                     // Decoded bundles always have a uuid.
                     internal_uuid: decoded.uuid,
-                    replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.key().id),
+                    replacement_uuid: decoded.replacement_data.clone().map(|r| r.key.id),
                     replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
                     signer_address: Some(bundle.metadata.signer),
                     builder_name,
@@ -311,8 +312,8 @@ impl From<(SystemBundle, String)> for BundleRow {
                     refund_tx_hashes: Vec::new(),
                     // NOTE: For now, replacement bundles don't have a uuid, so we set the
                     // user-provided replacement-uuid instead.
-                    internal_uuid: replacement.key.key().id,
-                    replacement_uuid: Some(replacement.key.key().id),
+                    internal_uuid: replacement.key.id,
+                    replacement_uuid: Some(replacement.key.id),
                     replacement_nonce: bundle.raw_bundle.metadata.replacement_nonce,
                     signer_address: Some(bundle.metadata.signer),
                     builder_name,
@@ -352,9 +353,10 @@ pub struct BundleReceiptRow {
 }
 
 impl ClickhouseRowExt for BundleReceiptRow {
-    const ORDER: &'static str = "bundle_receipt";
+    type TraceId = B256;
+    const TABLE_NAME: &'static str = "bundle_receipt";
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> Self::TraceId {
         self.bundle_hash
     }
 
@@ -394,12 +396,12 @@ impl From<(BundleReceipt, String)> for BundleReceiptRow {
     }
 }
 
-impl ClickhouseIndexableOrder for SystemBundle {
+impl ClickhouseIndexableData for SystemBundle {
     type ClickhouseRowType = BundleRow;
 
-    const ORDER: &'static str = <BundleRow as ClickhouseRowExt>::ORDER;
+    const DATA_NAME: &'static str = <BundleRow as ClickhouseRowExt>::TABLE_NAME;
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> B256 {
         self.bundle_hash()
     }
 
@@ -408,12 +410,12 @@ impl ClickhouseIndexableOrder for SystemBundle {
     }
 }
 
-impl ClickhouseIndexableOrder for BundleReceipt {
+impl ClickhouseIndexableData for BundleReceipt {
     type ClickhouseRowType = BundleReceiptRow;
 
-    const ORDER: &'static str = <BundleReceiptRow as ClickhouseRowExt>::ORDER;
+    const DATA_NAME: &'static str = <BundleReceiptRow as ClickhouseRowExt>::TABLE_NAME;
 
-    fn hash(&self) -> B256 {
+    fn trace_id(&self) -> B256 {
         self.bundle_hash
     }
 

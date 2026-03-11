@@ -2,7 +2,7 @@ use crate::{
     primitives::EthPooledTransaction, priority::Priority, rate_limit::CounterOverTime, utils,
 };
 use alloy_primitives::Address;
-use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
+use rbuilder_primitives::serialize::RawBundle;
 use revm_primitives::keccak256;
 use serde::Deserialize;
 use std::{
@@ -249,7 +249,6 @@ impl EntityBuilderStats {
 pub enum EntityRequest<'a> {
     PrivateTx(&'a EthPooledTransaction),
     Bundle(&'a RawBundle),
-    MevShareBundle(&'a RawShareBundle),
 }
 
 impl EntityRequest<'_> {
@@ -258,7 +257,6 @@ impl EntityRequest<'_> {
         match self {
             Self::PrivateTx(_) => false,
             Self::Bundle(bundle) => bundle.metadata.replacement_uuid.is_some(),
-            Self::MevShareBundle(bundle) => bundle.replacement_uuid.is_some(),
         }
     }
 
@@ -271,7 +269,6 @@ impl EntityRequest<'_> {
                 .txs
                 .iter()
                 .all(|tx| bundle.metadata.reverting_tx_hashes.contains(&keccak256(tx))),
-            Self::MevShareBundle(_) => false,
         }
     }
 
@@ -280,10 +277,6 @@ impl EntityRequest<'_> {
         match self {
             Self::PrivateTx(tx) => tx.is_eip4844(),
             Self::Bundle(bundle) => bundle.txs.iter().any(utils::looks_like_canonical_blob_tx),
-            Self::MevShareBundle(bundle) => bundle
-                .body
-                .iter()
-                .any(|tx| tx.tx.as_ref().is_some_and(utils::looks_like_canonical_blob_tx)),
         }
     }
 }

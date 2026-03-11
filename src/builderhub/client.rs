@@ -2,8 +2,6 @@ use crate::{builderhub::PeerCredentials, consts::DEFAULT_HTTP_TIMEOUT_SECS};
 use alloy_primitives::Address;
 use std::{fmt::Debug, time::Duration};
 
-use tracing::error;
-
 /// Errors that can occur when registering via the BuilderHub client.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientRegisterError {

@@ -3,8 +3,7 @@ use crate::{
     consts::{
         BUILDERNET_PRIORITY_HEADER, BUILDERNET_SENT_AT_HEADER, BUILDERNET_SIGNATURE_HEADER,
         DEFAULT_BUNDLE_VERSION, DEFAULT_HTTP_TIMEOUT_SECS, ETH_SEND_BUNDLE_METHOD,
-        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, MEV_SEND_BUNDLE_METHOD,
-        UNKNOWN, USE_LEGACY_SIGNATURE,
+        ETH_SEND_RAW_TRANSACTION_METHOD, FLASHBOTS_SIGNATURE_HEADER, UNKNOWN, USE_LEGACY_SIGNATURE,
     },
     entity::{Entity, EntityBuilderStats, EntityData, EntityRequest, EntityScores, SpamThresholds},
     forwarder::IngressForwarders,
@@ -12,10 +11,10 @@ use crate::{
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
     metrics::{IngressMetrics, SYSTEM_METRICS},
     primitives::{
-        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, DecodedShareBundle,
-        EthResponse, EthereumTransaction, RawBundleBitcode, Samplable, SystemBundle,
-        SystemBundleDecoder, SystemBundleMetadata, SystemMevShareBundle, SystemTransaction,
-        TcpResponse, TcpResponseStatus, UtcInstant, WithHeaders,
+        decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
+        EthereumTransaction, RawBundleBitcode, Samplable, SystemBundle, SystemBundleDecoder,
+        SystemBundleMetadata, SystemTransaction, TcpResponse, TcpResponseStatus, UtcInstant,
+        WithHeaders,
     },
     priority::{workers::PriorityWorkers, Priority},
     rate_limit::CounterOverTime,
@@ -37,7 +36,7 @@ use flate2::read::GzDecoder;
 use futures::StreamExt;
 use msg_socket::RepSocket;
 use msg_transport::tcp::Tcp;
-use rbuilder_primitives::serialize::{RawBundle, RawShareBundle};
+use rbuilder_primitives::serialize::RawBundle;
 use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use serde_json::Value;
@@ -256,26 +255,6 @@ impl OrderflowIngress {
 
                 ingress.on_raw_transaction(entity, tx, received_at).await.map(EthResponse::TxHash)
             }
-            MEV_SEND_BUNDLE_METHOD => {
-                let Some(Ok(bundle)) = request.take_single_param().map(|p| {
-                    serde_json::from_value::<RawShareBundle>(p).inspect_err(|e| {
-                        tracing::trace!(?e, body_utf8, "failed to parse mev share bundle")
-                    })
-                }) else {
-                    ingress.user_metrics.json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD).inc();
-                    return JsonRpcResponse::error(request.id, JsonRpcError::InvalidParams);
-                };
-
-                ingress
-                    .user_metrics
-                    .request_body_size(MEV_SEND_BUNDLE_METHOD)
-                    .observe(body.len() as f64);
-
-                ingress
-                    .on_mev_share_bundle(entity, bundle, received_at)
-                    .await
-                    .map(EthResponse::BundleHash)
-            }
             other => {
                 tracing::trace!("method not supported");
                 ingress.user_metrics.json_rpc_unknown_method(other.to_owned()).inc();
@@ -366,10 +345,7 @@ impl OrderflowIngress {
         tracing::Span::current().record("method", tracing::field::display(method));
 
         // Before doing anything else, verify that the signature header is present.
-        let Some(signature_header) = headers
-            .get(&BUILDERNET_SIGNATURE_HEADER.to_lowercase())
-            .or_else(|| headers.get(&FLASHBOTS_SIGNATURE_HEADER.to_lowercase()))
-        else {
+        let Some(signature_header) = headers.get(BUILDERNET_SIGNATURE_HEADER) else {
             let msg = "no signature headers found";
             tracing::error!(msg);
             return TcpResponse::error_message(
@@ -410,9 +386,6 @@ impl OrderflowIngress {
             return TcpResponse::error_invalid_signature();
         };
         tracing::Span::current().record("peer", tracing::field::display(&peer));
-
-        // This gets computed only if we enter in an error branch.
-        let body_utf8 = || str::from_utf8(data.as_ref()).unwrap_or("<invalid utf8>");
 
         // Record the one-way latency of the RPC call.
         let sent_at = headers
@@ -560,73 +533,6 @@ impl OrderflowIngress {
 
                 (raw, tx_hash)
             }
-            MEV_SEND_BUNDLE_METHOD => {
-                let mut request: JsonRpcRequest<serde_json::Value> =
-                    match JsonRpcRequest::from_bytes(&data) {
-                        Ok(request) => request,
-                        Err(e) => {
-                            tracing::error!(
-                                ?e,
-                                body_utf8 = body_utf8(),
-                                "failed to parse json-rpc request"
-                            );
-                            ingress
-                                .system_metrics
-                                .json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD)
-                                .inc();
-                            return TcpResponse::error_decoding(
-                                "failed to parse json-rpc request".to_string(),
-                            );
-                        }
-                    };
-
-                let Some(raw) = request.take_single_param() else {
-                    tracing::error!("error parsing bundle: take single param failed");
-                    ingress.system_metrics.json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD).inc();
-                    return TcpResponse::error_decoding("no json-rpc params".to_string());
-                };
-
-                let bundle = match serde_json::from_value::<RawShareBundle>(raw.clone()) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        tracing::error!(?e, body = body_utf8(), "error parsing bundle");
-                        ingress.system_metrics.json_rpc_parse_errors(MEV_SEND_BUNDLE_METHOD).inc();
-                        return TcpResponse::error_decoding(
-                            "failed to parse mev share bundle".to_string(),
-                        );
-                    }
-                };
-
-                let bundle_hash = bundle.bundle_hash();
-                if ingress.order_cache.contains(&bundle_hash) {
-                    tracing::trace!(hash = %bundle_hash, "bundle already processed");
-                    ingress.system_metrics.order_cache_hit("mev_share_bundle").inc();
-
-                    // Sample the order cache hit ratio.
-                    if bundle_hash.sample(10) {
-                        ingress
-                            .system_metrics
-                            .order_cache_hit_ratio()
-                            .set(ingress.order_cache.hit_ratio() * 100.0);
-                    }
-
-                    return TcpResponse::success(*bundle_hash);
-                }
-
-                ingress.order_cache.insert(bundle_hash);
-
-                ingress.system_metrics.txs_per_mev_share_bundle().observe(bundle.body.len() as f64);
-                ingress
-                    .system_metrics
-                    .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
-                    .observe(received_at.elapsed().as_secs_f64());
-                ingress
-                    .system_metrics
-                    .request_body_size(MEV_SEND_BUNDLE_METHOD)
-                    .observe(body.len() as f64);
-
-                (raw, bundle_hash)
-            }
             other => {
                 tracing::error!("method not supported");
                 ingress.system_metrics.json_rpc_unknown_method(other.to_owned()).inc();
@@ -766,67 +672,6 @@ impl OrderflowIngress {
         self.send_bundle(bundle).await
     }
 
-    /// Handles a new mev share bundle.
-    #[tracing::instrument(skip_all, name = "mev_share_bundle",
-        fields(
-            hash = tracing::field::Empty,
-            signer = tracing::field::Empty,
-            priority = tracing::field::Empty,
-        ))]
-    async fn on_mev_share_bundle(
-        &self,
-        entity: Entity,
-        bundle: RawShareBundle,
-        received_at: UtcInstant,
-    ) -> Result<B256, IngressError> {
-        let start = Instant::now();
-
-        // Convert to system bundle.
-        let Entity::Signer(signer) = entity else { unreachable!() };
-        let priority = self.priority_for(entity, EntityRequest::MevShareBundle(&bundle));
-        // Deduplicate bundles.
-        let bundle_hash = bundle.bundle_hash();
-
-        tracing::Span::current().record("hash", tracing::field::display(bundle_hash));
-        tracing::Span::current().record("signer", tracing::field::display(signer));
-        tracing::Span::current().record("priority", tracing::field::display(priority.as_str()));
-
-        if self.order_cache.contains(&bundle_hash) {
-            tracing::trace!("already processed");
-            self.user_metrics.order_cache_hit("mev_share_bundle").inc();
-
-            if bundle_hash.sample(10) {
-                self.user_metrics.order_cache_hit_ratio().set(self.order_cache.hit_ratio() * 100.0);
-            }
-
-            return Ok(bundle_hash);
-        }
-
-        self.order_cache.insert(bundle_hash);
-
-        // Decode and validate the bundle.
-        let bundle = SystemMevShareBundle::try_from_bundle_and_signer(
-            bundle,
-            signer,
-            received_at,
-            priority,
-        )?;
-        let elapsed = start.elapsed();
-
-        match bundle.decoded.as_ref() {
-            DecodedShareBundle::New(_) => {
-                tracing::debug!(?elapsed, "decoded new bundle");
-            }
-            DecodedShareBundle::Cancel(cancellation) => {
-                tracing::debug!(?elapsed, ?cancellation, "decoded cancellation bundle");
-            }
-        }
-
-        self.user_metrics.txs_per_mev_share_bundle().observe(bundle.raw.body.len() as f64);
-
-        self.send_mev_share_bundle(priority, bundle).await
-    }
-
     #[tracing::instrument(skip_all, name = "transaction",
         fields(
             hash = tracing::field::Empty,
@@ -904,22 +749,6 @@ impl OrderflowIngress {
 
         self.user_metrics
             .rpc_request_duration(ETH_SEND_BUNDLE_METHOD, priority.as_str())
-            .observe(received_at.elapsed().as_secs_f64());
-        Ok(bundle_hash)
-    }
-
-    async fn send_mev_share_bundle(
-        &self,
-        priority: Priority,
-        bundle: SystemMevShareBundle,
-    ) -> Result<B256, IngressError> {
-        let bundle_hash = bundle.bundle_hash();
-        let received_at = bundle.received_at;
-
-        self.forwarders.broadcast_order(bundle.into()).await;
-
-        self.user_metrics
-            .rpc_request_duration(MEV_SEND_BUNDLE_METHOD, priority.as_str())
             .observe(received_at.elapsed().as_secs_f64());
         Ok(bundle_hash)
     }

@@ -20,8 +20,8 @@ revm-primitives = { version = "21.0.2", default-features = false }
 revm-interpreter = { version = "29.0.1", default-features = false }
 
 # rbuilder
-rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder", rev = "332b00ceeb960cfa27278c020f0f8b299f928982" }
-rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", rev = "332b00ceeb960cfa27278c020f0f8b299f928982", features = [
+rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder", tag = "v1.3.1" }
+rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", tag = "v1.3.1", features = [
   "test-utils"
 ] }
 
@@ -50,7 +50,7 @@ prometheus = "0.14.0"
 # indexing
 arrow = { version = "56.2.0" }
 parquet = { version = "56.2.0" }
-clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", rev = "8cf3d2e138dd121367fa10e875d3f91374b075b2", features = [
+clickhouse = { version = "0.14.0", features = [
   "inserter",
   "time",
   "uuid",
@@ -101,7 +101,7 @@ openssl = { version = "0.10.75" }
 tempfile = { version = "3.23.0" }
 testcontainers = { version = "0.25.0" }
 testcontainers-modules = { version = "0.13.0", features = ["clickhouse"] }
-clickhouse = { git = "https://github.com/ClickHouse/clickhouse-rs", rev = "8cf3d2e138dd121367fa10e875d3f91374b075b2", features = [
+clickhouse = { version = "0.14.0", features = [
   "inserter",
   "time",
   "test-util",

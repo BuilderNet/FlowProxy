@@ -22,11 +22,9 @@ use bitcode::{Decode, Encode};
 use derive_more::{Deref, From};
 use rbuilder_primitives::{
     serialize::{
-        CancelShareBundle, RawBundle, RawBundleConvertError, RawBundleDecodeResult,
-        RawBundleMetadata, RawShareBundle, RawShareBundleConvertError, RawShareBundleDecodeResult,
-        TxEncoding,
+        RawBundle, RawBundleConvertError, RawBundleDecodeResult, RawBundleMetadata, TxEncoding,
     },
-    Bundle, BundleReplacementData, ShareBundle,
+    Bundle, BundleReplacementData,
 };
 use revm_primitives::{hex, B256};
 use serde::Serialize;
@@ -35,7 +33,7 @@ use strum::AsRefStr;
 use uuid::Uuid;
 
 use crate::{
-    consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD, MEV_SEND_BUNDLE_METHOD},
+    consts::{ETH_SEND_BUNDLE_METHOD, ETH_SEND_RAW_TRANSACTION_METHOD},
     priority::Priority,
 };
 
@@ -200,57 +198,6 @@ impl BundleHash for RawBundle {
     }
 }
 
-impl BundleHash for RawShareBundle {
-    fn bundle_hash(&self) -> B256 {
-        fn hash(bundle: &RawShareBundle, state: &mut wyhash::WyHash) {
-            let RawShareBundle { version, inclusion, body, validity, metadata, replacement_uuid } =
-                bundle;
-
-            version.hash(state);
-
-            inclusion.block.to::<u64>().hash(state);
-            if let Some(max_block) = &inclusion.max_block {
-                max_block.to::<u64>().hash(state);
-            }
-
-            for entry in body {
-                if let Some(tx) = &entry.tx {
-                    tx.hash(state);
-                }
-                entry.can_revert.hash(state);
-                if let Some(mode) = &entry.revert_mode {
-                    mode.hash(state);
-                }
-                if let Some(bundle) = &entry.bundle {
-                    bundle.hash(state);
-                }
-            }
-
-            if let Some(validity) = validity {
-                validity.hash(state);
-            }
-
-            if let Some(metadata) = metadata {
-                metadata.hash(state);
-            }
-
-            if let Some(uuid) = replacement_uuid {
-                uuid.hash(state);
-            }
-        }
-
-        let mut hasher = wyhash::WyHash::default();
-        let mut bytes = [0u8; 32];
-        for i in 0..4 {
-            hash(self, &mut hasher);
-            let hash = hasher.finish();
-            bytes[(i * 8)..((i + 1) * 8)].copy_from_slice(&hash.to_be_bytes());
-        }
-
-        B256::from(bytes)
-    }
-}
-
 /// Decoder for system bundles with additional constraints.
 #[derive(Debug, Clone, Copy)]
 pub struct SystemBundleDecoder {
@@ -329,7 +276,7 @@ impl SystemBundle {
     pub fn uuid(&self) -> Uuid {
         match self.decoded_bundle.as_ref() {
             DecodedBundle::Bundle(bundle) => bundle.uuid,
-            DecodedBundle::EmptyReplacement(replacement_data) => replacement_data.key.key().id,
+            DecodedBundle::EmptyReplacement(replacement_data) => replacement_data.key.id,
         }
     }
 
@@ -380,91 +327,6 @@ pub struct RawOrderMetadata {
     pub priority: Priority,
     pub received_at: UtcInstant,
     pub hash: B256,
-}
-
-/// Decoded MEV Share bundle.
-#[allow(clippy::large_enum_variant)]
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum DecodedShareBundle {
-    /// New bundle.
-    New(ShareBundle),
-    /// Bundle cancellation.
-    Cancel(CancelShareBundle),
-}
-
-impl DecodedShareBundle {
-    /// Create new decoded share bundle from [`RawShareBundleDecodeResult`].
-    pub fn from_result(bundle: RawShareBundleDecodeResult) -> Self {
-        match bundle {
-            RawShareBundleDecodeResult::NewShareBundle(bundle) => Self::New(*bundle),
-            RawShareBundleDecodeResult::CancelShareBundle(bundle) => Self::Cancel(bundle),
-        }
-    }
-}
-
-/// A wrapper around MEV share bundle.
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct SystemMevShareBundle {
-    /// The decoded MEV Share bundle.
-    pub decoded: Arc<DecodedShareBundle>,
-
-    /// The raw bundle.
-    pub raw: Arc<RawShareBundle>,
-
-    /// Signer address.
-    pub signer: Address,
-
-    /// The bundle hash.
-    pub bundle_hash: B256,
-
-    /// The priority of the bundle.
-    pub priority: Priority,
-
-    /// The timestamp at which the bundle has first been seen from the local operator.
-    pub received_at: UtcInstant,
-}
-
-impl SystemMevShareBundle {
-    /// Create a new system bundle from a raw bundle and a signer.
-    /// Returns an error if the bundle fails to decode.
-    pub fn try_from_bundle_and_signer(
-        raw: RawShareBundle,
-        signer: Address,
-        received_at: UtcInstant,
-        priority: Priority,
-    ) -> Result<Self, RawShareBundleConvertError> {
-        let decoded =
-            DecodedShareBundle::from_result(raw.clone().decode(TxEncoding::WithBlobData)?);
-        let bundle_hash = raw.bundle_hash();
-        Ok(Self {
-            decoded: Arc::new(decoded),
-            raw: Arc::new(raw),
-            signer,
-            bundle_hash,
-            received_at,
-            priority,
-        })
-    }
-
-    /// Returns the bundle hash.
-    pub fn bundle_hash(&self) -> B256 {
-        self.bundle_hash
-    }
-}
-
-impl SystemMevShareBundle {
-    /// Encode the inner bundle (no signer).
-    pub fn encode(self) -> WithEncoding<Self> {
-        let json = json!({
-            "id": 1,
-            "jsonrpc": "2.0",
-            "method": MEV_SEND_BUNDLE_METHOD,
-            "params": [self.raw]
-        });
-
-        let encoding = serde_json::to_vec(&json).expect("to JSON serialize bundle");
-        WithEncoding { inner: self, encoding: Arc::new(encoding), encoding_tcp_forwarder: None }
-    }
 }
 
 /// A wrapper around ethereum transaction containing decoded information as well as original raw
@@ -532,7 +394,6 @@ impl SystemTransaction {
 #[derive(Debug, Clone, From)]
 pub enum SystemOrder {
     Bundle(SystemBundle),
-    MevShareBundle(SystemMevShareBundle),
     Transaction(SystemTransaction),
 }
 
@@ -541,7 +402,6 @@ impl SystemOrder {
     pub fn priority(&self) -> Priority {
         match self {
             SystemOrder::Bundle(bundle) => bundle.metadata.priority,
-            SystemOrder::MevShareBundle(bundle) => bundle.priority,
             SystemOrder::Transaction(tx) => tx.priority,
         }
     }
@@ -550,11 +410,6 @@ impl SystemOrder {
         match self {
             SystemOrder::Bundle(bundle) => WithEncoding {
                 inner: SystemOrder::Bundle(bundle.clone()),
-                encoding: bundle.encode().encoding,
-                encoding_tcp_forwarder: None,
-            },
-            SystemOrder::MevShareBundle(bundle) => WithEncoding {
-                inner: SystemOrder::MevShareBundle(bundle.clone()),
                 encoding: bundle.encode().encoding,
                 encoding_tcp_forwarder: None,
             },
@@ -569,7 +424,6 @@ impl SystemOrder {
     pub fn method_name(&self) -> &'static str {
         match self {
             SystemOrder::Bundle(_) => ETH_SEND_BUNDLE_METHOD,
-            SystemOrder::MevShareBundle(_) => MEV_SEND_BUNDLE_METHOD,
             SystemOrder::Transaction(_) => ETH_SEND_RAW_TRANSACTION_METHOD,
         }
     }
@@ -678,8 +532,6 @@ pub enum EncodedOrder {
     Raw(WithEncoding<RawOrderMetadata>),
     /// A bundle along with its JSON-RPC encoding.
     Bundle(WithEncoding<SystemBundle>),
-    /// A MEV Share bundle along with its JSON-RPC encoding.
-    MevShareBundle(WithEncoding<SystemMevShareBundle>),
     /// A transaction along with its JSON-RPC encoding.
     Transaction(WithEncoding<SystemTransaction>),
 }
@@ -688,11 +540,6 @@ impl From<WithEncoding<SystemOrder>> for EncodedOrder {
     fn from(value: WithEncoding<SystemOrder>) -> Self {
         match value.inner {
             SystemOrder::Bundle(bundle) => EncodedOrder::Bundle(WithEncoding {
-                inner: bundle,
-                encoding: value.encoding,
-                encoding_tcp_forwarder: value.encoding_tcp_forwarder,
-            }),
-            SystemOrder::MevShareBundle(bundle) => EncodedOrder::MevShareBundle(WithEncoding {
                 inner: bundle,
                 encoding: value.encoding,
                 encoding_tcp_forwarder: value.encoding_tcp_forwarder,
@@ -712,7 +559,6 @@ impl EncodedOrder {
         match self {
             EncodedOrder::Raw(order) => &order.encoding,
             EncodedOrder::Bundle(bundle) => &bundle.encoding,
-            EncodedOrder::MevShareBundle(bundle) => &bundle.encoding,
             EncodedOrder::Transaction(tx) => &tx.encoding,
         }
     }
@@ -721,7 +567,6 @@ impl EncodedOrder {
         match self {
             EncodedOrder::Raw(order) => order.encoding_tcp_forwarder.as_ref(),
             EncodedOrder::Bundle(bundle) => bundle.encoding_tcp_forwarder.as_ref(),
-            EncodedOrder::MevShareBundle(bundle) => bundle.encoding_tcp_forwarder.as_ref(),
             EncodedOrder::Transaction(tx) => tx.encoding_tcp_forwarder.as_ref(),
         }
     }
@@ -731,7 +576,6 @@ impl EncodedOrder {
         match self {
             EncodedOrder::Raw(order) => order.inner.priority,
             EncodedOrder::Bundle(bundle) => bundle.inner.metadata.priority,
-            EncodedOrder::MevShareBundle(bundle) => bundle.inner.priority,
             EncodedOrder::Transaction(tx) => tx.inner.priority,
         }
     }
@@ -740,7 +584,6 @@ impl EncodedOrder {
         match self {
             EncodedOrder::Raw(order) => order.inner.received_at,
             EncodedOrder::Bundle(bundle) => bundle.inner.metadata.received_at,
-            EncodedOrder::MevShareBundle(bundle) => bundle.inner.received_at,
             EncodedOrder::Transaction(tx) => tx.inner.received_at,
         }
     }
@@ -750,7 +593,6 @@ impl EncodedOrder {
         match self {
             EncodedOrder::Raw(_) => "system",
             EncodedOrder::Bundle(_) => "bundle",
-            EncodedOrder::MevShareBundle(_) => "mev_share_bundle",
             EncodedOrder::Transaction(_) => "transaction",
         }
     }
@@ -760,7 +602,6 @@ impl EncodedOrder {
         match self {
             EncodedOrder::Raw(order) => order.inner.hash,
             EncodedOrder::Bundle(bundle) => bundle.inner.bundle_hash(),
-            EncodedOrder::MevShareBundle(bundle) => bundle.inner.bundle_hash(),
             EncodedOrder::Transaction(tx) => tx.inner.tx_hash(),
         }
     }
@@ -769,12 +610,6 @@ impl EncodedOrder {
 impl From<WithEncoding<SystemBundle>> for EncodedOrder {
     fn from(value: WithEncoding<SystemBundle>) -> Self {
         Self::Bundle(value)
-    }
-}
-
-impl From<WithEncoding<SystemMevShareBundle>> for EncodedOrder {
-    fn from(value: WithEncoding<SystemMevShareBundle>) -> Self {
-        Self::MevShareBundle(value)
     }
 }
 
@@ -801,8 +636,8 @@ impl Samplable for B256 {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, bitcode::Encode, bitcode::Decode)]
-pub struct WithHeaders<T> {
-    pub headers: HashMap<String, String>,
+pub struct WithHeaders<T, H = HashMap<String, String>> {
+    pub headers: H,
     pub data: T,
 }
 
