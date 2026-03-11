@@ -241,6 +241,8 @@ pub(crate) mod tests {
     use alloy_signer_local::PrivateKeySigner;
     use axum::{http::StatusCode, routing::post, Json};
     use clickhouse::{error::Result as ClickhouseResult, Client as ClickhouseClient};
+    use msg_socket::RepSocket;
+    use msg_transport::tcp::Tcp;
     use rbuilder_primitives::serialize::RawBundle;
     use rbuilder_utils::{
         clickhouse::{
@@ -251,6 +253,7 @@ pub(crate) mod tests {
         tasks::TaskManager,
     };
     use serde_json::json;
+    use std::net::SocketAddr;
     use testcontainers::{
         core::{
             error::Result as TestcontainersResult, wait::HttpWaitStrategy, ContainerPort, WaitFor,
@@ -677,6 +680,11 @@ pub(crate) mod tests {
         let user_port = user_listener.local_addr().unwrap().port();
         let user_url = format!("http://127.0.0.1:{user_port}");
 
+        // dummy_system_listener will not really be used but run_with_listeners needs one.
+        let mut dummy_system_listener = RepSocket::new(Tcp::default());
+        let dummy_system_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        dummy_system_listener.bind(dummy_system_addr).await.expect("to bind system listener");
+
         let (indexer_handle, _indexer_join_handles) =
             Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
         let cancellation_token = CancellationToken::new();
@@ -685,6 +693,7 @@ pub(crate) mod tests {
             crate::run_with_listeners(
                 args,
                 user_listener,
+                dummy_system_listener,
                 None,
                 task_executor,
                 indexer_handle,
