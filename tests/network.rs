@@ -14,12 +14,12 @@ use tracing::{debug, info};
 async fn network_e2e_bundle_tx_works() {
     let _ = tracing_subscriber::fmt::try_init();
     info!("starting network e2e tcp test");
-
+    let task_manager = rbuilder_utils::tasks::TaskManager::current();
     let mut rng = rand::rng();
     let mut builder1 = BuilderReceiver::spawn().await;
     let mut builder2 = BuilderReceiver::spawn().await;
-    let client1 = spawn_ingress(Some(builder1.url())).await;
-    let client2 = spawn_ingress(Some(builder2.url())).await;
+    let client1 = spawn_ingress(Some(builder1.url()), &task_manager).await;
+    let client2 = spawn_ingress(Some(builder2.url()), &task_manager).await;
 
     // Wait for the proxies to be ready and connected to each other.
     tokio::time::sleep(Duration::from_secs(10)).await;
@@ -104,7 +104,7 @@ mod linux {
     async fn network_e2e_tls() {
         let testdata_dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/testdata"));
         let cert_dir = testdata_dir.join("certificates");
-
+        let task_manager = rbuilder_utils::tasks::TaskManager::current();
         let signer1 = PrivateKeySigner::random();
         let signer2 = PrivateKeySigner::random();
 
@@ -126,8 +126,8 @@ mod linux {
         args.builder_url = Some(builder1.url());
         args2.builder_url = Some(builder2.url());
 
-        let client1 = spawn_ingress_with_args(args).await;
-        let _client2 = spawn_ingress_with_args(args2).await;
+        let client1 = spawn_ingress_with_args(args, &task_manager).await;
+        let _client2 = spawn_ingress_with_args(args2, &task_manager).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 

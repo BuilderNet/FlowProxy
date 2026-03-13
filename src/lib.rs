@@ -7,11 +7,11 @@ use crate::{
         client::{default_http_builder, HttpClientPool},
         http::spawn_http_forwarder,
     },
+    indexer::IndexerHandle,
     ingress::IngressSocket,
     metrics::IngressMetrics,
     primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
-    runner::CliContext,
     statics::LOCAL_PEER_STORE,
 };
 use alloy_signer_local::PrivateKeySigner;
@@ -28,6 +28,7 @@ use forwarder::{IngressForwarders, PeerHandle};
 use msg_socket::RepSocket;
 use msg_transport::tcp::Tcp;
 use prometric::exporter::ExporterBuilder;
+use rbuilder_utils::tasks::TaskExecutor;
 use reqwest::Url;
 use std::{
     net::SocketAddr,
@@ -36,8 +37,9 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::net::TcpListener;
-use tracing::level_filters::LevelFilter;
+use tokio::{net::TcpListener, select};
+use tokio_util::sync::CancellationToken;
+use tracing::{info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt, EnvFilter};
 
 pub mod cli;
@@ -46,7 +48,7 @@ use cli::OrderflowIngressArgs;
 pub mod ingress;
 use ingress::OrderflowIngress;
 
-use crate::{cache::OrderCache, indexer::Indexer};
+use crate::cache::OrderCache;
 
 pub mod builderhub;
 mod cache;
@@ -59,13 +61,17 @@ pub mod metrics;
 pub mod primitives;
 pub mod priority;
 pub mod rate_limit;
-pub mod runner;
 pub mod statics;
 pub mod trace;
 pub mod utils;
 pub mod validation;
 
-pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()> {
+pub async fn run(
+    args: OrderflowIngressArgs,
+    task_executor: TaskExecutor,
+    indexer_handle: IndexerHandle,
+    cancellation_token: CancellationToken,
+) -> eyre::Result<()> {
     fdlimit::raise_fd_limit()?;
 
     if let Some(ref metrics_addr) = args.metrics {
@@ -74,6 +80,9 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
 
         // Set build info metric
         metrics::BUILD_INFO_METRICS.info(env!("CARGO_PKG_VERSION"), env!("GIT_HASH")).set(1);
+        metrics::CLICKHOUSE_METRICS
+            .disk_max_size_to_accept_user_rpc_bytes()
+            .set(args.disk_max_size_to_accept_user_rpc_mb.saturating_mul(1024 * 1024));
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
@@ -85,15 +94,28 @@ pub async fn run(args: OrderflowIngressArgs, ctx: CliContext) -> eyre::Result<()
     } else {
         None
     };
-    run_with_listeners(args, user_listener, system_listener, builder_listener, ctx).await
+    run_with_listeners(
+        args,
+        user_listener,
+        system_listener,
+        builder_listener,
+        task_executor,
+        indexer_handle,
+        cancellation_token,
+    )
+    .await
 }
 
+/// Cancellation is a little ugly, just added enough to make it drop indexer_handle but it's a mix
+/// of cancellation_token + task_executor which also has a shutdown method.
 pub async fn run_with_listeners(
     args: OrderflowIngressArgs,
     user_listener: TcpListener,
     system_listener: RepSocket<Tcp, SocketAddr>,
     builder_listener: Option<TcpListener>,
-    ctx: CliContext,
+    task_executor: TaskExecutor,
+    indexer_handle: IndexerHandle,
+    cancellation_token: CancellationToken,
 ) -> eyre::Result<()> {
     // Initialize tracing.
     let registry = tracing_subscriber::registry().with(
@@ -104,8 +126,6 @@ pub async fn run_with_listeners(
     } else {
         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
     }
-
-    let indexer_handle = Indexer::run(args.indexing, args.builder_name, ctx.task_executor.clone());
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => {
@@ -141,10 +161,10 @@ pub async fn run_with_listeners(
             peer_update_config,
             builder_hub,
             peers.clone(),
-            ctx.task_executor.clone(),
+            task_executor.clone(),
         );
 
-        ctx.task_executor
+        task_executor
             .spawn_critical("run_update_peers", peer_updater.run(args.peer_update_interval_s));
     } else {
         tracing::warn!("No BuilderHub URL provided, running with local peer store");
@@ -154,14 +174,9 @@ pub async fn run_with_listeners(
             .register(local_signer, Some(system_listener.local_addr().expect("bound").port()));
 
         let peers = peers.clone();
-        let peer_updater = PeersUpdater::new(
-            peer_update_config,
-            peer_store,
-            peers.clone(),
-            ctx.task_executor.clone(),
-        );
-
-        ctx.task_executor
+        let peer_updater =
+            PeersUpdater::new(peer_update_config, peer_store, peers.clone(), task_executor.clone());
+        task_executor
             .spawn_critical("local_update_peers", peer_updater.run(args.peer_update_interval_s));
     }
 
@@ -176,7 +191,7 @@ pub async fn run_with_listeners(
             builder_url.to_string(),
             // Use 1 client here, this is still using HTTP/1.1 with internal connection pooling.
             HttpClientPool::new(NonZero::new(1).unwrap(), || client.clone()),
-            &ctx.task_executor,
+            &task_executor,
         )?;
 
         IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
@@ -210,25 +225,35 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
+        disk_max_size_to_accept_user_rpc: args.disk_max_size_to_accept_user_rpc_mb * 1024 * 1024,
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
 
     // Spawn a state maintenance task.
-    tokio::spawn({
+    let cancellation_token_clone = cancellation_token.clone();
+    task_executor.spawn({
         let ingress = ingress.clone();
         async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-                ingress.maintenance().await;
+                info!("starting state maintenance!!");
+                select! {
+                    _ = cancellation_token_clone.cancelled() => {
+                        info!("Cancellation token cancelled, stopping state maintenance");
+                        break;
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                        ingress.maintenance();
+                    }
+                }
             }
         }
     });
 
     tracing::info!(addr = ?system_listener.local_addr(), "starting system tcp listener");
     let ingress_socket =
-        IngressSocket::new(system_listener, ingress.clone(), ctx.task_executor.clone());
-    ctx.task_executor.spawn(ingress_socket.listen());
+        IngressSocket::new(system_listener, ingress.clone(), task_executor.clone());
+    task_executor.spawn(ingress_socket.listen(cancellation_token));
 
     // Spawn user facing HTTP server for accepting bundles and raw transactions.
     let user_router = Router::new()

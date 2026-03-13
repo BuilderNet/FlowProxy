@@ -10,18 +10,20 @@ use axum::{extract::State, routing::post, Router};
 use flowproxy::{
     cli::OrderflowIngressArgs,
     consts::FLASHBOTS_SIGNATURE_HEADER,
+    indexer::Indexer,
     ingress::maybe_decompress,
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse, JSONRPC_VERSION_2},
-    runner::CliContext,
 };
 use hyper::{header, HeaderMap};
 use msg_socket::RepSocket;
 use msg_transport::tcp::Tcp;
 use rbuilder_primitives::serialize::RawBundle;
+use rbuilder_utils::tasks::TaskManager;
 use revm_primitives::keccak256;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 use tokio::{net::TcpListener, sync::mpsc};
+use tokio_util::sync::CancellationToken;
 
 #[cfg(target_os = "linux")]
 use testcontainers::{
@@ -36,22 +38,27 @@ pub(crate) struct IngressClient<S: Signer> {
 
 pub(crate) async fn spawn_ingress_with_args(
     args: OrderflowIngressArgs,
+    task_manager: &TaskManager,
 ) -> IngressClient<PrivateKeySigner> {
     let user_listener = TcpListener::bind(&args.user_listen_addr).await.unwrap();
     let mut system_listener = RepSocket::new(Tcp::default());
     system_listener.bind(args.system_listen_addr).await.expect("to bind tcp socket address");
     let builder_listener = None;
     let address = user_listener.local_addr().unwrap();
-
-    let task_manager = rbuilder_utils::tasks::TaskManager::current();
-
+    let task_executor = task_manager.executor();
     tokio::spawn(async move {
+        let (indexer_handle, _indexer_join_handles) =
+            Indexer::run(args.indexing.clone(), args.builder_name.clone(), task_executor.clone());
+        let cancellation_token = CancellationToken::new();
+
         flowproxy::run_with_listeners(
             args,
             user_listener,
             system_listener,
             builder_listener,
-            CliContext { task_executor: task_manager.executor() },
+            task_executor,
+            indexer_handle,
+            cancellation_token,
         )
         .await
         .unwrap();
@@ -64,11 +71,15 @@ pub(crate) async fn spawn_ingress_with_args(
     }
 }
 
-pub(crate) async fn spawn_ingress(builder_url: Option<String>) -> IngressClient<PrivateKeySigner> {
+#[allow(dead_code)]
+pub(crate) async fn spawn_ingress(
+    builder_url: Option<String>,
+    task_manager: &TaskManager,
+) -> IngressClient<PrivateKeySigner> {
     let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
     args.peer_update_interval_s = 5;
     args.builder_url = builder_url;
-    spawn_ingress_with_args(args).await
+    spawn_ingress_with_args(args, task_manager).await
 }
 
 impl<S: Signer + Sync> IngressClient<S> {
