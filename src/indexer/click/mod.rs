@@ -628,19 +628,21 @@ pub(crate) mod tests {
         }
     }
 
-    /// Integration test: when backup DB exceeds disk_max_size_to_accept_user_rpc_mb, user RPC
-    /// returns DiskFull; after fixing ClickHouse and draining backup, RPC accepts again.
+    /// Integration test: when backup DB exceeds disk_backup_size_reject_flow_threshold_mb,
+    /// user RPC returns DiskFull; after fixing ClickHouse and draining backup below
+    /// disk_backup_size_resume_flow_threshold_mb, RPC accepts again.
     /// A little long func.. consider improving this.
     #[tokio::test(flavor = "multi_thread")]
     async fn disk_full_rpc_rejects_then_accepts_after_drain() {
         const BACKUP_DISK_MAX_SIZE_BYTES: u64 = 5;
         const BUNDLE_TX_COUNT: usize = 10;
         const BUNDLE_TX_INPUT_SIZE: usize = 1024;
-        const DISK_MAX_SIZE_TO_ACCEPT_USER_RPC_MB: u64 = 1;
-        // We need to fill DISK_MAX_SIZE_TO_ACCEPT_USER_RPC_MB with bundles.
+        const DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB: u64 = 1;
+        const DISK_BACKUP_SIZE_RESUME_FLOW_THRESHOLD_MB: u64 = 0;
+        // We need to fill DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB with bundles.
         // 2 is to play it safe.
         const BUNDLE_COUNT_TO_FILL_DISK: usize = 2 *
-            (DISK_MAX_SIZE_TO_ACCEPT_USER_RPC_MB * 1024 * 1024) as usize /
+            (DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB * 1024 * 1024) as usize /
             (BUNDLE_TX_COUNT * BUNDLE_TX_INPUT_SIZE);
 
         const FLOWPROXY_START_DELAY_MS: Duration = Duration::from_millis(800);
@@ -673,7 +675,8 @@ pub(crate) mod tests {
         let mut args = OrderflowIngressArgs::default().gzip_enabled().disable_builder_hub();
         args.peer_update_interval_s = 5;
         args.indexing = IndexerArgs { clickhouse: Some(clickhouse_args), parquet: None };
-        args.disk_max_size_to_accept_user_rpc_mb = DISK_MAX_SIZE_TO_ACCEPT_USER_RPC_MB; // 1 MiB threshold
+        args.disk_backup_size_reject_flow_threshold_mb = DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB;
+        args.disk_backup_size_resume_flow_threshold_mb = DISK_BACKUP_SIZE_RESUME_FLOW_THRESHOLD_MB;
         args.builder_url = Some(builder_url.clone());
 
         let user_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

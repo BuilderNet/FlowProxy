@@ -266,15 +266,25 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
-    /// Maximum local ClickHouse backup disk size in MB above which user RPC (e.g. eth_sendBundle)
-    /// is rejected with disk full. Defaults to 1024 MB (1 GiB).
+    /// ClickHouse backup disk size in MB above which user RPC is rejected. Defaults to 1024 MB.
     #[clap(
-        long = "disk-max-size-to-accept-user-rpc-mb",
+        long = "disk-backup-size-reject-flow-threshold-mb",
         default_value_t = 1024,
-        env = "DISK_MAX_SIZE_TO_ACCEPT_USER_RPC",
-        id = "DISK_MAX_SIZE_TO_ACCEPT_USER_RPC"
+        env = "DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB",
+        id = "DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB"
     )]
-    pub disk_max_size_to_accept_user_rpc_mb: u64,
+    pub disk_backup_size_reject_flow_threshold_mb: u64,
+
+    /// ClickHouse backup disk size in MB below which user RPC is accepted again after being
+    /// rejected. Must be less than or equal to disk-backup-size-reject-flow-threshold-mb.
+    /// Defaults to 512 MB.
+    #[clap(
+        long = "disk-backup-size-to-resume-flow-threshold-mb",
+        default_value_t = 512,
+        env = "DISK_BACKUP_SIZE_TO_RESUME_FLOW_THRESHOLD_MB",
+        id = "DISK_BACKUP_SIZE_TO_RESUME_FLOW_THRESHOLD_MB"
+    )]
+    pub disk_backup_size_resume_flow_threshold_mb: u64,
 
     /// The interval in seconds to update the peer list from BuilderHub.
     #[clap(
@@ -344,7 +354,8 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            disk_max_size_to_accept_user_rpc_mb: 1024,
+            disk_backup_size_reject_flow_threshold_mb: 1024,
+            disk_backup_size_resume_flow_threshold_mb: 512,
             tcp_small_clients: NonZero::new(4).expect("non-zero"),
             tcp_big_clients: 0,
             io_threads: 4,

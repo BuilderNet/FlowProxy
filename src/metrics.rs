@@ -189,9 +189,15 @@ pub struct ClickhouseMetrics {
     /// Errors encountered during Clickhouse disk backup.
     #[metric(labels = ["order", "error"])]
     backup_disk_errors: Counter,
-    /// Configured max disk size (bytes) above which user RPC is rejected.
-    #[metric(rename = "disk_max_size_to_accept_user_rpc_bytes")]
-    disk_max_size_to_accept_user_rpc_bytes: Gauge,
+    /// Configured disk size (bytes) above which user RPC is rejected.
+    #[metric(rename = "disk_backup_size_reject_flow_threshold_bytes")]
+    disk_backup_size_reject_flow_threshold_bytes: Gauge,
+    /// Configured disk size (bytes) below which user RPC is accepted again after rejection.
+    #[metric(rename = "disk_backup_size_resume_flow_threshold_bytes")]
+    disk_backup_size_resume_flow_threshold_bytes: Gauge,
+    /// Whether user RPC is currently being rejected due to disk size (0 or 1).
+    #[metric(rename = "disk_backup_size_is_rejecting_flow")]
+    disk_backup_size_is_rejecting_flow: Gauge,
 }
 
 #[metrics(scope = "indexer_parquet")]

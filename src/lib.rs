@@ -34,7 +34,7 @@ use std::{
     net::SocketAddr,
     num::NonZero,
     str::FromStr as _,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::{Duration, Instant},
 };
 use tokio::{net::TcpListener, select};
@@ -74,6 +74,13 @@ pub async fn run(
 ) -> eyre::Result<()> {
     fdlimit::raise_fd_limit()?;
 
+    eyre::ensure!(
+        args.disk_backup_size_resume_flow_threshold_mb <= args.disk_backup_size_reject_flow_threshold_mb,
+        "disk-backup-size-to-resume-flow-threshold-mb ({}) must be <= disk-backup-size-reject-flow-threshold-mb ({})",
+        args.disk_backup_size_resume_flow_threshold_mb,
+        args.disk_backup_size_reject_flow_threshold_mb,
+    );
+
     if let Some(ref metrics_addr) = args.metrics {
         ExporterBuilder::new().with_address(metrics_addr).with_namespace("flowproxy").install()?;
         metrics::spawn_process_collector().await?;
@@ -81,8 +88,11 @@ pub async fn run(
         // Set build info metric
         metrics::BUILD_INFO_METRICS.info(env!("CARGO_PKG_VERSION"), env!("GIT_HASH")).set(1);
         metrics::CLICKHOUSE_METRICS
-            .disk_max_size_to_accept_user_rpc_bytes()
-            .set(args.disk_max_size_to_accept_user_rpc_mb.saturating_mul(1024 * 1024));
+            .disk_backup_size_reject_flow_threshold_bytes()
+            .set(args.disk_backup_size_reject_flow_threshold_mb.saturating_mul(1024 * 1024));
+        metrics::CLICKHOUSE_METRICS
+            .disk_backup_size_resume_flow_threshold_bytes()
+            .set(args.disk_backup_size_resume_flow_threshold_mb.saturating_mul(1024 * 1024));
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
@@ -225,7 +235,9 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
-        disk_max_size_to_accept_user_rpc: args.disk_max_size_to_accept_user_rpc_mb * 1024 * 1024,
+        disk_backup_size_reject_flow_threshold: args.disk_backup_size_reject_flow_threshold_mb * 1024 * 1024,
+        disk_backup_size_resume_flow_threshold: args.disk_backup_size_resume_flow_threshold_mb * 1024 * 1024,
+        is_rejecting: AtomicBool::new(false),
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
     });
