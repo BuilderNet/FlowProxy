@@ -91,7 +91,69 @@ pub struct OrderflowIngress {
     pub(crate) system_metrics: IngressMetrics,
 }
 
+pub(crate) struct Config {
+    pub(crate) gzip_enabled: bool,
+    pub(crate) rate_limiting_enabled: bool,
+    pub(crate) rate_limit_lookback_s: u64,
+    pub(crate) rate_limit_count: u64,
+    pub(crate) score_lookback_s: u64,
+    pub(crate) score_bucket_s: u64,
+    pub(crate) max_txs_per_bundle: usize,
+    pub(crate) flashbots_signer: Option<Address>,
+    pub(crate) local_builder_url: Option<Url>,
+    pub(crate) builder_ready_endpoint: Option<Url>,
+    pub(crate) disk_backup_size_reject_flow_threshold: u64,
+    pub(crate) disk_backup_size_resume_flow_threshold: u64,
+    pub(crate) order_cache_ttl: u64,
+    pub(crate) order_cache_size: u64,
+    pub(crate) signer_cache_ttl: u64,
+    pub(crate) signer_cache_size: u64,
+}
+
 impl OrderflowIngress {
+    pub(crate) fn new(
+        config: Config,
+        pqueues: PriorityWorkers,
+        forwarders: IngressForwarders,
+        indexer_handle: IndexerHandle,
+    ) -> Self {
+        CLICKHOUSE_METRICS.disk_backup_size_is_rejecting_flow().set(0);
+        CLICKHOUSE_METRICS
+            .disk_backup_size_reject_flow_threshold_bytes()
+            .set(config.disk_backup_size_reject_flow_threshold);
+        CLICKHOUSE_METRICS
+            .disk_backup_size_resume_flow_threshold_bytes()
+            .set(config.disk_backup_size_resume_flow_threshold);
+        let order_cache = OrderCache::new(config.order_cache_ttl, config.order_cache_size);
+        let signer_cache = SignerCache::new(config.signer_cache_ttl, config.signer_cache_size);
+        Self {
+            gzip_enabled: config.gzip_enabled,
+            rate_limiting_enabled: config.rate_limiting_enabled,
+            rate_limit_lookback_s: config.rate_limit_lookback_s,
+            rate_limit_count: config.rate_limit_count,
+            score_lookback_s: config.score_lookback_s,
+            score_bucket_s: config.score_bucket_s,
+            system_bundle_decoder: SystemBundleDecoder {
+                max_txs_per_bundle: config.max_txs_per_bundle,
+            },
+            spam_thresholds: SpamThresholds::default(),
+            pqueues,
+            entities: DashMap::default(),
+            order_cache,
+            signer_cache,
+            forwarders,
+            flashbots_signer: config.flashbots_signer,
+            local_builder_url: config.local_builder_url,
+            builder_ready_endpoint: config.builder_ready_endpoint,
+            indexer_handle,
+            disk_backup_size_reject_flow_threshold: config.disk_backup_size_reject_flow_threshold,
+            disk_backup_size_resume_flow_threshold: config.disk_backup_size_resume_flow_threshold,
+            is_rejecting: AtomicBool::new(false),
+            user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
+            system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
+        }
+    }
+
     /// Return the score for the give entity. Unknown entities are not expected to be scored.
     ///
     /// # Panics

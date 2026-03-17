@@ -9,7 +9,8 @@ use rbuilder_utils::clickhouse::indexer::{
 
 use crate::{
     indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
-    SystemBundleDecoder,
+    ingress,
+    primitives::SystemBundleDecoder,
 };
 
 /// The maximum request size in bytes (10 MiB).
@@ -372,6 +373,46 @@ impl Default for OrderflowIngressArgs {
 }
 
 impl OrderflowIngressArgs {
+    pub(crate) fn ingress_config(&self) -> eyre::Result<ingress::Config> {
+        use eyre::WrapErr as _;
+        use reqwest::Url;
+
+        let local_builder_url = self
+            .builder_url
+            .as_ref()
+            .map(|url| Url::parse(url))
+            .transpose()
+            .wrap_err("invalid builder URL")?;
+        let builder_ready_endpoint = self
+            .builder_ready_endpoint
+            .as_ref()
+            .map(|url| Url::parse(url))
+            .transpose()
+            .wrap_err("invalid builder ready endpoint URL")?;
+        Ok(ingress::Config {
+            gzip_enabled: self.gzip_enabled,
+            rate_limiting_enabled: self.enable_rate_limiting,
+            rate_limit_lookback_s: self.rate_limit_lookback_s,
+            rate_limit_count: self.rate_limit_count,
+            score_lookback_s: self.score_lookback_s,
+            score_bucket_s: self.score_bucket_s,
+            max_txs_per_bundle: self.max_txs_per_bundle,
+            flashbots_signer: self.flashbots_signer,
+            local_builder_url,
+            builder_ready_endpoint,
+            disk_backup_size_reject_flow_threshold: self
+                .disk_backup_size_reject_flow_threshold_mb
+                .saturating_mul(1024 * 1024),
+            disk_backup_size_resume_flow_threshold: self
+                .disk_backup_size_resume_flow_threshold_mb
+                .saturating_mul(1024 * 1024),
+            order_cache_ttl: self.cache.order_cache_ttl,
+            order_cache_size: self.cache.order_cache_size,
+            signer_cache_ttl: self.cache.signer_cache_ttl,
+            signer_cache_size: self.cache.signer_cache_size,
+        })
+    }
+
     /// Set max request size.
     pub fn max_request_size(mut self, max: usize) -> Self {
         self.max_request_size = max;

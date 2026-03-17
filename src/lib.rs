@@ -2,7 +2,6 @@
 
 use crate::{
     builderhub::{PeersUpdater, PeersUpdaterConfig},
-    cache::SignerCache,
     forwarder::{
         client::{default_http_builder, HttpClientPool},
         http::spawn_http_forwarder,
@@ -10,7 +9,6 @@ use crate::{
     indexer::IndexerHandle,
     ingress::IngressSocket,
     metrics::IngressMetrics,
-    primitives::SystemBundleDecoder,
     priority::workers::PriorityWorkers,
     statics::LOCAL_PEER_STORE,
 };
@@ -23,18 +21,15 @@ use axum::{
     Router,
 };
 use dashmap::DashMap;
-use entity::SpamThresholds;
 use forwarder::{IngressForwarders, PeerHandle};
 use msg_socket::RepSocket;
 use msg_transport::tcp::Tcp;
 use prometric::exporter::ExporterBuilder;
 use rbuilder_utils::tasks::TaskExecutor;
-use reqwest::Url;
 use std::{
     net::SocketAddr,
     num::NonZero,
-    str::FromStr as _,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{net::TcpListener, select};
@@ -47,8 +42,6 @@ use cli::OrderflowIngressArgs;
 
 pub mod ingress;
 use ingress::OrderflowIngress;
-
-use crate::cache::OrderCache;
 
 pub mod builderhub;
 mod cache;
@@ -87,12 +80,6 @@ pub async fn run(
 
         // Set build info metric
         metrics::BUILD_INFO_METRICS.info(env!("CARGO_PKG_VERSION"), env!("GIT_HASH")).set(1);
-        metrics::CLICKHOUSE_METRICS
-            .disk_backup_size_reject_flow_threshold_bytes()
-            .set(args.disk_backup_size_reject_flow_threshold_mb.saturating_mul(1024 * 1024));
-        metrics::CLICKHOUSE_METRICS
-            .disk_backup_size_resume_flow_threshold_bytes()
-            .set(args.disk_backup_size_resume_flow_threshold_mb.saturating_mul(1024 * 1024));
     }
 
     let user_listener = TcpListener::bind(&args.user_listen_addr).await?;
@@ -136,6 +123,8 @@ pub async fn run_with_listeners(
     } else {
         let _ = registry.with(tracing_subscriber::fmt::layer()).try_init();
     }
+
+    let config = args.ingress_config()?;
 
     let orderflow_signer = match args.orderflow_signer {
         Some(signer) => {
@@ -194,8 +183,7 @@ pub async fn run_with_listeners(
     let workers = PriorityWorkers::new_with_threads(args.compute_threads);
 
     // Spawn forwarders
-    let builder_url = args.builder_url.map(|url| Url::from_str(&url)).transpose()?;
-    let forwarders = if let Some(ref builder_url) = builder_url {
+    let forwarders = if let Some(ref builder_url) = config.local_builder_url {
         let local_sender = spawn_http_forwarder(
             String::from("local-builder"),
             builder_url.to_string(),
@@ -211,40 +199,7 @@ pub async fn run_with_listeners(
         IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
     };
 
-    let builder_ready_endpoint =
-        args.builder_ready_endpoint.map(|url| Url::from_str(&url)).transpose()?;
-
-    let order_cache = OrderCache::new(args.cache.order_cache_ttl, args.cache.order_cache_size);
-    let signer_cache = SignerCache::new(args.cache.signer_cache_ttl, args.cache.signer_cache_size);
-
-    let ingress = Arc::new(OrderflowIngress {
-        gzip_enabled: args.gzip_enabled,
-        rate_limiting_enabled: args.enable_rate_limiting,
-        rate_limit_lookback_s: args.rate_limit_lookback_s,
-        rate_limit_count: args.rate_limit_count,
-        score_lookback_s: args.score_lookback_s,
-        score_bucket_s: args.score_bucket_s,
-        system_bundle_decoder: SystemBundleDecoder { max_txs_per_bundle: args.max_txs_per_bundle },
-        spam_thresholds: SpamThresholds::default(),
-        flashbots_signer: args.flashbots_signer,
-        pqueues: workers,
-        entities: DashMap::default(),
-        order_cache,
-        signer_cache,
-        forwarders,
-        local_builder_url: builder_url,
-        builder_ready_endpoint,
-        indexer_handle,
-        disk_backup_size_reject_flow_threshold: args.disk_backup_size_reject_flow_threshold_mb *
-            1024 *
-            1024,
-        disk_backup_size_resume_flow_threshold: args.disk_backup_size_resume_flow_threshold_mb *
-            1024 *
-            1024,
-        is_rejecting: AtomicBool::new(false),
-        user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
-        system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
-    });
+    let ingress = Arc::new(OrderflowIngress::new(config, workers, forwarders, indexer_handle));
 
     // Spawn a state maintenance task.
     let cancellation_token_clone = cancellation_token.clone();
