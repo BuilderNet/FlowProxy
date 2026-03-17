@@ -175,16 +175,16 @@ pub struct ClickhouseMetrics {
     #[metric(labels = ["order", "backend"])]
     backup_size_batches: Gauge,
     /// Total number of bytes sent to Clickhouse backup.
-    #[metric(rename = "clickhouse_backup_data_bytes_total")]
+    #[metric(rename = "backup_data_bytes_total")]
     backup_data_bytes: Counter,
     /// Total number of rows sent to Clickhouse backup.
-    #[metric(rename = "clickhouse_backup_data_rows_total")]
+    #[metric(rename = "backup_data_rows_total")]
     backup_data_rows: Counter,
     /// Total number of bytes lost due to pressure on Clickhouse backup.
-    #[metric(rename = "clickhouse_backup_data_lost_bytes_total")]
+    #[metric(rename = "backup_data_lost_bytes_total")]
     backup_data_lost_bytes: Counter,
     /// Total number of rows lost due to pressure on Clickhouse backup.
-    #[metric(rename = "clickhouse_backup_data_lost_rows_total")]
+    #[metric(rename = "backup_data_lost_rows_total")]
     backup_data_lost_rows: Counter,
     /// Errors encountered during Clickhouse disk backup.
     #[metric(labels = ["order", "error"])]

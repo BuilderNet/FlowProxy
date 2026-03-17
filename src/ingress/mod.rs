@@ -117,7 +117,11 @@ impl OrderflowIngress {
         forwarders: IngressForwarders,
         indexer_handle: IndexerHandle,
     ) -> Self {
-        CLICKHOUSE_METRICS.disk_backup_size_is_rejecting_flow().set(0);
+        // Reject hysteresis state is not carried between restarts. We assume we are not rejecting
+        // and let next write update it. This is not a big problem since we don't restart
+        // that much.
+        let is_rejecting = false;
+        Self::update_is_rejecting_metric(is_rejecting);
         CLICKHOUSE_METRICS
             .disk_backup_size_reject_flow_threshold_bytes()
             .set(config.disk_backup_size_reject_flow_threshold);
@@ -148,7 +152,7 @@ impl OrderflowIngress {
             indexer_handle,
             disk_backup_size_reject_flow_threshold: config.disk_backup_size_reject_flow_threshold,
             disk_backup_size_resume_flow_threshold: config.disk_backup_size_resume_flow_threshold,
-            is_rejecting: AtomicBool::new(false),
+            is_rejecting: AtomicBool::new(is_rejecting),
             user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
             system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
         }
@@ -213,25 +217,29 @@ impl OrderflowIngress {
         tracing::info!(entries = len_after, num_removed, "finished state maintenance");
     }
 
+    fn update_is_rejecting_metric(is_rejecting: bool) {
+        CLICKHOUSE_METRICS.disk_backup_size_is_rejecting_flow().set(if is_rejecting {
+            1
+        } else {
+            0
+        });
+    }
+
     fn clickhouse_backup_disk_size_is_ok(&self) -> bool {
         let size = CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.disk_size();
         let was_rejecting = self.is_rejecting.load(Ordering::Relaxed);
 
-        let ok = if was_rejecting {
-            size <= self.disk_backup_size_resume_flow_threshold
+        let is_rejecting = if was_rejecting {
+            size > self.disk_backup_size_resume_flow_threshold
         } else {
-            size <= self.disk_backup_size_reject_flow_threshold
+            size > self.disk_backup_size_reject_flow_threshold
         };
 
-        if was_rejecting && ok {
-            self.is_rejecting.store(false, Ordering::Relaxed);
-            CLICKHOUSE_METRICS.disk_backup_size_is_rejecting_flow().set(0);
-        } else if !was_rejecting && !ok {
-            self.is_rejecting.store(true, Ordering::Relaxed);
-            CLICKHOUSE_METRICS.disk_backup_size_is_rejecting_flow().set(1);
+        if was_rejecting != is_rejecting {
+            self.is_rejecting.store(is_rejecting, Ordering::Relaxed);
+            Self::update_is_rejecting_metric(is_rejecting);
         }
-
-        ok
+        !is_rejecting
     }
 
     #[tracing::instrument(skip_all, name = "ingress",
