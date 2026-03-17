@@ -235,8 +235,12 @@ pub async fn run_with_listeners(
         local_builder_url: builder_url,
         builder_ready_endpoint,
         indexer_handle,
-        disk_backup_size_reject_flow_threshold: args.disk_backup_size_reject_flow_threshold_mb * 1024 * 1024,
-        disk_backup_size_resume_flow_threshold: args.disk_backup_size_resume_flow_threshold_mb * 1024 * 1024,
+        disk_backup_size_reject_flow_threshold: args.disk_backup_size_reject_flow_threshold_mb *
+            1024 *
+            1024,
+        disk_backup_size_resume_flow_threshold: args.disk_backup_size_resume_flow_threshold_mb *
+            1024 *
+            1024,
         is_rejecting: AtomicBool::new(false),
         user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
         system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
