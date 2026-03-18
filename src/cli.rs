@@ -9,7 +9,8 @@ use rbuilder_utils::clickhouse::indexer::{
 
 use crate::{
     indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
-    SystemBundleDecoder,
+    ingress,
+    primitives::SystemBundleDecoder,
 };
 
 /// The maximum request size in bytes (10 MiB).
@@ -266,15 +267,25 @@ pub struct OrderflowIngressArgs {
     #[clap(long = "http.enable-gzip", default_value_t = false)]
     pub gzip_enabled: bool,
 
-    /// Maximum local ClickHouse backup disk size in MB above which user RPC (e.g. eth_sendBundle)
-    /// is rejected with disk full. Defaults to 1024 MB (1 GiB).
+    /// ClickHouse backup disk size in MB above which user RPC is rejected. Defaults to 1024 MB.
     #[clap(
-        long = "disk-max-size-to-accept-user-rpc-mb",
+        long = "disk-backup-size-reject-flow-threshold-mb",
         default_value_t = 1024,
-        env = "DISK_MAX_SIZE_TO_ACCEPT_USER_RPC",
-        id = "DISK_MAX_SIZE_TO_ACCEPT_USER_RPC"
+        env = "DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB",
+        id = "DISK_BACKUP_SIZE_REJECT_FLOW_THRESHOLD_MB"
     )]
-    pub disk_max_size_to_accept_user_rpc_mb: u64,
+    pub disk_backup_size_reject_flow_threshold_mb: u64,
+
+    /// ClickHouse backup disk size in MB below which user RPC is accepted again after being
+    /// rejected. Must be less than or equal to disk-backup-size-reject-flow-threshold-mb.
+    /// Defaults to 512 MB.
+    #[clap(
+        long = "disk-backup-size-to-resume-flow-threshold-mb",
+        default_value_t = 512,
+        env = "DISK_BACKUP_SIZE_TO_RESUME_FLOW_THRESHOLD_MB",
+        id = "DISK_BACKUP_SIZE_TO_RESUME_FLOW_THRESHOLD_MB"
+    )]
+    pub disk_backup_size_resume_flow_threshold_mb: u64,
 
     /// The interval in seconds to update the peer list from BuilderHub.
     #[clap(
@@ -344,7 +355,8 @@ impl Default for OrderflowIngressArgs {
             score_bucket_s: 4,
             log_json: false,
             gzip_enabled: false,
-            disk_max_size_to_accept_user_rpc_mb: 1024,
+            disk_backup_size_reject_flow_threshold_mb: 1024,
+            disk_backup_size_resume_flow_threshold_mb: 512,
             tcp_small_clients: NonZero::new(4).expect("non-zero"),
             tcp_big_clients: 0,
             io_threads: 4,
@@ -361,6 +373,46 @@ impl Default for OrderflowIngressArgs {
 }
 
 impl OrderflowIngressArgs {
+    pub(crate) fn ingress_config(&self) -> eyre::Result<ingress::Config> {
+        use eyre::WrapErr as _;
+        use reqwest::Url;
+
+        let local_builder_url = self
+            .builder_url
+            .as_ref()
+            .map(|url| Url::parse(url))
+            .transpose()
+            .wrap_err("invalid builder URL")?;
+        let builder_ready_endpoint = self
+            .builder_ready_endpoint
+            .as_ref()
+            .map(|url| Url::parse(url))
+            .transpose()
+            .wrap_err("invalid builder ready endpoint URL")?;
+        Ok(ingress::Config {
+            gzip_enabled: self.gzip_enabled,
+            rate_limiting_enabled: self.enable_rate_limiting,
+            rate_limit_lookback_s: self.rate_limit_lookback_s,
+            rate_limit_count: self.rate_limit_count,
+            score_lookback_s: self.score_lookback_s,
+            score_bucket_s: self.score_bucket_s,
+            max_txs_per_bundle: self.max_txs_per_bundle,
+            flashbots_signer: self.flashbots_signer,
+            local_builder_url,
+            builder_ready_endpoint,
+            disk_backup_size_reject_flow_threshold: self
+                .disk_backup_size_reject_flow_threshold_mb
+                .saturating_mul(1024 * 1024),
+            disk_backup_size_resume_flow_threshold: self
+                .disk_backup_size_resume_flow_threshold_mb
+                .saturating_mul(1024 * 1024),
+            order_cache_ttl: self.cache.order_cache_ttl,
+            order_cache_size: self.cache.order_cache_size,
+            signer_cache_ttl: self.cache.signer_cache_ttl,
+            signer_cache_size: self.cache.signer_cache_size,
+        })
+    }
+
     /// Set max request size.
     pub fn max_request_size(mut self, max: usize) -> Self {
         self.max_request_size = max;

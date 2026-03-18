@@ -9,7 +9,7 @@ use crate::{
     forwarder::IngressForwarders,
     indexer::{click::CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE, IndexerHandle, OrderIndexer as _},
     jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
-    metrics::{IngressMetrics, SYSTEM_METRICS},
+    metrics::{IngressMetrics, CLICKHOUSE_METRICS, SYSTEM_METRICS},
     primitives::{
         decode_transaction, BundleHash as _, BundleReceipt, DecodedBundle, EthResponse,
         EthereumTransaction, RawBundleBitcode, Samplable, SystemBundle, SystemBundleDecoder,
@@ -45,7 +45,10 @@ use std::{
     io::Read as _,
     net::SocketAddr,
     str::FromStr as _,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, Instant},
 };
 use time::UtcDateTime;
@@ -76,15 +79,85 @@ pub struct OrderflowIngress {
     pub local_builder_url: Option<Url>,
     pub builder_ready_endpoint: Option<Url>,
     pub indexer_handle: IndexerHandle,
-    /// Maximum local ClickHouse backup disk size in bytes above which user RPC is rejected.
-    pub disk_max_size_to_accept_user_rpc: u64,
+    /// backup disk size in bytes above which user RPC is rejected.
+    pub disk_backup_size_reject_flow_threshold: u64,
+    /// backup disk size in bytes below which user RPC is accepted again after rejection.
+    pub disk_backup_size_resume_flow_threshold: u64,
+    /// whether we are currently rejecting user RPCs due to disk size.
+    pub(crate) is_rejecting: AtomicBool,
 
     // Metrics
     pub(crate) user_metrics: IngressMetrics,
     pub(crate) system_metrics: IngressMetrics,
 }
 
+pub(crate) struct Config {
+    pub(crate) gzip_enabled: bool,
+    pub(crate) rate_limiting_enabled: bool,
+    pub(crate) rate_limit_lookback_s: u64,
+    pub(crate) rate_limit_count: u64,
+    pub(crate) score_lookback_s: u64,
+    pub(crate) score_bucket_s: u64,
+    pub(crate) max_txs_per_bundle: usize,
+    pub(crate) flashbots_signer: Option<Address>,
+    pub(crate) local_builder_url: Option<Url>,
+    pub(crate) builder_ready_endpoint: Option<Url>,
+    pub(crate) disk_backup_size_reject_flow_threshold: u64,
+    pub(crate) disk_backup_size_resume_flow_threshold: u64,
+    pub(crate) order_cache_ttl: u64,
+    pub(crate) order_cache_size: u64,
+    pub(crate) signer_cache_ttl: u64,
+    pub(crate) signer_cache_size: u64,
+}
+
 impl OrderflowIngress {
+    pub(crate) fn new(
+        config: Config,
+        pqueues: PriorityWorkers,
+        forwarders: IngressForwarders,
+        indexer_handle: IndexerHandle,
+    ) -> Self {
+        // Reject hysteresis state is not carried between restarts. We assume we are not rejecting
+        // and let next write update it. This is not a big problem since we don't restart
+        // that much.
+        let is_rejecting = false;
+        Self::update_is_rejecting_metric(is_rejecting);
+        CLICKHOUSE_METRICS
+            .disk_backup_size_reject_flow_threshold_bytes()
+            .set(config.disk_backup_size_reject_flow_threshold);
+        CLICKHOUSE_METRICS
+            .disk_backup_size_resume_flow_threshold_bytes()
+            .set(config.disk_backup_size_resume_flow_threshold);
+        let order_cache = OrderCache::new(config.order_cache_ttl, config.order_cache_size);
+        let signer_cache = SignerCache::new(config.signer_cache_ttl, config.signer_cache_size);
+        Self {
+            gzip_enabled: config.gzip_enabled,
+            rate_limiting_enabled: config.rate_limiting_enabled,
+            rate_limit_lookback_s: config.rate_limit_lookback_s,
+            rate_limit_count: config.rate_limit_count,
+            score_lookback_s: config.score_lookback_s,
+            score_bucket_s: config.score_bucket_s,
+            system_bundle_decoder: SystemBundleDecoder {
+                max_txs_per_bundle: config.max_txs_per_bundle,
+            },
+            spam_thresholds: SpamThresholds::default(),
+            pqueues,
+            entities: DashMap::default(),
+            order_cache,
+            signer_cache,
+            forwarders,
+            flashbots_signer: config.flashbots_signer,
+            local_builder_url: config.local_builder_url,
+            builder_ready_endpoint: config.builder_ready_endpoint,
+            indexer_handle,
+            disk_backup_size_reject_flow_threshold: config.disk_backup_size_reject_flow_threshold,
+            disk_backup_size_resume_flow_threshold: config.disk_backup_size_resume_flow_threshold,
+            is_rejecting: AtomicBool::new(is_rejecting),
+            user_metrics: IngressMetrics::builder().with_label("handler", "user").build(),
+            system_metrics: IngressMetrics::builder().with_label("handler", "system").build(),
+        }
+    }
+
     /// Return the score for the give entity. Unknown entities are not expected to be scored.
     ///
     /// # Panics
@@ -144,8 +217,29 @@ impl OrderflowIngress {
         tracing::info!(entries = len_after, num_removed, "finished state maintenance");
     }
 
+    fn update_is_rejecting_metric(is_rejecting: bool) {
+        CLICKHOUSE_METRICS.disk_backup_size_is_rejecting_flow().set(if is_rejecting {
+            1
+        } else {
+            0
+        });
+    }
+
     fn clickhouse_backup_disk_size_is_ok(&self) -> bool {
-        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.disk_size() <= self.disk_max_size_to_accept_user_rpc
+        let size = CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.disk_size();
+        let was_rejecting = self.is_rejecting.load(Ordering::Relaxed);
+
+        let is_rejecting = if was_rejecting {
+            size > self.disk_backup_size_resume_flow_threshold
+        } else {
+            size > self.disk_backup_size_reject_flow_threshold
+        };
+
+        if was_rejecting != is_rejecting {
+            self.is_rejecting.store(is_rejecting, Ordering::Relaxed);
+            Self::update_is_rejecting_metric(is_rejecting);
+        }
+        !is_rejecting
     }
 
     #[tracing::instrument(skip_all, name = "ingress",
