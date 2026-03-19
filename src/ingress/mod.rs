@@ -819,23 +819,32 @@ impl OrderflowIngress {
 
         self.order_cache.insert(tx_hash);
 
-        let system_transaction =
-            SystemTransaction::from_transaction(transaction, signer, received_at, priority);
-
-        let tx = system_transaction.transaction.clone();
+        let transaction = Arc::new(transaction);
+        let tx = transaction.clone();
 
         // Spawn expensive operations like ECDSA recovery and consensus validation.
-        self.pqueues
+        let tx_sender = self
+            .pqueues
             .spawn_with_priority(priority, move || {
                 validate_transaction(&tx.decoded, received_at.utc.unix_timestamp() as u64)?;
-                tx.recover_signer()?;
-                Ok::<(), IngressError>(())
+                let sender = tx.recover_signer()?;
+                Ok::<Address, IngressError>(sender)
             })
             .await
             .inspect_err(|e| {
                 tracing::error!(?e, "failed to validate transaction");
                 self.user_metrics.validation_errors(e.to_string()).inc();
             })?;
+
+        let system_transaction = SystemTransaction::from_arc_transaction(
+            transaction,
+            signer,
+            tx_sender,
+            received_at,
+            priority,
+        );
+
+        self.indexer_handle.index_transaction(system_transaction.clone());
 
         // Send request to all forwarders.
         self.forwarders.broadcast_order(system_transaction.into()).await;

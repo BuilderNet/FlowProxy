@@ -177,7 +177,7 @@ impl ParquetIndexer {
         receivers: OrderReceivers,
         task_executor: TaskExecutor,
     ) -> io::Result<()> {
-        let OrderReceivers { mut bundle_rx, bundle_receipt_rx } = receivers;
+        let OrderReceivers { mut bundle_rx, bundle_receipt_rx, mut transaction_rx } = receivers;
 
         let parquet_file = OpenOptions::new().create(true).append(true).open(
             parquet_args.bundle_receipts_file_path.expect("bundle receipts file path is set"),
@@ -203,6 +203,7 @@ impl ParquetIndexer {
         };
 
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
+        task_executor.spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
         task_executor.spawn_with_graceful_shutdown_signal(|mut shutdown| async move {
             tokio::select! {
                 _ = runner.run_loop() => {

@@ -11,7 +11,7 @@ use crate::{
     cli::IndexerArgs,
     indexer::{click::ClickhouseIndexer, parq::ParquetIndexer},
     metrics::IndexerMetrics,
-    primitives::{BundleReceipt, SystemBundle},
+    primitives::{BundleReceipt, SystemBundle, SystemTransaction},
 };
 
 pub(crate) mod click;
@@ -46,6 +46,7 @@ const TARGET_INDEXER: &str = "indexer";
 pub(crate) trait OrderIndexer: Sync + Send {
     fn index_bundle(&self, system_bundle: SystemBundle);
     fn index_bundle_receipt(&self, bundle_receipt: BundleReceipt);
+    fn index_transaction(&self, system_transaction: SystemTransaction);
 }
 
 /// The collection of channel senders to send data to be indexed.
@@ -53,6 +54,7 @@ pub(crate) trait OrderIndexer: Sync + Send {
 pub(crate) struct OrderSenders {
     bundle_tx: mpsc::Sender<SystemBundle>,
     bundle_receipt_tx: mpsc::Sender<BundleReceipt>,
+    transaction_tx: mpsc::Sender<SystemTransaction>,
 }
 
 /// The collection of channel receivers to receive data to be indexed.
@@ -60,6 +62,7 @@ pub(crate) struct OrderSenders {
 pub(crate) struct OrderReceivers {
     bundle_rx: mpsc::Receiver<SystemBundle>,
     bundle_receipt_rx: mpsc::Receiver<BundleReceipt>,
+    transaction_rx: mpsc::Receiver<SystemTransaction>,
 }
 
 impl OrderSenders {
@@ -67,8 +70,9 @@ impl OrderSenders {
     pub(crate) fn new() -> (Self, OrderReceivers) {
         let (bundle_tx, bundle_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
         let (bundle_receipt_tx, bundle_receipt_rx) = mpsc::channel(BUNDLE_INDEXER_BUFFER_SIZE);
-        let senders = Self { bundle_tx, bundle_receipt_tx };
-        let receivers = OrderReceivers { bundle_rx, bundle_receipt_rx };
+        let (transaction_tx, transaction_rx) = mpsc::channel(TRANSACTION_INDEXER_BUFFER_SIZE);
+        let senders = Self { bundle_tx, bundle_receipt_tx, transaction_tx };
+        let receivers = OrderReceivers { bundle_rx, bundle_receipt_rx, transaction_rx };
         (senders, receivers)
     }
 }
@@ -161,6 +165,21 @@ impl OrderIndexer for IndexerHandle {
             }
         }
     }
+
+    fn index_transaction(&self, system_transaction: SystemTransaction) {
+        if let Err(e) = self.senders.transaction_tx.try_send(system_transaction) {
+            match e {
+                mpsc::error::TrySendError::Full(tx) => {
+                    tracing::error!(target: TARGET_INDEXER, tx_hash = ?tx.tx_hash(), "CRITICAL: Failed to send transaction to index, channel is full");
+                    self.metrics.transaction_indexing_failures("Full").inc();
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    tracing::error!(target: TARGET_INDEXER, "CRITICAL: Failed to send transaction to index, indexer task is closed");
+                    self.metrics.transaction_indexing_failures("Closed").inc();
+                }
+            }
+        }
+    }
 }
 
 /// A mock indexer that simply drains the channels.
@@ -170,9 +189,10 @@ impl MockIndexer {
     fn run(self, receivers: OrderReceivers, task_executor: TaskExecutor) {
         tracing::info!(target: TARGET_INDEXER, "Running with mocked indexer");
 
-        let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx } = receivers;
+        let OrderReceivers { mut bundle_rx, mut bundle_receipt_rx, mut transaction_rx } = receivers;
         task_executor.spawn(async move { while let Some(_b) = bundle_rx.recv().await {} });
         task_executor.spawn(async move { while let Some(_b) = bundle_receipt_rx.recv().await {} });
+        task_executor.spawn(async move { while let Some(_t) = transaction_rx.recv().await {} });
     }
 }
 #[cfg(test)]

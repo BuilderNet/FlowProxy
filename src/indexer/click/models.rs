@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
-use alloy_primitives::{Address, Keccak256, B256, U256};
+use alloy_primitives::{hex, Address, Keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use clickhouse::Row;
 use rbuilder_primitives::BundleVersion;
@@ -14,7 +14,7 @@ use rbuilder_utils::clickhouse::backup::primitives::{ClickhouseIndexableData, Cl
 use time::{OffsetDateTime, UtcDateTime};
 use uuid::Uuid;
 
-use crate::primitives::{DecodedBundle, SystemBundle};
+use crate::primitives::{DecodedBundle, SystemBundle, SystemTransaction};
 
 /// Model representing Clickhouse bundle row.
 ///
@@ -417,6 +417,101 @@ impl ClickhouseIndexableData for BundleReceipt {
 
     fn trace_id(&self) -> B256 {
         self.bundle_hash
+    }
+
+    fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {
+        (self, builder_name).into()
+    }
+}
+
+/// Model representing a Clickhouse transaction row for individual transactions received via
+/// `eth_sendRawTransaction`.
+///
+/// NOTE: Make sure the fields are in the same order as the columns in the Clickhouse table.
+#[derive(Clone, clickhouse::Row, Debug, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
+pub struct TransactionRow {
+    #[serde(with = "clickhouse::serde::time::datetime64::millis")]
+    pub received_at: OffsetDateTime,
+    pub hash: String,
+    pub chain_id: String,
+    pub tx_type: i64,
+    #[serde(rename = "from")]
+    pub tx_from: String,
+    pub to: String,
+    pub value: String,
+    pub nonce: String,
+    pub gas: String,
+    pub gas_price: String,
+    pub gas_tip_cap: String,
+    pub gas_fee_cap: String,
+    pub data_size: i64,
+    pub data_4bytes: String,
+    pub raw_tx: String,
+}
+
+impl ClickhouseRowExt for TransactionRow {
+    type TraceId = String;
+    const TABLE_NAME: &'static str = "transaction";
+
+    fn trace_id(&self) -> Self::TraceId {
+        self.hash.clone()
+    }
+
+    fn to_row_ref(row: &Self) -> &<Self as Row>::Value<'_> {
+        row
+    }
+}
+
+impl From<(SystemTransaction, String)> for TransactionRow {
+    fn from((system_tx, _builder_name): (SystemTransaction, String)) -> Self {
+        let tx = &system_tx.transaction;
+        let millis = system_tx.received_at.utc.millisecond();
+        let received_at: OffsetDateTime = system_tx
+            .received_at
+            .utc
+            .replace_millisecond(millis)
+            .expect("to replace milliseconds")
+            .into();
+
+        let input = tx.decoded.input();
+        let data_4bytes = if input.len() >= 4 {
+            format!("0x{}", hex::encode(&input[..4]))
+        } else {
+            String::new()
+        };
+
+        TransactionRow {
+            received_at,
+            hash: format!("{:#x}", tx.decoded.tx_hash()),
+            chain_id: tx.decoded.chain_id().map(|c| c.to_string()).unwrap_or_default(),
+            tx_type: tx.decoded.tx_type() as i64,
+            tx_from: format!("{:#x}", system_tx.tx_sender),
+            to: tx.decoded.to().map(|a| format!("{:#x}", a)).unwrap_or_default(),
+            value: tx.decoded.value().to_string(),
+            nonce: tx.decoded.nonce().to_string(),
+            gas: tx.decoded.gas_limit().to_string(),
+            gas_price: tx.decoded.gas_price().map(|p| p.to_string()).unwrap_or_default(),
+            gas_tip_cap: tx
+                .decoded
+                .max_priority_fee_per_gas()
+                .map(|p| p.to_string())
+                .unwrap_or_default(),
+            gas_fee_cap: tx.decoded.max_fee_per_gas().to_string(),
+            data_size: input.len() as i64,
+            data_4bytes,
+            raw_tx: format!("0x{}", hex::encode(&tx.raw)),
+        }
+    }
+}
+
+impl ClickhouseIndexableData for SystemTransaction {
+    type ClickhouseRowType = TransactionRow;
+
+    const DATA_NAME: &'static str = <TransactionRow as ClickhouseRowExt>::TABLE_NAME;
+
+    fn trace_id(&self) -> String {
+        format!("{:#x}", self.tx_hash())
     }
 
     fn to_row(self, builder_name: String) -> Self::ClickhouseRowType {

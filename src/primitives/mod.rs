@@ -353,10 +353,12 @@ pub struct SystemTransaction {
     /// Ethereum transaction.
     #[deref]
     pub transaction: Arc<EthereumTransaction>,
-    /// The original transaction signer.
+    /// The original transaction signer (from Flashbots signature header).
     pub signer: Address,
+    /// The recovered transaction sender (from ECDSA signature recovery).
+    pub tx_sender: Address,
 
-    /// The timestamp at which the bundle has first been seen from the local operator.
+    /// The timestamp at which the transaction has first been seen from the local operator.
     pub received_at: UtcInstant,
     pub priority: Priority,
 }
@@ -366,10 +368,22 @@ impl SystemTransaction {
     pub fn from_transaction(
         transaction: EthereumTransaction,
         signer: Address,
+        tx_sender: Address,
         received_at: UtcInstant,
         priority: Priority,
     ) -> Self {
-        Self { transaction: Arc::new(transaction), signer, received_at, priority }
+        Self { transaction: Arc::new(transaction), signer, tx_sender, received_at, priority }
+    }
+
+    /// Create a new system transaction from an already-wrapped Arc transaction.
+    pub fn from_arc_transaction(
+        transaction: Arc<EthereumTransaction>,
+        signer: Address,
+        tx_sender: Address,
+        received_at: UtcInstant,
+        priority: Priority,
+    ) -> Self {
+        Self { transaction, signer, tx_sender, received_at, priority }
     }
 
     /// Encode the system transaction in a JSON-RPC payload with params EIP-2718 encoded bytes.
