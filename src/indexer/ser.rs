@@ -185,6 +185,15 @@ pub(super) mod address {
     }
 }
 
+/// serializes `Vec<u8>` as raw bytes (Clickhouse `String`) instead of `Array(UInt8)`.
+pub(super) mod raw_bytes {
+    use serde::{ser::Serializer, Serialize as _};
+
+    pub(crate) fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+        bytes.as_slice().serialize(serializer)
+    }
+}
+
 pub(super) mod addresses {
     use alloy_primitives::Address;
     use serde::{

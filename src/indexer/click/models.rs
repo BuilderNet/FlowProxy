@@ -1,7 +1,7 @@
 //! Contains the model used for storing data inside Clickhouse.
 
 use crate::{
-    indexer::ser::{address, addresses, hash, hashes, u256es},
+    indexer::ser::{address, addresses, hash, hashes, raw_bytes, u256es},
     primitives::BundleReceipt,
 };
 use alloy_consensus::Transaction;
@@ -447,7 +447,8 @@ pub struct TransactionRow {
     pub gas_fee_cap: String,
     pub data_size: i64,
     pub data_4bytes: String,
-    pub raw_tx: String,
+    #[serde(serialize_with = "raw_bytes::serialize")]
+    pub raw_tx: Vec<u8>,
 }
 
 impl ClickhouseRowExt for TransactionRow {
@@ -500,7 +501,7 @@ impl From<(SystemTransaction, String)> for TransactionRow {
             gas_fee_cap: tx.decoded.max_fee_per_gas().to_string(),
             data_size: input.len() as i64,
             data_4bytes,
-            raw_tx: format!("0x{}", hex::encode(&tx.raw)),
+            raw_tx: tx.raw.to_vec(),
         }
     }
 }
