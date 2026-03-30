@@ -1,4 +1,4 @@
-CREATE TABLE mempool_dumpster.transactions
+CREATE TABLE transactions
 (
     `received_at` DateTime64(3,
  'UTC'),
@@ -18,7 +18,7 @@ CREATE TABLE mempool_dumpster.transactions
     `raw_tx` String,
     `ver` Int64 MATERIALIZED -toUnixTimestamp(received_at)
 )
-ENGINE = ReplacingMergeTree()
+ENGINE = ReplacingMergeTree(ver)
 PARTITION BY toYYYYMM(received_at)
 PRIMARY KEY hash
 ORDER BY hash
