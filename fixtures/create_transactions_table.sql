@@ -1,4 +1,4 @@
-CREATE TABLE transactions
+CREATE TABLE transactions_from_send_raw_tx
 (
     `received_at` DateTime64(3,
  'UTC'),
