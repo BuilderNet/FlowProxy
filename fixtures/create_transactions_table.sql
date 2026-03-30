@@ -1,6 +1,7 @@
-CREATE TABLE transactions
+CREATE TABLE mempool_dumpster.transactions
 (
-    `received_at` DateTime64(3, 'UTC'),
+    `received_at` DateTime64(3,
+ 'UTC'),
     `hash` String,
     `chain_id` String,
     `tx_type` Int64,
@@ -14,10 +15,14 @@ CREATE TABLE transactions
     `gas_fee_cap` String,
     `data_size` Int64,
     `data_4bytes` String,
-    `raw_tx` String
+    `raw_tx` String,
+    `ver` Int64 MATERIALIZED -toUnixTimestamp(received_at)
 )
-ENGINE = MergeTree()
-PARTITION BY toDate(received_at)
+ENGINE = ReplacingMergeTree()
+PARTITION BY toYYYYMM(received_at)
 PRIMARY KEY hash
 ORDER BY hash
-SETTINGS index_granularity = 8192;
+SETTINGS index_granularity = 8192
+COMMENT 'Transaction details,
+ deduplicated by hash,
+ will keep the transaction with earliest received_at.';
