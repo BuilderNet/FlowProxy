@@ -11,17 +11,17 @@ pub const DEFAULT_POOL_IDLE_TIMEOUT_SECS: u64 = 28;
 pub const DEFAULT_CONNECTION_LIMIT_PER_HOST: usize = 512;
 
 /// Header name for BuilderNet signature.
-pub const BUILDERNET_SIGNATURE_HEADER: &str = "X-BuilderNet-Signature";
+pub const BUILDERNET_SIGNATURE_HEADER: &str = "x-buildernet-signature";
 
 /// Header name for Flashbots signature.
 /// NOTE: this header is used for backwards compatibility.
 pub const FLASHBOTS_SIGNATURE_HEADER: &str = "X-Flashbots-Signature";
 
 /// Header name for flashbots priority.
-pub const BUILDERNET_PRIORITY_HEADER: &str = "X-BuilderNet-Priority";
+pub const BUILDERNET_PRIORITY_HEADER: &str = "x-buildernet-priority";
 
 /// Header name for BuilderNet sent at timestamp (in Unix microseconds).
-pub const BUILDERNET_SENT_AT_HEADER: &str = "X-BuilderNet-SentAtUs";
+pub const BUILDERNET_SENT_AT_HEADER: &str = "x-buildernet-sentatus";
 
 /// Header name for XFF header.
 pub const XFF_HEADER: &str = "X-Forwarded-For";
