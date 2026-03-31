@@ -34,7 +34,7 @@ pub const BUNDLE_TABLE_NAME: &str = "bundles";
 pub const BUNDLE_RECEIPTS_TABLE_NAME: &str = "bundle_receipts";
 
 /// The name of the Clickhouse table to store transactions in.
-pub const TRANSACTIONS_TABLE_NAME: &str = "transactions";
+pub const TRANSACTIONS_TABLE_NAME: &str = "transactions_from_send_raw_tx";
 
 /// The path of the backup database for storing failed Clickhouse batch insertions
 pub const BACKUP_DATABASE_PATH: &str = "/var/lib/buildernet-of-proxy/clickhouse-backup.db";
@@ -167,6 +167,7 @@ impl OrderIndexer for IndexerHandle {
     }
 
     fn index_transaction(&self, system_transaction: SystemTransaction) {
+        tracing::info!("DX index_transaction");
         if let Err(e) = self.senders.transaction_tx.try_send(system_transaction) {
             match e {
                 mpsc::error::TrySendError::Full(tx) => {
