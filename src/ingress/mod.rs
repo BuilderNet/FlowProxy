@@ -467,7 +467,7 @@ impl OrderflowIngress {
 
         let mut priority = Priority::Low;
         if let Some(priority_) =
-            headers.get(&BUILDERNET_PRIORITY_HEADER.to_lowercase()).and_then(|h| h.parse().ok())
+            headers.get(BUILDERNET_PRIORITY_HEADER).and_then(|h| h.parse().ok())
         {
             priority = priority_;
         } else {
