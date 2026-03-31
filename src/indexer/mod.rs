@@ -167,7 +167,6 @@ impl OrderIndexer for IndexerHandle {
     }
 
     fn index_transaction(&self, system_transaction: SystemTransaction) {
-        tracing::info!("DX index_transaction");
         if let Err(e) = self.senders.transaction_tx.try_send(system_transaction) {
             match e {
                 mpsc::error::TrySendError::Full(tx) => {
