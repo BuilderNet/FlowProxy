@@ -189,7 +189,10 @@ pub(super) mod address {
 pub(super) mod raw_bytes {
     use serde::{ser::Serializer, Serialize as _};
 
-    pub(crate) fn serialize<S: Serializer>(bytes: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+    pub(crate) fn serialize<S: Serializer>(
+        bytes: &Vec<u8>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
         bytes.as_slice().serialize(serializer)
     }
 }
