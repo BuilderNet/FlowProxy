@@ -8,7 +8,7 @@ use rbuilder_utils::clickhouse::indexer::{
 };
 
 use crate::{
-    indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME},
+    indexer::{BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TRANSACTIONS_TABLE_NAME},
     ingress,
     primitives::SystemBundleDecoder,
 };
@@ -68,6 +68,15 @@ pub struct ClickhouseArgs {
         default_value = BUNDLE_RECEIPTS_TABLE_NAME,
     )]
     pub bundle_receipts_table_name: String,
+
+    /// The clickhouse table name to store transactions data.
+    #[arg(
+        long = "indexer.clickhouse.transactions-table-name",
+        env = "CLICKHOUSE_TRANSACTIONS_TABLE_NAME",
+        id = "CLICKHOUSE_TRANSACTIONS_TABLE_NAME",
+        default_value = TRANSACTIONS_TABLE_NAME,
+    )]
+    pub transactions_table_name: String,
 
     /// The maximum size in bytes for the in-memory backup in case of of disk-backup failure, for a
     /// certain data type (bundles or bundle receipts). Defaults to 1GiB.

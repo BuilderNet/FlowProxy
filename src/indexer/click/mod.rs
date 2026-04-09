@@ -13,11 +13,11 @@ use std::{
 use crate::{
     cli::ClickhouseArgs,
     indexer::{
-        click::models::{BundleReceiptRow, BundleRow},
+        click::models::{BundleReceiptRow, BundleRow, TransactionRow},
         OrderReceivers, TARGET_INDEXER,
     },
     metrics::CLICKHOUSE_METRICS,
-    primitives::{BundleReceipt, SystemBundle},
+    primitives::{BundleReceipt, SystemBundle, SystemTransaction},
 };
 use rbuilder_utils::{
     clickhouse::{
@@ -46,6 +46,7 @@ fn config_from_clickhouse_args(args: &ClickhouseArgs, validation: bool) -> Click
 pub(crate) struct ClickhouseLocalBackupDiskSize {
     bundles_size: AtomicU64,
     bundle_receipts_size: AtomicU64,
+    transactions_size: AtomicU64,
 }
 
 impl ClickhouseLocalBackupDiskSize {
@@ -55,9 +56,13 @@ impl ClickhouseLocalBackupDiskSize {
     pub(crate) fn set_bundle_receipts_size(&self, size: u64) {
         self.bundle_receipts_size.store(size, Ordering::Relaxed);
     }
+    pub(crate) fn set_transactions_size(&self, size: u64) {
+        self.transactions_size.store(size, Ordering::Relaxed);
+    }
     pub(crate) fn disk_size(&self) -> u64 {
         self.bundles_size.load(Ordering::Relaxed) +
-            self.bundle_receipts_size.load(Ordering::Relaxed)
+            self.bundle_receipts_size.load(Ordering::Relaxed) +
+            self.transactions_size.load(Ordering::Relaxed)
     }
 }
 
@@ -84,6 +89,14 @@ struct UpdateBundleReceiptsSizeCallback;
 impl DiskBackupSizeCallback for UpdateBundleReceiptsSizeCallback {
     fn on_disk_backup_size(size_bytes: u64) {
         CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.set_bundle_receipts_size(size_bytes);
+    }
+}
+
+struct UpdateTransactionsSizeCallback;
+
+impl DiskBackupSizeCallback for UpdateTransactionsSizeCallback {
+    fn on_disk_backup_size(size_bytes: u64) {
+        CLICKHOUSE_LOCAL_BACKUP_DISK_SIZE.set_transactions_size(size_bytes);
     }
 }
 
@@ -211,7 +224,28 @@ impl ClickhouseIndexer {
             end_timeout,
             TARGET_INDEXER,
         );
-        vec![bundle_inserter_join_handle, bundle_receipt_inserter_join_handle]
+
+        let transaction_inserter_join_handle = spawn_clickhouse_inserter_and_backup::<
+            SystemTransaction,
+            TransactionRow,
+            MetricsWrapper<UpdateTransactionsSizeCallback>,
+        >(
+            &client,
+            receivers.transaction_rx,
+            &task_executor,
+            args.transactions_table_name,
+            builder_name.clone(),
+            disk_backup.clone(),
+            args.backup_memory_max_size_bytes,
+            send_timeout,
+            end_timeout,
+            TARGET_INDEXER,
+        );
+        vec![
+            bundle_inserter_join_handle,
+            bundle_receipt_inserter_join_handle,
+            transaction_inserter_join_handle,
+        ]
     }
 }
 
@@ -229,6 +263,7 @@ pub(crate) mod tests {
             },
             tests::{bundle_receipt_example, system_bundle_example},
             Indexer, OrderSenders, BUNDLE_RECEIPTS_TABLE_NAME, BUNDLE_TABLE_NAME, TARGET_INDEXER,
+            TRANSACTIONS_TABLE_NAME,
         },
         jsonrpc::{JsonRpcError, JsonRpcResponse, JsonRpcResponseTy, JSONRPC_VERSION_2},
         utils::{
@@ -340,6 +375,7 @@ pub(crate) mod tests {
                 password: Some(config.password),
                 bundles_table_name: BUNDLE_TABLE_NAME.to_string(),
                 bundle_receipts_table_name: BUNDLE_RECEIPTS_TABLE_NAME.to_string(),
+                transactions_table_name: TRANSACTIONS_TABLE_NAME.to_string(),
                 backup_memory_max_size_bytes: 1024 * 1024 * 10, // 10MiB
                 backup_disk_database_path: default_disk_backup_database_path(),
                 backup_disk_max_size_bytes: 1024 * 1024 * 100, // 100MiB

@@ -142,6 +142,9 @@ pub struct IndexerMetrics {
     /// The total number of bundle receipt indexing failures.
     #[metric(labels = ["error"])]
     bundle_receipt_indexing_failures: Counter,
+    /// The total number of transaction indexing failures.
+    #[metric(labels = ["error"])]
+    transaction_indexing_failures: Counter,
 }
 
 #[derive(Debug, Clone)]
