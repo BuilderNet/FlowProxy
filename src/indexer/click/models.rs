@@ -468,6 +468,8 @@ impl From<(SystemTransaction, String)> for TransactionRow {
     fn from((system_tx, _builder_name): (SystemTransaction, String)) -> Self {
         let tx = &system_tx.transaction;
         let millis = system_tx.received_at.utc.millisecond();
+        // Needed so that the `TransactionRow` created has the same timestamp precision
+        // (milliseconds) as the row written on clickhouse db.
         let received_at: OffsetDateTime = system_tx
             .received_at
             .utc
