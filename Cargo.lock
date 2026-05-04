@@ -5468,7 +5468,7 @@ dependencies = [
 [[package]]
 name = "rbuilder-primitives"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rbuilder?rev=e3b49692d5b4353c62abe828245a44c390f7bec2#e3b49692d5b4353c62abe828245a44c390f7bec2"
+source = "git+https://github.com/flashbots/rbuilder?rev=0a0c273a8aa5ac64aeab16519db06c8172836941#0a0c273a8aa5ac64aeab16519db06c8172836941"
 dependencies = [
  "ahash",
  "alloy-consensus",
@@ -5509,7 +5509,7 @@ dependencies = [
 [[package]]
 name = "rbuilder-utils"
 version = "0.1.0"
-source = "git+https://github.com/flashbots/rbuilder?rev=e3b49692d5b4353c62abe828245a44c390f7bec2#e3b49692d5b4353c62abe828245a44c390f7bec2"
+source = "git+https://github.com/flashbots/rbuilder?rev=0a0c273a8aa5ac64aeab16519db06c8172836941#0a0c273a8aa5ac64aeab16519db06c8172836941"
 dependencies = [
  "alloy-primitives 1.5.0",
  "clickhouse",

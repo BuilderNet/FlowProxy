@@ -104,6 +104,8 @@ pub struct BundleRow {
     pub refund_recipient: Option<Address>,
     /// Whether the bundle has a delayed refund.
     pub delayed_refund: Option<bool>,
+    /// If bundle disallows sending to other regions
+    pub disable_cross_region_sharing: Option<bool>,
     /// For 2nd price refunds done by buildernet
     #[serde(with = "address::option")]
     pub refund_identity: Option<Address>,
@@ -251,6 +253,10 @@ impl From<(SystemBundle, String)> for BundleRow {
                     reverting_tx_hashes: bundle.raw_bundle.metadata.reverting_tx_hashes.clone(),
                     dropping_tx_hashes: bundle.raw_bundle.metadata.dropping_tx_hashes.clone(),
                     delayed_refund: bundle.raw_bundle.metadata.delayed_refund,
+                    disable_cross_region_sharing: bundle
+                        .raw_bundle
+                        .metadata
+                        .disable_cross_region_sharing,
                     refund_tx_hashes: bundle
                         .raw_bundle
                         .metadata
@@ -318,6 +324,10 @@ impl From<(SystemBundle, String)> for BundleRow {
                     signer_address: Some(bundle.metadata.signer),
                     builder_name,
                     delayed_refund: bundle.raw_bundle.metadata.delayed_refund,
+                    disable_cross_region_sharing: bundle
+                        .raw_bundle
+                        .metadata
+                        .disable_cross_region_sharing,
                     refund_percent: bundle.raw_bundle.metadata.refund_percent,
                     refund_recipient: bundle.raw_bundle.metadata.refund_recipient,
                     refund_identity: bundle.raw_bundle.metadata.refund_identity,
@@ -568,7 +578,9 @@ pub(crate) mod tests {
                         Some("v2".to_string())
                     },
                     signing_address: value.signer_address,
+                    // TODO: looks like a bug
                     delayed_refund: None,
+                    disable_cross_region_sharing: value.disable_cross_region_sharing,
                 },
             }
         }

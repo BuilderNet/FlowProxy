@@ -57,6 +57,9 @@ pub struct PeerCredentials {
     pub tls_cert: Option<String>,
     /// Orderflow signer public key.
     pub ecdsa_pubkey_address: Address,
+    /// Region of the builder.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub region: String,
 }
 
 /// A [`Peer`] is a builder inside Builderhub. This holds informations about a builder peer, as
@@ -135,7 +138,12 @@ impl LocalPeerStore {
         Self { builders: Arc::new(DashMap::new()) }
     }
 
-    pub fn register(&self, signer_address: Address, port: Option<u16>) -> LocalPeerStore {
+    pub fn register(
+        &self,
+        signer_address: Address,
+        port: Option<u16>,
+        region: String,
+    ) -> LocalPeerStore {
         self.builders.insert(
             signer_address.to_string(),
             Peer {
@@ -147,6 +155,7 @@ impl LocalPeerStore {
                 orderflow_proxy: PeerCredentials {
                     tls_cert: None,
                     ecdsa_pubkey_address: signer_address,
+                    region,
                 },
                 instance: InstanceData { tls_cert: "".to_string() },
             },

@@ -33,6 +33,7 @@ CREATE TABLE bundles (
   `refund_percent` Nullable(UInt8),
   `refund_recipient` Nullable(FixedString(20)),
   `delayed_refund` Nullable(Bool),
+  `disable_cross_region_sharing` Nullable(Bool),
   `refund_identity` Nullable(FixedString(20)),
 
   `signer_address` Nullable(FixedString(20)),

@@ -151,10 +151,12 @@ pub async fn run_with_listeners(
         private_key_pem_file: args.private_key_pem_file,
     };
 
+    let builder_region = args.builder_region.to_string();
+
     if let Some(builder_hub_url) = args.builder_hub_url {
         tracing::debug!(url = builder_hub_url, "Running with BuilderHub");
         let builder_hub = builderhub::Client::new(builder_hub_url);
-        builder_hub.register(local_signer).await?;
+        builder_hub.register(local_signer, builder_region.clone()).await?;
 
         let peer_updater = PeersUpdater::new(
             peer_update_config,
@@ -169,8 +171,11 @@ pub async fn run_with_listeners(
         tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
 
-        let peer_store = local_peer_store
-            .register(local_signer, Some(system_listener.local_addr().expect("bound").port()));
+        let peer_store = local_peer_store.register(
+            local_signer,
+            Some(system_listener.local_addr().expect("bound").port()),
+            builder_region.clone(),
+        );
 
         let peers = peers.clone();
         let peer_updater =
@@ -192,11 +197,23 @@ pub async fn run_with_listeners(
             &task_executor,
         )?;
 
-        IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
+        IngressForwarders::new(
+            local_sender,
+            peers,
+            orderflow_signer,
+            workers.clone(),
+            builder_region.clone(),
+        )
     } else {
         // No builder URL provided, so mock local forwarder.
         let (local_sender, _) = priority::channel::unbounded_channel();
-        IngressForwarders::new(local_sender, peers, orderflow_signer, workers.clone())
+        IngressForwarders::new(
+            local_sender,
+            peers,
+            orderflow_signer,
+            workers.clone(),
+            builder_region.clone(),
+        )
     };
 
     let ingress = Arc::new(OrderflowIngress::new(config, workers, forwarders, indexer_handle));

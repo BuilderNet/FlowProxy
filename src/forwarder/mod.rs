@@ -49,6 +49,9 @@ pub struct IngressForwarders {
     peers: Arc<DashMap<String, PeerHandle>>,
     /// The priority workers for signing requests.
     workers: PriorityWorkers,
+    /// The region of the local builder. Used to filter peers when bundles disable
+    /// cross-region sharing.
+    region: String,
 }
 
 impl IngressForwarders {
@@ -58,8 +61,9 @@ impl IngressForwarders {
         peers: Arc<DashMap<String, PeerHandle>>,
         signer: PrivateKeySigner,
         workers: PriorityWorkers,
+        region: String,
     ) -> Self {
-        Self { local, peers, signer, workers }
+        Self { local, peers, signer, workers, region }
     }
 
     /// Find peer name by address.
@@ -78,6 +82,12 @@ impl IngressForwarders {
 
         let priority = order.priority();
         let method_name = order.method_name().to_string();
+        let restrict_to_local_region = match &order {
+            SystemOrder::Bundle(bundle) => {
+                bundle.raw_bundle.metadata.disable_cross_region_sharing.unwrap_or(false)
+            }
+            SystemOrder::Transaction(_) => false,
+        };
 
         // Start with JSON-RPC encoding, that's needed for the local builder anyway.
         let mut encoded_order = order.clone().encode();
@@ -120,12 +130,16 @@ impl IngressForwarders {
         let forward = Arc::new(ForwardingRequest::user_to_system(encoded_order.into(), headers));
 
         debug!(peers = %self.peers.len(), "sending order to peers");
-        self.broadcast_inner(forward);
+        self.broadcast_inner(forward, restrict_to_local_region);
     }
 
-    /// Broadcast request to all peers.
-    fn broadcast_inner(&self, forward: Arc<ForwardingRequest>) {
+    /// Broadcast request to all peers. When `restrict_to_local_region` is true, peers in a
+    /// different region than the local builder are skipped (but kept in the peer map).
+    fn broadcast_inner(&self, forward: Arc<ForwardingRequest>, restrict_to_local_region: bool) {
         self.peers.retain(|peer, handle| {
+            if restrict_to_local_region && handle.info.orderflow_proxy.region != self.region {
+                return true;
+            }
             if let Err(e) = handle.sender.send(forward.priority(), forward.clone()) {
                 error!(?e, %peer,  "peer channel closed, removing peer");
 

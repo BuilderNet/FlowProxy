@@ -29,10 +29,14 @@ impl Client {
     }
 
     /// Register the given signer address with the BuilderHub peer store.
-    pub async fn register(&self, signer_address: Address) -> Result<(), ClientRegisterError> {
+    pub async fn register(
+        &self,
+        signer_address: Address,
+        region: String,
+    ) -> Result<(), ClientRegisterError> {
         let endpoint =
             format!("{}/api/l1-builder/v1/register_credentials/orderflow_proxy", self.url);
-        let body = PeerCredentials { tls_cert: None, ecdsa_pubkey_address: signer_address };
+        let body = PeerCredentials { tls_cert: None, ecdsa_pubkey_address: signer_address, region };
         let response = self.inner.post(endpoint).json(&body).send().await?;
         let status = response.status();
         if !status.is_success() {
