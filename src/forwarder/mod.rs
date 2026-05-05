@@ -378,3 +378,100 @@ impl Default for LogRateLimiter {
         Self::new(Duration::from_millis(100))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        builderhub::{InstanceData, Peer, PeerCredentials},
+        primitives::{EncodedOrder, RawOrderMetadata, UtcInstant, WithEncoding},
+        priority::Priority,
+    };
+    use alloy_primitives::{Address, B256};
+
+    fn make_peer_with_region(
+        region: &str,
+    ) -> (Peer, PeerHandle, priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>) {
+        let info = Peer {
+            name: region.to_string(),
+            ip: "127.0.0.1".to_string(),
+            dns_name: String::new(),
+            orderflow_proxy: PeerCredentials {
+                tls_cert: None,
+                ecdsa_pubkey_address: Address::ZERO,
+                region: region.to_string(),
+            },
+            instance: InstanceData { tls_cert: String::new() },
+        };
+        let (tx, rx) = priority::channel::unbounded_channel();
+        (info.clone(), PeerHandle { info, sender: tx }, rx)
+    }
+
+    fn dummy_forward() -> Arc<ForwardingRequest> {
+        let order = EncodedOrder::Raw(WithEncoding {
+            inner: RawOrderMetadata {
+                priority: Priority::Medium,
+                received_at: UtcInstant::now(),
+                hash: B256::ZERO,
+            },
+            encoding: Arc::new(Vec::new()),
+            encoding_tcp_forwarder: None,
+        });
+        Arc::new(ForwardingRequest::user_to_local(order))
+    }
+
+    fn forwarders_with(
+        local_region: &str,
+        peers: Arc<DashMap<String, PeerHandle>>,
+    ) -> IngressForwarders {
+        let (local_tx, _) = priority::channel::unbounded_channel();
+        IngressForwarders::new(
+            local_tx,
+            peers,
+            alloy_signer_local::PrivateKeySigner::random(),
+            PriorityWorkers::new_with_threads(1),
+            local_region.to_string(),
+        )
+    }
+
+    async fn try_recv(
+        rx: &mut priority::channel::UnboundedReceiver<Arc<ForwardingRequest>>,
+    ) -> bool {
+        tokio::time::timeout(Duration::from_millis(50), rx.recv()).await.is_ok()
+    }
+
+    #[tokio::test]
+    async fn broadcast_inner_skips_cross_region_when_restricted() {
+        let peers: Arc<DashMap<String, PeerHandle>> = Arc::new(DashMap::new());
+        let (_, us_handle, mut us_rx) = make_peer_with_region("us");
+        let (_, eu_handle, mut eu_rx) = make_peer_with_region("eu");
+        peers.insert("us".to_string(), us_handle);
+        peers.insert("eu".to_string(), eu_handle);
+
+        let forwarders = forwarders_with("us", peers.clone());
+
+        forwarders.broadcast_inner(dummy_forward(), true);
+
+        assert!(try_recv(&mut us_rx).await, "same-region peer should receive");
+        assert!(!try_recv(&mut eu_rx).await, "cross-region peer should be skipped");
+
+        // Both peers must remain in the map (skip != evict).
+        assert_eq!(peers.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn broadcast_inner_sends_to_all_when_unrestricted() {
+        let peers: Arc<DashMap<String, PeerHandle>> = Arc::new(DashMap::new());
+        let (_, us_handle, mut us_rx) = make_peer_with_region("us");
+        let (_, eu_handle, mut eu_rx) = make_peer_with_region("eu");
+        peers.insert("us".to_string(), us_handle);
+        peers.insert("eu".to_string(), eu_handle);
+
+        let forwarders = forwarders_with("us", peers.clone());
+
+        forwarders.broadcast_inner(dummy_forward(), false);
+
+        assert!(try_recv(&mut us_rx).await);
+        assert!(try_recv(&mut eu_rx).await);
+    }
+}
