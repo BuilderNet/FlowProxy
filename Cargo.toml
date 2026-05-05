@@ -20,8 +20,8 @@ revm-primitives = { version = "21.0.2", default-features = false }
 revm-interpreter = { version = "29.0.1", default-features = false }
 
 # rbuilder
-rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder", rev = "fbb266fb39b15b070d0ec301e821852e6c8c2ac0" }
-rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", rev = "fbb266fb39b15b070d0ec301e821852e6c8c2ac0", features = [
+rbuilder-primitives = { git = "https://github.com/flashbots/rbuilder", rev = "a501b8b667934f5e9493ab31ebf27e6eebe4160c" }
+rbuilder-utils = { git = "https://github.com/flashbots/rbuilder", rev = "a501b8b667934f5e9493ab31ebf27e6eebe4160c", features = [
   "test-utils"
 ] }
 
