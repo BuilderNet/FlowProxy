@@ -105,7 +105,7 @@ pub struct BundleRow {
     /// Whether the bundle has a delayed refund.
     pub delayed_refund: Option<bool>,
     /// If bundle disallows sending to other regions
-    pub disable_cross_region_sharing: Option<bool>,
+    pub disable_cross_region_sharing: bool,
     /// For 2nd price refunds done by buildernet
     #[serde(with = "address::option")]
     pub refund_identity: Option<Address>,

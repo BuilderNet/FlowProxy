@@ -82,11 +82,10 @@ impl IngressForwarders {
 
         let priority = order.priority();
         let method_name = order.method_name().to_string();
-        let restrict_to_local_region = match &order {
-            SystemOrder::Bundle(bundle) => {
-                bundle.raw_bundle.metadata.disable_cross_region_sharing.unwrap_or(false)
-            }
-            SystemOrder::Transaction(_) => false,
+        let restrict_to_local_region = if let SystemOrder::Bundle(ref bundle) = order {
+            bundle.raw_bundle.metadata.disable_cross_region_sharing
+        } else {
+            false
         };
 
         // Start with JSON-RPC encoding, that's needed for the local builder anyway.

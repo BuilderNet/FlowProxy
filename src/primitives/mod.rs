@@ -186,7 +186,7 @@ impl BundleHash for RawBundle {
                 delayed_refund.hash(state);
             }
 
-            if let Some(disable_cross_region_sharing) = disable_cross_region_sharing {
+            if *disable_cross_region_sharing {
                 disable_cross_region_sharing.hash(state);
             }
         }
@@ -691,7 +691,7 @@ pub struct RawBundleMetadataBitcode {
 
     pub refund_tx_hashes: Option<Vec<[u8; 32]>>,
     pub delayed_refund: Option<bool>,
-    pub disable_cross_region_sharing: Option<bool>,
+    pub disable_cross_region_sharing: bool,
 
     pub bundle_hash: Option<[u8; 32]>,
 }
@@ -905,7 +905,7 @@ mod tests {
                 refund_recipient: None,
                 refund_tx_hashes: None,
                 delayed_refund: None,
-                disable_cross_region_sharing: None,
+                disable_cross_region_sharing: false,
                 bundle_hash: None,
             },
         };

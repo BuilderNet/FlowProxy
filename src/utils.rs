@@ -293,7 +293,7 @@ pub mod testutils {
                 refund_percent: Some(rng.random_range(0..100)),
                 refund_recipient: Some(Address::random_with(rng)),
                 delayed_refund: None,
-                disable_cross_region_sharing: None,
+                disable_cross_region_sharing: false,
                 bundle_hash: None,
             },
         }
