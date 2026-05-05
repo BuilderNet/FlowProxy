@@ -1,4 +1,6 @@
-use std::{convert::Infallible, net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr};
+use std::{
+    convert::Infallible, fmt::Display, net::SocketAddr, num::NonZero, path::PathBuf, str::FromStr,
+};
 
 use alloy_primitives::Address;
 use alloy_signer_local::PrivateKeySigner;
@@ -15,6 +17,24 @@ use crate::{
 
 /// The maximum request size in bytes (10 MiB).
 const MAX_REQUEST_SIZE_BYTES: usize = 10 * 1024 * 1024;
+
+/// Possible config regions
+#[derive(Debug, Clone, clap::ValueEnum)]
+pub enum Region {
+    US,
+    EU,
+    AP,
+}
+
+impl Display for Region {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::US => write!(f, "us"),
+            Self::EU => write!(f, "eu"),
+            Self::AP => write!(f, "ap"),
+        }
+    }
+}
 
 /// Arguments required to create a clickhouse client.
 #[derive(PartialEq, Eq, Clone, Debug, Args)]
@@ -210,6 +230,10 @@ pub struct OrderflowIngressArgs {
     #[clap(long, env = "BUILDERNET_NODE_NAME", id = "BUILDERNET_NODE_NAME", value_parser = replace_dashes_with_underscores)]
     pub builder_name: String,
 
+    /// Region of the builder.
+    #[clap(long, value_enum, env = "BUILDER_REGION", id = "BUILDER_REGION")]
+    pub builder_region: Region,
+
     /// The URL of BuilderHub.
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDERHUB_ENDPOINT", id = "BUILDERHUB_ENDPOINT")]
     pub builder_hub_url: Option<String>,
@@ -350,6 +374,7 @@ impl Default for OrderflowIngressArgs {
             builder_url: None,
             builder_ready_endpoint: None,
             builder_name: String::from("buildernet"),
+            builder_region: Region::US,
             builder_hub_url: None,
             flashbots_signer: None,
             max_txs_per_bundle: 100,
@@ -506,6 +531,8 @@ mod tests {
             "http://localhost:3000",
             "--builder-name",
             "buildernet",
+            "--builder-region",
+            "us",
         ];
 
         let args = OrderflowIngressArgs::try_parse_from(args)
@@ -535,6 +562,8 @@ mod tests {
             "http://localhost:3000",
             "--builder-name",
             "buildernet",
+            "--builder-region",
+            "us",
             "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
         ];
@@ -567,6 +596,8 @@ mod tests {
             "http://localhost:3000",
             "--builder-name",
             "buildernet",
+            "--builder-region",
+            "us",
             "--indexer.clickhouse.host",
             "http://127.0.0.1:12345",
             "--indexer.clickhouse.database",
@@ -613,6 +644,8 @@ mod tests {
             "http://localhost:3000",
             "--builder-name",
             "buildernet",
+            "--builder-region",
+            "us",
             "--indexer.parquet.bundle-receipts-file-path",
             "pronto.parquet",
         ];
@@ -647,6 +680,8 @@ mod tests {
             "http://localhost:3000",
             "--builder-name",
             "buildernet",
+            "--builder-region",
+            "us",
             "--indexer.parquet.bundle-receipts-file-path",
             "pronto.parquet",
             "--indexer.clickhouse.host",

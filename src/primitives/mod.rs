@@ -115,6 +115,7 @@ impl BundleHash for RawBundle {
                         max_timestamp,
                         delayed_refund,
                         block_number,
+                        disable_cross_region_sharing,
                         signing_address: _,
                         // NOTE: If we call `hash`, this should not be set.
                         bundle_hash: _,
@@ -183,6 +184,10 @@ impl BundleHash for RawBundle {
 
             if let Some(delayed_refund) = delayed_refund {
                 delayed_refund.hash(state);
+            }
+
+            if *disable_cross_region_sharing {
+                disable_cross_region_sharing.hash(state);
             }
         }
 
@@ -686,6 +691,7 @@ pub struct RawBundleMetadataBitcode {
 
     pub refund_tx_hashes: Option<Vec<[u8; 32]>>,
     pub delayed_refund: Option<bool>,
+    pub disable_cross_region_sharing: bool,
 
     pub bundle_hash: Option<[u8; 32]>,
 }
@@ -718,6 +724,7 @@ impl From<&RawBundleMetadata> for RawBundleMetadataBitcode {
                 .map(|hashes| hashes.into_iter().map(|h| *h).collect()),
 
             delayed_refund: r.delayed_refund,
+            disable_cross_region_sharing: r.disable_cross_region_sharing,
             bundle_hash: r.bundle_hash.map(|b| b.0),
         }
     }
@@ -750,6 +757,7 @@ impl From<RawBundleMetadataBitcode> for RawBundleMetadata {
                 .map(|hashes| hashes.into_iter().map(B256::from).collect()),
 
             delayed_refund: r.delayed_refund,
+            disable_cross_region_sharing: r.disable_cross_region_sharing,
             bundle_hash: r.bundle_hash.map(B256::from),
         }
     }
@@ -897,6 +905,7 @@ mod tests {
                 refund_recipient: None,
                 refund_tx_hashes: None,
                 delayed_refund: None,
+                disable_cross_region_sharing: false,
                 bundle_hash: None,
             },
         };
