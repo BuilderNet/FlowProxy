@@ -168,8 +168,17 @@ pub async fn run_with_listeners(
         task_executor
             .spawn_critical("run_update_peers", peer_updater.run(args.peer_update_interval_s));
     } else {
-        tracing::warn!("No BuilderHub URL provided, running with local peer store");
         let local_peer_store = LOCAL_PEER_STORE.clone();
+
+        if let Some(dev_peers_path) = args.dev_peers.as_ref() {
+            tracing::warn!(
+                path = %dev_peers_path.display(),
+                "Running in dev mode with static peers from file"
+            );
+            local_peer_store.load_from_file(dev_peers_path)?;
+        } else {
+            tracing::warn!("No BuilderHub URL provided, running with local peer store");
+        }
 
         let peer_store = local_peer_store.register(
             local_signer,
