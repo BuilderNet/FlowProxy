@@ -9,6 +9,5 @@ WORKDIR /build
 COPY . .
 RUN SOURCE_DATE_EPOCH=1730000000 just build-reproducible
 
-FROM gcr.io/distroless/cc-debian13:nonroot@sha256:4dd5cc58bb27cf9da5960f2a202cecf6c1c05c6ccbf0cda1b8ac24aeb428ca1a
-COPY --from=builder /build/target/x86_64-unknown-linux-gnu/reproducible/flowproxy /flowproxy
-ENTRYPOINT ["/flowproxy"]
+FROM scratch AS artifacts
+COPY --from=builder /build/target/x86_64-unknown-linux-gnu/reproducible/flowproxy /
