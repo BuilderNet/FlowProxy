@@ -19,7 +19,12 @@ use openssl::{
     x509::X509,
 };
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, io, net::SocketAddr, num::NonZero,
+    convert::Infallible,
+    fmt::Debug,
+    future::Future,
+    io,
+    net::SocketAddr,
+    num::NonZero,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
