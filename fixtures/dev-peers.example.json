@@ -1,0 +1,22 @@
+[
+  {
+    "name": "proxy_us",
+    "ip": "127.0.0.1:5544",
+    "dns_name": "",
+    "orderflow_proxy": {
+      "ecdsa_pubkey_address": "0xFCAd0B19bB29D4674531d6f115237E16AfCE377c",
+      "region": "us"
+    },
+    "instance": { "tls_cert": "" }
+  },
+  {
+    "name": "proxy_eu",
+    "ip": "127.0.0.2:5544",
+    "dns_name": "",
+    "orderflow_proxy": {
+      "ecdsa_pubkey_address": "0x6A9296CEb89D12e1F53b2Dd5Df45d3ADB3A814c2",
+      "region": "eu"
+    },
+    "instance": { "tls_cert": "" }
+  }
+]

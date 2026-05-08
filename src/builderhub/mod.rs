@@ -19,8 +19,15 @@ use openssl::{
     x509::X509,
 };
 use std::{
-    convert::Infallible, fmt::Debug, future::Future, io, net::SocketAddr, num::NonZero,
-    path::PathBuf, sync::Arc, time::Duration,
+    convert::Infallible,
+    fmt::Debug,
+    future::Future,
+    io,
+    net::SocketAddr,
+    num::NonZero,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 use tokio::net::{lookup_host, ToSocketAddrs};
 
@@ -163,6 +170,32 @@ impl LocalPeerStore {
 
         LocalPeerStore { builders: self.builders.clone() }
     }
+}
+
+impl LocalPeerStore {
+    /// Load peers from a JSON file and insert them into the store, keyed by their `name`.
+    /// Returns the number of peers loaded.
+    ///
+    /// Used by dev mode (`--dev-peers <filepath>`) to seed the local peer store from a static
+    /// list instead of using BuilderHub.
+    pub fn load_from_file(&self, path: &Path) -> Result<usize, LocalPeerStoreLoadError> {
+        let bytes = std::fs::read(path).map_err(LocalPeerStoreLoadError::Io)?;
+        let peers: Vec<Peer> =
+            serde_json::from_slice(&bytes).map_err(LocalPeerStoreLoadError::Parse)?;
+        let count = peers.len();
+        for peer in peers {
+            self.builders.insert(peer.name.clone(), peer);
+        }
+        Ok(count)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LocalPeerStoreLoadError {
+    #[error("failed to read dev peers file: {0}")]
+    Io(#[source] io::Error),
+    #[error("failed to parse dev peers file: {0}")]
+    Parse(#[source] serde_json::Error),
 }
 
 impl PeerStore for LocalPeerStore {

@@ -238,6 +238,18 @@ pub struct OrderflowIngressArgs {
     #[clap(long, value_hint = ValueHint::Url, env = "BUILDERHUB_ENDPOINT", id = "BUILDERHUB_ENDPOINT")]
     pub builder_hub_url: Option<String>,
 
+    /// Path to a JSON file containing a static list of peers for development/testing.
+    /// When set, peers are loaded from this file once at startup into the local peer store.
+    /// Conflicts with `--builder-hub-url`.
+    #[clap(
+        long,
+        value_hint = ValueHint::FilePath,
+        env = "DEV_PEERS",
+        id = "DEV_PEERS",
+        conflicts_with = "BUILDERHUB_ENDPOINT"
+    )]
+    pub dev_peers: Option<PathBuf>,
+
     /// Enable Prometheus metrics.
     /// The metrics will be served at the given interface and port.
     #[arg(long, env = "METRICS_ADDR", id = "METRICS_ADDR")]
@@ -376,6 +388,7 @@ impl Default for OrderflowIngressArgs {
             builder_name: String::from("buildernet"),
             builder_region: Region::US,
             builder_hub_url: None,
+            dev_peers: None,
             flashbots_signer: None,
             max_txs_per_bundle: 100,
             enable_rate_limiting: false,
