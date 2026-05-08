@@ -170,15 +170,11 @@ pub async fn run_with_listeners(
     } else {
         let local_peer_store = LOCAL_PEER_STORE.clone();
 
-        if let Some(dev_peers_path) = args.dev_peers.as_ref() {
-            tracing::warn!(
-                path = %dev_peers_path.display(),
-                "Running in dev mode with static peers from file"
-            );
-            local_peer_store.load_from_file(dev_peers_path)?;
-        } else {
-            tracing::warn!("No BuilderHub URL provided, running with local peer store");
-        }
+        let static_peer_count = match args.dev_peers.as_ref() {
+            Some(path) => local_peer_store.load_from_file(path)?,
+            None => 0,
+        };
+        tracing::warn!(static_peer_count, "running without builderhub");
 
         let peer_store = local_peer_store.register(
             local_signer,

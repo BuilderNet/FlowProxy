@@ -239,8 +239,8 @@ pub struct OrderflowIngressArgs {
     pub builder_hub_url: Option<String>,
 
     /// Path to a JSON file containing a static list of peers for development/testing.
-    /// When set, BuilderHub is not used and peers are loaded from this file (refreshed on the
-    /// regular peer update interval). Conflicts with `--builder-hub-url`.
+    /// When set, peers are loaded from this file once at startup into the local peer store.
+    /// Conflicts with `--builder-hub-url`.
     #[clap(
         long,
         value_hint = ValueHint::FilePath,
